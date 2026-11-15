@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,9 +17,14 @@ DB_FILENAME = "pocket-dm.db"
 
 
 def default_data_dir() -> Path:
+    """$POCKET_DM_DATA, else the usual per-user data folder for this OS."""
     env = os.environ.get("POCKET_DM_DATA")
     if env:
         return Path(env).expanduser()
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Pocket DM"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Pocket DM"
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(base) / "pocket-dm"
 

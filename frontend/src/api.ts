@@ -42,6 +42,14 @@ export const qs = (params: Params = {}) => {
   return s ? `?${s}` : "";
 };
 
+export interface Projection {
+  id: string;
+  zoom: number;
+  x: number;
+  y: number;
+  seq: number;
+}
+
 export interface SrdSearchResult {
   total: number;
   results: SrdEntry[];
@@ -66,6 +74,8 @@ export const api = {
     if (!res.ok) throw new Error(errorMessage(data, res));
     return data as Handout;
   },
+  projection: () => request<Projection>("GET", "projection"),
+  project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
   handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),

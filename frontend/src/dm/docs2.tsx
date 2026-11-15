@@ -6,7 +6,7 @@ import { EmptyState, NumInput, Select, TextInput, type Option } from "../compone
 import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
-import { useDraft } from "../lib/hooks";
+import { useDebounced, useDraft } from "../lib/hooks";
 import { fmtDate, titleCase } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
 import { TrackerWidget } from "./docs";
@@ -290,8 +290,8 @@ const PROJECT_CHANNEL = "pocketdm-project";
 interface ViewState { id: string; zoom: number; x: number; y: number }
 
 /** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
-export function projectHandout(id: string) {
-  const url = `/project/${id}`;
+export function projectHandout() {
+  const url = "/project";
   const native = (window as unknown as { pywebview?: { api?: { project?: (u: string) => void } } }).pywebview?.api?.project;
   if (native) return native(url);
   window.open(url, "pocketdm-players", "popup,width=1280,height=800");
@@ -310,9 +310,14 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
     channel.current = new BroadcastChannel(PROJECT_CHANNEL);
     return () => channel.current?.close();
   }, []);
+  // Same browser: instant via BroadcastChannel. Anywhere else (second desktop window, a TV on
+  // the network): through the server, which the players' window polls.
+  const publish = useDebounced((v: ViewState) => void api.project(v).catch(() => {}), 120);
   useEffect(() => {
-    if (casting) channel.current?.postMessage(view);
-  }, [casting, view]);
+    if (!casting) return;
+    channel.current?.postMessage(view);
+    publish(view);
+  }, [casting, view, publish]);
   if (!doc) return null;
   const set = <K extends keyof Handout>(k: K) => (v: Handout[K]) => edit((d) => void (d[k] = v));
   const upload = async (file: File | undefined) => {
@@ -337,7 +342,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
         extra={doc.filename ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
-              onClick={() => { projectHandout(doc.id); setCasting(true); setTimeout(() => channel.current?.postMessage(view), 400); }}>
+              onClick={() => { setCasting(true); void api.project(view).then(() => projectHandout()); }}>
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>
@@ -396,16 +401,28 @@ export function PanZoom({ src, alt, view, onView, interactive = true }: {
 }
 
 /** The players' window: shows whichever handout the DM is casting, mirroring zoom and pan. */
-export function ProjectionView({ id }: { id: string }) {
+export function ProjectionView({ id = "" }: { id?: string }) {
   const [view, setView] = useState<ViewState>({ id, zoom: 1, x: 0, y: 0 });
   const [handout, setHandout] = useState<Handout | null>(null);
+  const seq = useRef(-1);
   useEffect(() => {
     const ch = new BroadcastChannel(PROJECT_CHANNEL);
     ch.onmessage = (e: MessageEvent<ViewState>) => setView(e.data);
-    return () => ch.close();
+    const poll = setInterval(() => {
+      api.projection().then((p) => {
+        if (p.seq !== seq.current && p.id) {
+          seq.current = p.seq;
+          setView({ id: p.id, zoom: p.zoom, x: p.x, y: p.y });
+        }
+      }, () => {});
+    }, 500);
+    return () => {
+      ch.close();
+      clearInterval(poll);
+    };
   }, []);
   useEffect(() => {
-    api.get("handouts", view.id).then(setHandout, () => setHandout(null));
+    if (view.id) api.get("handouts", view.id).then(setHandout, () => setHandout(null));
   }, [view.id]);
   useEffect(() => {
     if (handout) document.title = handout.title;

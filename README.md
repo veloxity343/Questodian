@@ -1,42 +1,78 @@
 # Pocket DM
 
-An all-in-one Dungeons & Dragons table manager that runs locally in your browser:
-campaigns, live sessions with an initiative tracker, character sheets, the full
-5e System Reference Document, your own handbook, and a dice roller and calculator.
-Everything can be exported and imported.
+An all-in-one Dungeons & Dragons table manager that runs on your own computer:
+a DM screen for running sessions, campaign prep, encounters, character sheets,
+the System Reference Document for both rule sets, your own handbook, and a dice
+roller. Fully offline: one local database file, no account, nothing to connect.
 
-- **Backend:** Python, [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/) ORM on SQLite
+- **Rules:** each campaign uses either the 2014 rules (SRD 5.1) or the 2024 rules (SRD 5.2.1)
+- **Desktop app:** Windows and macOS builds open in their own window; anywhere else it runs in the browser
+- **Backend:** Python, [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/) on SQLite, [Alembic](https://alembic.sqlalchemy.org/) migrations
 - **Frontend:** [React](https://react.dev/) + TypeScript, built with [Vite](https://vite.dev/)
 
-## Quick start
+## Install
+
+**Desktop app (Windows, macOS):** download the zip for your system from the
+[Releases](https://github.com/veloxity343/pocket-dm/releases) page, unzip it and run
+*Pocket DM*. The builds aren't code-signed yet, so the first launch needs one extra step:
+
+- **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
+- **macOS:** after moving *Pocket DM.app* to Applications, run `xattr -cr "/Applications/Pocket DM.app"` once in Terminal.
+
+**From source (any OS):**
 
 ```sh
-cd frontend && npm install && npm run build && cd ..   # build the UI once
-uv run pocket-dm                                       # starts the app and opens http://localhost:8765
+make install     # uv sync + npm install
+make run         # build the UI and open it in your browser at http://localhost:8765
+make app         # or: open it in its own window (Windows, macOS; Linux needs GTK or Qt)
 ```
 
 Other options:
 
 ```sh
 uv run pocket-dm serve --port 9000 --no-browser
-uv run pocket-dm serve --host 0.0.0.0     # let devices on your network connect
+uv run pocket-dm serve --host 0.0.0.0     # let devices on your network connect (e.g. a TV for handouts)
 uv run pocket-dm --data-dir ./my-table    # store the database somewhere specific
 ```
 
-Data lives in a single SQLite file, `pocket-dm.db`, under `~/.local/share/pocket-dm`
-(or `$POCKET_DM_DATA` / `--data-dir`).
+Your data is one SQLite file, `pocket-dm.db`, in the usual place for your OS
+(`%APPDATA%\Pocket DM` on Windows, `~/Library/Application Support/Pocket DM` on macOS,
+`~/.local/share/pocket-dm` on Linux), or `$POCKET_DM_DATA` / `--data-dir`. Handout
+images sit next to it in `handouts/`. Before a new version changes the database, a
+copy is saved next to it (`pocket-dm.db.backup-…`).
 
-## What's inside
+## The DM screen
+
+Three columns, built for running a session:
+
+- **Left, the navigator:** sessions, scenes (grouped by status), NPCs, notes, handouts (by folder),
+  homebrew monsters, trackers and the party; and a separate list of encounters.
+- **Middle, the workspace:** everything opens as a tab, and reads and edits in the same layout.
+  - **Scenes:** summary, boxed *read-aloud* text, DM notes, and a status (planned, active, completed, skipped).
+  - **NPCs:** looks, voice, wants, secret, what they know, and a linked stat block.
+  - **Encounters:** party size × level with the 2024 difficulty (low / moderate / high), initiative,
+    a "now" banner, HP pills (damage, heal, temp), conditions, hidden combatants, Roll HP.
+  - **Sessions:** their scenes in order, trackers (clocks like "tolls of the bell"), encounters, prep,
+    recap, a timestamped log, loot that goes straight into inventories, and XP.
+  - **Handouts:** images with zoom and pan; **Show to players** opens a second window (or any browser on
+    your network at `/project`) that follows what you show.
+  - Homebrew stat blocks, notes (general, session, quest, pin board) and the campaign overview.
+- **Right, the reference panel:** the rules for your campaign's edition (monsters, spells, items, rules
+  and more, plus your homebrew), a **View** tab for whatever you clicked, quick notes, and a dice tray
+  with history. Attacks and damage in any stat block or note roll when clicked: `+6`, `2d8+3`.
+
+Type `[[Ada Brae]]` in any notes to link to a record (or `[[spell:Fireball]]`, `[[monster:Zombie]]` for
+the rules); typing `[[` suggests names. **Ctrl K** searches everything: records, the rules, and quick actions.
+
+## Everything else
 
 | Area | What it does |
 |---|---|
-| **Campaigns** | Player roster (with linked characters and contact info), setting, DM notes, sessions, party overview. |
-| **Sessions** | Initiative tracker (add the party, SRD monsters or custom NPCs; roll initiative; turn and round tracking; damage/heal with temp HP; conditions; statblocks in a side drawer). PC HP syncs back to their character sheet. Also a timestamped session log, prep and recap notes (Markdown), a loot table that hands items to characters, and XP awards. |
-| **Characters** | Full 5e sheet: multiclassing, abilities and saves, skills (proficiency, expertise, half, Jack of All Trades), HP, hit dice, death saves, conditions, exhaustion, attacks with to-hit/damage/crit rolls, spellcasting (DC, attack, slots auto-filled from class levels, spells from the SRD), class resources, inventory with carrying weight, coins, features, personality. Short and long rests. Click any number to roll it. |
-| **Rules & SRD** | All of SRD 5.1: rules, conditions, classes, races, spells (319), monsters (334), equipment, magic items and more, with search and filters (spell level, class, school, ritual, concentration; monster CR and type; item rarity). Dice in the text are clickable, e.g. "2d6" or "+5 to hit". |
-| **Handbook** | Your own Markdown documents (house rules, NPCs, locations, factions, random tables and so on), with templates, live preview, tags and per-campaign scope. They show up in Rules & SRD search results. |
-| **Dice & Calculator** | Dice pool builder, advantage/disadvantage, macros, roll history (which you can send to the session log), a calculator that understands dice, and quick calculators for ability modifiers, point buy, encounter XP, XP to level, coin splitting and spell DC. Press **R** anywhere to open the quick roller. |
-| **Import / Export** | A full backup, or one campaign with everything linked to it, as JSON. Single characters, sessions and handbook entries export as JSON or Markdown. Imports accept any of these, plus `.md` files, in *overwrite*, *skip* or *copy* mode (copy gives records new ids and rewires the links between them, which suits sharing between DMs). Imports run in a single transaction: a bad file changes nothing. |
+| **Characters** | Full sheet: multiclassing, abilities and saves, skills (proficiency, expertise, half, Jack of All Trades), HP, hit dice, death saves, conditions, exhaustion, attacks with to-hit/damage/crit rolls, spellcasting (DC, attack, slots from class levels, spells from the SRD), class resources, inventory with carrying weight, coins, features, personality. Short and long rests. Click any number to roll it. |
+| **Library** | The whole SRD for the campaign's edition: SRD 5.1 (319 spells, 334 monsters) or SRD 5.2.1 (339 spells, 341 monsters, species, weapon mastery…), with filters. |
+| **Handbook** | Your own Markdown documents (house rules, lore, random tables…), with templates and live preview. |
+| **Tools** | Dice pool builder, macros, roll history, a calculator that understands dice, and quick calculators (ability modifiers, point buy, encounter XP, XP to level, coin splitting, spell DC). Press **R** for the quick roller. |
+| **Data** | A full backup, or one campaign with everything linked to it (handout images included), as JSON. Single records export as JSON or Markdown. Imports accept these and `.md` files in *overwrite*, *skip* or *copy* mode, in one transaction: a bad file changes nothing. |
 
 ### Dice syntax
 
@@ -84,6 +120,12 @@ cd frontend && npm run build && cd ..   # writes src/pocket_dm/web/
 uv build                                # dist/pocket_dm-*.whl and .tar.gz
 ```
 
+### Desktop builds
+
+`make desktop` builds the app for the OS you're on into `dist-desktop/`. The **Desktop app**
+workflow builds Windows and macOS on GitHub: run it from the Actions tab, or push a version tag
+(`git tag v0.2.0 && git push origin v0.2.0`) to also publish a Release with both zips.
+
 ### Continuous integration
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on
@@ -95,6 +137,7 @@ as a `dist` artifact.
 ### Layout
 
 - `src/pocket_dm/app.py`: FastAPI app, routes and static UI serving
+- `src/pocket_dm/desktop.py`: the desktop window (pywebview); `packaging/` has the PyInstaller recipe
 - `src/pocket_dm/models.py`: SQLAlchemy tables (campaigns, sessions, characters, handbook)
 - `src/pocket_dm/schemas.py`: Pydantic schemas for API payloads and exports
 - `src/pocket_dm/db.py`, `repo.py`: engine/session setup and record access
@@ -103,9 +146,10 @@ as a `dist` artifact.
 - `src/pocket_dm/dice.py`: dice and arithmetic parser/evaluator (no `eval`)
 - `src/pocket_dm/rules.py`: 5e numbers and derived character stats
 - `src/pocket_dm/transfer.py`: import and export (JSON bundles, Markdown)
-- `frontend/src/`: the React UI (`views/` per page, `context/` for app-wide state)
-- `scripts/build_srd.py`: regenerates `src/pocket_dm/data/srd.json.gz` from
-  [5e-bits/5e-database](https://github.com/5e-bits/5e-database)
+- `frontend/src/`: the React UI (`dm/` is the DM screen, `views/` the other pages, `context/` app-wide state)
+- `scripts/build_srd.py`, `scripts/build_srd_2024.py`: regenerate the bundled SRD 5.1 and 5.2.1 data
+  from [5e-bits/5e-database](https://github.com/5e-bits/5e-database) (the 2024 rules prose comes from
+  a Markdown copy of the SRD 5.2.1)
 
 Nested sheet data (inventory, spells, the encounter, etc.) is stored in JSON
 columns; links between records are real foreign keys (deleting a campaign deletes
@@ -135,6 +179,11 @@ SQLite can't alter columns in place, so migrations run in Alembic's batch mode
 ## License and attribution
 
 Pocket DM is released under the [MIT License](LICENSE).
+
+This work includes material from the System Reference Document 5.2.1 ("SRD 5.2.1") by
+Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is
+licensed under the Creative Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
 
 This work includes material taken from the System Reference Document 5.1
 ("SRD 5.1") by Wizards of the Coast LLC and available at

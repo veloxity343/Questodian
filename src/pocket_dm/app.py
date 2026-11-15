@@ -272,6 +272,19 @@ def delete_handout(request: Request, repo: RepoDep, doc_id: str) -> dict:
     return {"deleted": doc_id}
 
 
+@tools.get("/projection", response_model=schemas.Projection)
+def get_projection(request: Request):
+    return request.app.state.projection
+
+
+@tools.put("/projection", response_model=schemas.Projection)
+def set_projection(request: Request, body: schemas.Projection):
+    """Kept in memory: the players' window (any browser on the network) polls this."""
+    body.seq = request.app.state.projection.seq + 1
+    request.app.state.projection = body
+    return body
+
+
 @tools.get("/encounter-budget")
 def encounter_budget(party_size: int = 4, party_level: int = 1, xp: int = 0) -> dict:
     return {
@@ -307,6 +320,7 @@ def rest(repo: RepoDep, doc_id: str, body: schemas.RestIn) -> schemas.Character:
 def create_app(db: Database, web_dir: Path | None = WEB_DIR) -> FastAPI:
     app = FastAPI(title="Pocket DM", version=__version__)
     app.state.db = db
+    app.state.projection = schemas.Projection()
 
     api = APIRouter(prefix="/api")
     # Specific routes first, so e.g. DELETE /handouts/{id} (which also removes the file) wins.

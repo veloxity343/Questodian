@@ -110,6 +110,16 @@ def test_encounter_uses_campaign_edition_and_homebrew(api):
     assert budget == {"budget": {"low": 200, "moderate": 300, "high": 400}, "difficulty": "low"}
 
 
+def test_projection_relay(api):
+    _, p = api("GET", "/api/projection")
+    assert p["id"] == "" and p["seq"] == 0
+    _, p = api("PUT", "/api/projection", {"id": "h1", "zoom": 2, "x": 10, "y": -5})
+    assert p["seq"] == 1
+    _, p = api("GET", "/api/projection")
+    assert (p["id"], p["zoom"], p["x"], p["seq"]) == ("h1", 2, 10, 1)
+    assert api("PUT", "/api/projection", {"id": "h1", "zoom": 0})[0] == 422
+
+
 def test_srd_editions(api):
     _, r = api("GET", "/api/srd/search?q=zombie&category=monsters&edition=2024")
     assert r["results"][0]["name"] == "Zombie"

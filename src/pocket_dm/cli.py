@@ -43,6 +43,12 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_app(args) -> int:
+    from .desktop import run
+
+    return run(args.data_dir)
+
+
 def cmd_roll(args) -> int:
     ok = True
     for expr in args.expressions:
@@ -133,6 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     s.add_argument("-v", "--verbose", action="store_true", help="log every request")
     s.set_defaults(func=cmd_serve)
+
+    a = sub.add_parser("app", help="open Pocket DM in its own window (needs pocket-dm[desktop])")
+    a.set_defaults(func=cmd_app)
 
     r = sub.add_parser("roll", help="roll dice, e.g. 2d20kh1+5, 8d6, 4d6dl1")
     r.add_argument("expressions", nargs="+")

@@ -96,8 +96,13 @@ export default function App() {
   const { pathname } = useLocation();
   const main = useRef<HTMLElement>(null);
   useEffect(() => main.current?.focus({ preventScroll: true }), [pathname]);
-  if (pathname.startsWith("/project/")) {
-    return <Routes><Route path="/project/:id" element={<ProjectRoute />} /></Routes>;
+  if (pathname === "/project" || pathname.startsWith("/project/")) {
+    return (
+      <Routes>
+        <Route path="/project" element={<ProjectionView />} />
+        <Route path="/project/:id" element={<ProjectRoute />} />
+      </Routes>
+    );
   }
   const onDm = pathname === "/";
   return (

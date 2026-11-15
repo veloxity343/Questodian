@@ -130,3 +130,32 @@ def test_links_are_checked_and_filterable(repo):
     assert [n["kind"] for n in repo.list("notes", kind="quest")] == ["quest"]
     with pytest.raises(ValueError):
         repo.list("notes", title="x")
+
+
+@pytest.mark.parametrize(
+    ("platform", "env", "expected"),
+    [
+        ("win32", {"APPDATA": "C:/Users/me/AppData/Roaming"}, "C:/Users/me/AppData/Roaming/Pocket DM"),
+        ("darwin", {}, "~/Library/Application Support/Pocket DM"),
+        ("linux", {"XDG_DATA_HOME": "/xdg"}, "/xdg/pocket-dm"),
+    ],
+)
+def test_default_data_dir_per_os(monkeypatch, platform, env, expected):
+    from pathlib import Path
+
+    from pocket_dm import db
+
+    monkeypatch.delenv("POCKET_DM_DATA", raising=False)
+    for k in ("APPDATA", "XDG_DATA_HOME"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(db.sys, "platform", platform)
+    assert db.default_data_dir() == Path(expected).expanduser()
+
+
+def test_data_dir_env_wins(monkeypatch, tmp_path):
+    from pocket_dm import db
+
+    monkeypatch.setenv("POCKET_DM_DATA", str(tmp_path))
+    assert db.default_data_dir() == tmp_path

@@ -4,7 +4,7 @@ FRONTEND := frontend
 NPM := npm --prefix $(FRONTEND)
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev api web run build ui package test typecheck check migration clean
+.PHONY: help install dev api web run app build ui package desktop test typecheck check migration clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -25,6 +25,9 @@ web: ## Run only the Vite dev server (:5173)
 run: ui ## Build the UI and start the app as users run it
 	uv run pocket-dm
 
+app: ui ## Build the UI and open Pocket DM in its own window
+	uv run --extra desktop pocket-dm app
+
 ui: ## Build the frontend into src/pocket_dm/web
 	$(NPM) run build
 
@@ -33,6 +36,10 @@ package: ui ## Build the release wheel and sdist into dist/
 	@unzip -l dist/*.whl | grep -q 'pocket_dm/web/index.html' || { echo "error: wheel is missing the UI"; exit 1; }
 
 build: package ## Alias for package
+
+desktop: ui ## Build the desktop app for this OS into dist-desktop/ (PyInstaller)
+	uv sync --group build --extra desktop
+	cd packaging && uv run pyinstaller --noconfirm --distpath ../dist-desktop --workpath ../build-desktop pocket-dm.spec
 
 test: ## Run backend tests
 	uv run pytest
@@ -47,4 +54,4 @@ migration: ## Create a migration from model changes: make migration m="add portr
 	uv run alembic revision --autogenerate -m "$(m)"
 
 clean: ## Remove build output (keeps your database)
-	rm -rf dist src/pocket_dm/web $(FRONTEND)/*.tsbuildinfo
+	rm -rf dist dist-desktop build-desktop src/pocket_dm/web $(FRONTEND)/*.tsbuildinfo

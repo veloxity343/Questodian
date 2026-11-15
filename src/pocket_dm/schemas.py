@@ -389,6 +389,16 @@ class RestIn(Doc):
     type: Literal["short", "long"] = "long"
 
 
+class Projection(Doc):
+    """What the players' screen shows: a handout and the DM's zoom and pan."""
+
+    id: str = ""
+    zoom: float = Field(1, gt=0, le=20)
+    x: float = 0
+    y: float = 0
+    seq: int = 0
+
+
 class Expression(Doc):
     expression: str
 
