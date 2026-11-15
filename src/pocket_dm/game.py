@@ -10,8 +10,8 @@ def _combatant(data: dict) -> dict:
     return schemas.Combatant.model_validate(data).model_dump()
 
 
-def _log(session: dict, text: str, kind: str) -> None:
-    session["log"].append({"id": models.new_id(), "time": models.now(), "kind": kind, "text": text})
+def _log(doc: dict, text: str, kind: str) -> None:
+    doc["log"].append({"id": models.new_id(), "time": models.now(), "kind": kind, "text": text})
 
 
 # --------------------------------------------------------------------------- encounter helpers
@@ -57,14 +57,33 @@ def apply_hp_change(combatant: dict, amount: int) -> None:
         combatant["hp"] = min(cap, combatant["hp"] + amount)
 
 
-def _roll_hp(entry: dict, average: bool) -> int:
-    hp = entry["data"].get("hp", 1)
-    if not average and entry["data"].get("hp_roll"):
+def _roll_hp(hp: int, hp_roll: str, average: bool) -> int:
+    if not average and hp_roll:
         try:
-            return max(1, int(dice.roll(entry["data"]["hp_roll"]).total))
+            return max(1, int(dice.roll(hp_roll).total))
         except dice.DiceError:
             pass
     return hp
+
+
+def _stat_source(repo: Repo, body: schemas.EncounterAction, edition: str) -> dict:
+    """The monster to add: an SRD entry or a homebrew stat block, in one shape."""
+    if body.monster_id:
+        m = repo.get("monsters", body.monster_id)
+        return {"name": m["name"], "ac": m["ac"], "hp": m["hp"], "hp_roll": m["hp_roll"], "init_bonus": m["init_bonus"],
+                "xp": m["xp"], "notes": m["kind"], "srd_id": "", "monster_id": m["id"]}
+    entry = srd.get(body.srd_id, edition)
+    if not entry or entry["category"] != "monsters":
+        raise NotFound("monster not found")
+    d = entry["data"]
+    return {"name": entry["name"], "ac": d["ac"], "hp": d.get("hp", 1), "hp_roll": d.get("hp_roll", ""),
+            "init_bonus": d["init_bonus"], "xp": d.get("xp", 0), "notes": entry["summary"], "srd_id": entry["id"],
+            "monster_id": ""}
+
+
+def _edition(repo: Repo, doc: dict) -> str:
+    cid = doc.get("campaign_id")
+    return repo.get("campaigns", cid)["edition"] if cid else srd.DEFAULT_EDITION
 
 
 def _sync_pc(repo: Repo, combatant: dict) -> None:
@@ -83,9 +102,8 @@ def _sync_pc(repo: Repo, combatant: dict) -> None:
 # --------------------------------------------------------------------------- encounter actions
 
 
-def encounter_action(repo: Repo, session_id: str, body: schemas.EncounterAction) -> dict:
-    session = repo.get("sessions", session_id)
-    enc = session["encounter"]
+def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterAction) -> dict:
+    enc = repo.get("encounters", encounter_id)
     combatants = enc["combatants"]
     action = body.action
 
@@ -101,29 +119,44 @@ def encounter_action(repo: Repo, session_id: str, body: schemas.EncounterAction)
         c["max_hp"] = c["max_hp"] or c["hp"]
         combatants.append(c)
     elif action == "add_monster":
-        entry = srd.get(body.srd_id)
-        if not entry or entry["category"] != "monsters":
-            raise NotFound("monster not found")
-        existing = sum(1 for c in combatants if c["srd_id"] == entry["id"])
+        src = _stat_source(repo, body, _edition(repo, enc))
+        same = [c for c in combatants if (src["srd_id"] and c["srd_id"] == src["srd_id"])
+                or (src["monster_id"] and c["monster_id"] == src["monster_id"])]
+        if len(same) == 1 and same[0]["name"] == src["name"]:
+            same[0]["name"] = f"{src['name']} 1"  # numbering starts once there's more than one
         for i in range(body.count):
-            hp = _roll_hp(entry, body.average_hp)
-            n = existing + i + 1
+            hp = _roll_hp(src["hp"], src["hp_roll"], body.average_hp)
+            n = len(same) + i + 1
             combatants.append(
                 _combatant(
                     {
+                        **{k: src[k] for k in ("ac", "init_bonus", "xp", "notes", "srd_id", "monster_id")},
                         "id": models.new_id(),
-                        "name": entry["name"] if body.count == 1 and existing == 0 else f"{entry['name']} {n}",
+                        "name": src["name"] if body.count == 1 and not same else f"{src['name']} {n}",
                         "kind": "monster",
-                        "ac": entry["data"]["ac"],
                         "hp": hp,
                         "max_hp": hp,
-                        "init_bonus": entry["data"]["init_bonus"],
-                        "srd_id": entry["id"],
-                        "xp": entry["data"].get("xp", 0),
-                        "notes": entry["summary"],
                     }
                 )
             )
+    elif action == "add_npc":
+        npc = repo.get("npcs", body.npc_id)
+        base = {"ac": 10, "hp": 4, "hp_roll": "", "init_bonus": 0, "xp": 0, "srd_id": "", "monster_id": ""}
+        ref = npc["stat_ref"]
+        if ref.startswith(("srd:", "monster:")):
+            kind, _, ref_id = ref.partition(":")
+            linked = schemas.EncounterAction(action="add_monster", srd_id=ref_id if kind == "srd" else "",
+                                             monster_id=ref_id if kind == "monster" else "")
+            base = _stat_source(repo, linked, _edition(repo, enc))
+        combatants.append(
+            _combatant(
+                {
+                    **{k: base[k] for k in ("ac", "init_bonus", "xp", "srd_id", "monster_id")},
+                    "id": models.new_id(), "name": npc["name"], "kind": "npc", "hp": base["hp"], "max_hp": base["hp"],
+                    "notes": npc["role"] or npc["stats"], "npc_id": npc["id"],
+                }
+            )
+        )
     elif action == "add_character":
         for cid in body.character_ids or [body.character_id]:
             ch = repo.get("characters", cid)
@@ -160,9 +193,9 @@ def encounter_action(repo: Repo, session_id: str, body: schemas.EncounterAction)
         before = c["hp"]
         apply_hp_change(c, body.amount)
         verb = "takes" if body.amount < 0 else "heals"
-        _log(session, f"{c['name']} {verb} {abs(body.amount)} ({before} → {c['hp']} HP)", "combat")
+        _log(enc, f"{c['name']} {verb} {abs(body.amount)} ({before} → {c['hp']} HP)", "combat")
         if c["hp"] == 0 and before > 0:
-            _log(session, f"{c['name']} drops to 0 HP", "combat")
+            _log(enc, f"{c['name']} drops to 0 HP", "combat")
         _sync_pc(repo, c)
     elif action == "roll_initiative":
         for c in combatants:
@@ -178,21 +211,21 @@ def encounter_action(repo: Repo, session_id: str, body: schemas.EncounterAction)
         was_active, prev_round = enc["active"], enc["round"]
         advance_turn(enc, 1)
         if not was_active and enc["active"]:
-            _log(session, "Combat begins — round 1", "combat")
+            _log(enc, "Combat begins — round 1", "combat")
         elif enc["round"] != prev_round:
-            _log(session, f"Round {enc['round']} begins", "combat")
+            _log(enc, f"Round {enc['round']} begins", "combat")
     elif action == "prev":
         advance_turn(enc, -1)
     elif action == "end":
         if enc["active"]:
-            _log(session, f"Combat ends after {enc['round']} round(s)", "combat")
+            _log(enc, f"Combat ends after {enc['round']} round(s)", "combat")
         for c in combatants:
             _sync_pc(repo, c)
         enc.update(active=False, round=0, turn=0)
     elif action == "clear":
         kept = [] if body.all else [c for c in combatants if c["kind"] == "pc"]
         enc.update(active=False, round=0, turn=0, combatants=kept)
-    return repo.save("sessions", session)
+    return repo.save("encounters", enc)
 
 
 # --------------------------------------------------------------------------- rewards, log, rests

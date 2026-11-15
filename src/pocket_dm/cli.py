@@ -84,8 +84,9 @@ def cmd_srd(args) -> int:
 
 
 def cmd_export(args) -> int:
-    with _db(args).session() as s:
-        bundle = transfer.export_bundle(Repo(s), args.campaign)
+    db = _db(args)
+    with db.session() as s:
+        bundle = transfer.export_bundle(Repo(s), args.campaign, db.files_dir)
     text = json.dumps(bundle, indent=2, ensure_ascii=False)
     if args.output == "-":
         print(text)
@@ -109,7 +110,7 @@ def cmd_import(args) -> int:
             continue
         try:
             with db.session() as s:
-                summary = transfer.import_data(Repo(s), json.loads(text), args.mode)
+                summary = transfer.import_data(Repo(s), json.loads(text), args.mode, db.files_dir)
         except ValueError as exc:  # includes JSON, transfer and validation errors
             print(f"{name}: error: {exc}", file=sys.stderr)
             status = 1

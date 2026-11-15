@@ -30,8 +30,9 @@ def populated(new_repo):
     camp["players"] = [{"name": "Sam", "character_id": ch["id"], "contact": "", "notes": ""}]
     s.save("campaigns", camp)
     sess = s.create("sessions", {"campaign_id": camp["id"], "title": "Goblin Arrows"})
-    sess["encounter"]["combatants"] = [{"id": "x1", "name": "Thorin", "kind": "pc", "character_id": ch["id"]}]
-    s.save("sessions", sess)
+    s.create("encounters", {"campaign_id": camp["id"], "session_id": sess["id"], "combatants": [
+        {"id": "x1", "name": "Thorin", "kind": "pc", "character_id": ch["id"]}]})
+    s.create("scenes", {"campaign_id": camp["id"], "session_id": sess["id"], "title": "Triboar Trail"})
     s.create("handbook", {"title": "Crits", "campaign_id": camp["id"], "body": "Max the dice."})
     s.create("characters", {"name": "Unrelated"})
     return s, camp, ch
@@ -44,7 +45,7 @@ def test_full_roundtrip(populated, new_repo):
     assert len(bundle["collections"]["characters"]) == 2
     other = new_repo("b")
     summary = transfer.import_data(other, bundle)
-    assert summary["imported"] == {"campaigns": 1, "sessions": 1, "characters": 2, "handbook": 1}
+    assert summary["imported"] == {"campaigns": 1, "sessions": 1, "characters": 2, "handbook": 1, "scenes": 1, "encounters": 1}
     assert other.get("characters", ch["id"])["name"] == "Thorin"
     assert other.get("campaigns", camp["id"])["created"] == camp["created"]
 
@@ -77,7 +78,10 @@ def test_copy_mode_remaps_links(populated):
     assert new_char_id != ch["id"]
     assert s.get("characters", new_char_id)["campaign_id"] == new_camp["id"]
     new_sess = s.list("sessions", campaign_id=new_camp["id"])[0]
-    assert new_sess["encounter"]["combatants"][0]["character_id"] == new_char_id
+    new_enc = s.list("encounters", campaign_id=new_camp["id"])[0]
+    assert new_enc["session_id"] == new_sess["id"]
+    assert new_enc["combatants"][0]["character_id"] == new_char_id
+    assert s.list("scenes", campaign_id=new_camp["id"])[0]["session_id"] == new_sess["id"]
 
 
 def test_single_record_export_import(populated, new_repo):
@@ -122,3 +126,14 @@ def test_import_drops_links_to_missing_campaigns(repo):
     payload = {"kind": "character", "data": {"id": "abc123", "name": "Orphan", "campaign_id": "gone"}}
     transfer.import_data(repo, payload)
     assert repo.get("characters", "abc123")["campaign_id"] == ""
+
+
+def test_version_1_bundles_keep_their_encounters(repo):
+    bundle = {"format": "pocket-dm", "version": 1, "collections": {
+        "campaigns": [{"id": "c1", "name": "Old"}],
+        "sessions": [{"id": "s1", "campaign_id": "c1", "number": 3, "title": "Ambush",
+                      "encounter": {"round": 2, "active": True, "combatants": [{"id": "g", "name": "Goblin"}]}}],
+    }}
+    transfer.import_data(repo, bundle)
+    (enc,) = repo.list("encounters")
+    assert enc["session_id"] == "s1" and enc["round"] == 2 and enc["combatants"][0]["name"] == "Goblin"

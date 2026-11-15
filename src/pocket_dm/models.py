@@ -49,11 +49,16 @@ def _campaign_fk(ondelete: str) -> Mapped[str | None]:
     return mapped_column(ForeignKey("campaigns.id", ondelete=ondelete), index=True)
 
 
+def _fk(table: str, ondelete: str = "SET NULL") -> Mapped[str | None]:
+    return mapped_column(ForeignKey(f"{table}.id", ondelete=ondelete), index=True)
+
+
 class Campaign(Record):
     __tablename__ = "campaigns"
 
     name: Mapped[str]
     system: Mapped[str]
+    edition: Mapped[str] = mapped_column(server_default="2014")  # "2014" (SRD 5.1) or "2024" (SRD 5.2.1)
     description: Mapped[str]
     setting: Mapped[str]
     players: Mapped[list[Any]]
@@ -78,7 +83,6 @@ class Session(Record):
     prep: Mapped[str]
     recap: Mapped[str]
     log: Mapped[list[Any]]
-    encounter: Mapped[dict[str, Any]]
     loot: Mapped[list[Any]]
     xp_awarded: Mapped[int]
 
@@ -134,3 +138,118 @@ class HandbookEntry(Record):
     body: Mapped[str]
 
     campaign: Mapped[Campaign | None] = relationship(back_populates="handbook")
+
+
+# --------------------------------------------------------------------------- DM screen
+# Everything below belongs to one campaign and goes with it when the campaign is deleted.
+# Links to a session or scene are optional and are cleared if that record is deleted.
+
+
+class Scene(Record):
+    """A prepared beat of a session: summary, read-aloud text and DM notes."""
+
+    __tablename__ = "scenes"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    session_id: Mapped[str | None] = _fk("sessions")
+    position: Mapped[int]
+    title: Mapped[str]
+    location: Mapped[str]
+    status: Mapped[str]  # planned | active | completed | skipped
+    summary: Mapped[str]
+    read_aloud: Mapped[str]
+    body: Mapped[str]
+
+
+class Npc(Record):
+    __tablename__ = "npcs"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    name: Mapped[str]
+    role: Mapped[str]
+    first_appears: Mapped[str]
+    looks: Mapped[str]
+    voice: Mapped[str]
+    wants: Mapped[str]
+    secret: Mapped[str]
+    knows: Mapped[str]
+    stats: Mapped[str]  # free text, e.g. "Commoner"
+    stat_ref: Mapped[str]  # "srd:monsters/commoner" or "monster:<id>", for the tracker and stat block
+    notes: Mapped[str]
+    tags: Mapped[list[Any]]
+
+
+class Monster(Record):
+    """A homebrew stat block. Campaign-less monsters are shared by every campaign."""
+
+    __tablename__ = "monsters"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    name: Mapped[str]
+    kind: Mapped[str]  # "Medium undead, neutral evil"
+    cr: Mapped[str]
+    xp: Mapped[int]
+    ac: Mapped[int]
+    hp: Mapped[int]
+    hp_roll: Mapped[str]
+    init_bonus: Mapped[int]
+    speed: Mapped[str]
+    abilities: Mapped[dict[str, Any]]
+    body: Mapped[str]  # traits, actions etc. in Markdown
+    notes: Mapped[str]
+
+
+class Note(Record):
+    __tablename__ = "notes"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    session_id: Mapped[str | None] = _fk("sessions")
+    kind: Mapped[str]  # general | session | quest | pin
+    title: Mapped[str]
+    body: Mapped[str]
+    pinned: Mapped[bool]
+    done: Mapped[bool]
+
+
+class Encounter(Record):
+    __tablename__ = "encounters"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    session_id: Mapped[str | None] = _fk("sessions")
+    scene_id: Mapped[str | None] = _fk("scenes")
+    name: Mapped[str]
+    round: Mapped[int]
+    turn: Mapped[int]
+    active: Mapped[bool]
+    combatants: Mapped[list[Any]]
+    party_size: Mapped[int]
+    party_level: Mapped[int]
+    log: Mapped[list[Any]]
+    notes: Mapped[str]
+
+
+class Tracker(Record):
+    """A clock or counter, e.g. "Tolls 3 of 7" with a label for each step."""
+
+    __tablename__ = "trackers"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    session_id: Mapped[str | None] = _fk("sessions")
+    name: Mapped[str]
+    value: Mapped[int]
+    max: Mapped[int]
+    steps: Mapped[list[Any]]
+    notes: Mapped[str]
+
+
+class Handout(Record):
+    """An image (map, letter, portrait) stored as a file next to the database."""
+
+    __tablename__ = "handouts"
+
+    campaign_id: Mapped[str | None] = _campaign_fk("CASCADE")
+    folder: Mapped[str]
+    title: Mapped[str]
+    filename: Mapped[str]  # stored file name, or "" before an image is uploaded
+    mime: Mapped[str]
+    body: Mapped[str]

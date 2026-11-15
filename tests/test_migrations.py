@@ -31,8 +31,10 @@ def test_new_database_is_at_head_and_matches_models(db):
 
 def test_database_from_before_migrations_is_adopted(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / DB_FILENAME}")
-    Base.metadata.create_all(engine)  # how databases were created before Alembic
+    # Databases made before Alembic had the 0001 schema and no alembic_version table.
+    command.upgrade(migrate.alembic_config(engine), "0001")
     with engine.begin() as conn:
+        conn.execute(text("DROP TABLE alembic_version"))
         conn.execute(text(
             "INSERT INTO handbook (id, created, updated, campaign_id, title, category, tags, body) "
             "VALUES ('old1', '', '', NULL, 'Kept', 'Lore', '[]', 'still here')"
@@ -91,3 +93,30 @@ def test_downgrade_to_base_and_back(db):
     assert set(inspect(db.engine).get_table_names()) == {"alembic_version"}
     command.upgrade(cfg, "head")
     assert set(Base.metadata.tables) <= set(inspect(db.engine).get_table_names())
+
+
+def test_0002_moves_session_encounters_and_backs_up(tmp_path):
+    path = tmp_path / DB_FILENAME
+    engine = create_engine(f"sqlite:///{path}")
+    command.upgrade(migrate.alembic_config(engine), "0001")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO campaigns (id, created, updated, name, system, description, setting, players, notes) "
+            "VALUES ('c1', '', '', 'C', '', '', '', '[]', '')"))
+        conn.execute(text(
+            "INSERT INTO sessions (id, created, updated, campaign_id, number, title, date, status, attendance, prep,"
+            " recap, log, encounter, loot, xp_awarded) VALUES ('s1', '', '', 'c1', 2, 'Causeway', '', 'planned', '[]',"
+            " '', '', '[]', :enc, '[]', 0)"),
+            {"enc": '{"round": 1, "turn": 0, "active": true, "combatants": [{"id": "z", "name": "Zombie", "kind": "monster"}]}'})
+    engine.dispose()
+
+    db = Database(tmp_path)
+    assert db.backup is not None and db.backup.name.startswith("pocket-dm.db.backup-0001-")
+    with db.session() as s:
+        repo = Repo(s)
+        (enc,) = repo.list("encounters")
+        assert enc["session_id"] == "s1" and enc["name"] == "Session 2: Causeway" and enc["active"]
+        assert enc["combatants"][0]["name"] == "Zombie"
+        assert repo.get("campaigns", "c1")["edition"] == "2014"
+    db.dispose()
+    assert Database(tmp_path).backup is None  # nothing to migrate the second time

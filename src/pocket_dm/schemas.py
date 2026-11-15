@@ -48,9 +48,13 @@ class Player(Doc):
     notes: Str = ""
 
 
+Edition = Literal["2014", "2024"]
+
+
 class Campaign(Record):
     name: Str = "New Campaign"
     system: Str = "D&D 5e (SRD 5.1)"
+    edition: Edition = "2014"
     description: Str = ""
     setting: Str = ""
     players: list[Player] = []
@@ -74,15 +78,10 @@ class Combatant(Doc):
     notes: Str = ""
     character_id: Str = ""
     srd_id: Str = ""
+    monster_id: Str = ""  # homebrew stat block
+    npc_id: Str = ""
     xp: int = 0
     hidden: bool = False
-
-
-class Encounter(Doc):
-    round: int = 0
-    turn: int = 0
-    active: bool = False
-    combatants: list[Combatant] = []
 
 
 class LogEntry(Doc):
@@ -109,7 +108,6 @@ class Session(Record):
     prep: Str = ""
     recap: Str = ""
     log: list[LogEntry] = []
-    encounter: Encounter = Encounter()
     loot: list[LootItem] = []
     xp_awarded: int = 0
 
@@ -257,18 +255,115 @@ class HandbookEntry(Record):
     body: Str = ""
 
 
+# --------------------------------------------------------------------------- DM screen
+
+
+class Scene(Record):
+    campaign_id: Str = ""
+    session_id: Str = ""
+    position: int = 0
+    title: Str = "New Scene"
+    location: Str = ""
+    status: Literal["planned", "active", "completed", "skipped"] = "planned"
+    summary: Str = ""
+    read_aloud: Str = ""
+    body: Str = ""
+
+
+class Npc(Record):
+    campaign_id: Str = ""
+    name: Str = "New NPC"
+    role: Str = ""
+    first_appears: Str = ""
+    looks: Str = ""
+    voice: Str = ""
+    wants: Str = ""
+    secret: Str = ""
+    knows: Str = ""
+    stats: Str = ""
+    stat_ref: Str = ""
+    notes: Str = ""
+    tags: Annotated[list[str], BeforeValidator(_split_tags)] = []
+
+
+class Monster(Record):
+    campaign_id: Str = ""
+    name: Str = "New Monster"
+    kind: Str = "Medium humanoid, neutral"
+    cr: Str = "0"
+    xp: int = 0
+    ac: int = 10
+    hp: int = 1
+    hp_roll: Str = ""
+    init_bonus: int = 0
+    speed: Str = "30 ft."
+    abilities: dict[str, int] = Field(default_factory=lambda: {a: 10 for a in rules.ABILITIES})
+    body: Str = ""
+    notes: Str = ""
+
+
+class Note(Record):
+    campaign_id: Str = ""
+    session_id: Str = ""
+    kind: Literal["general", "session", "quest", "pin"] = "general"
+    title: Str = "New note"
+    body: Str = ""
+    pinned: bool = False
+    done: bool = False
+
+
+class Encounter(Record):
+    campaign_id: Str = ""
+    session_id: Str = ""
+    scene_id: Str = ""
+    name: Str = "New Encounter"
+    round: int = 0
+    turn: int = 0
+    active: bool = False
+    combatants: list[Combatant] = []
+    party_size: int = Field(4, ge=1, le=12)
+    party_level: int = Field(1, ge=1, le=20)
+    log: list[LogEntry] = []
+    notes: Str = ""
+
+
+class TrackerStep(Doc):
+    label: Str = ""
+
+
+class Tracker(Record):
+    campaign_id: Str = ""
+    session_id: Str = ""
+    name: Str = "New tracker"
+    value: int = 0
+    max: int = Field(6, ge=1, le=100)
+    steps: list[TrackerStep] = []
+    notes: Str = ""
+
+
+class Handout(Record):
+    campaign_id: Str = ""
+    folder: Str = ""
+    title: Str = "New handout"
+    filename: Str = ""
+    mime: Str = ""
+    body: Str = ""
+
+
 # --------------------------------------------------------------------------- request bodies
 
 
 class EncounterAction(Doc):
     action: Literal[
-        "add", "add_monster", "add_character", "update", "remove", "hp",
+        "add", "add_monster", "add_character", "add_npc", "update", "remove", "hp",
         "roll_initiative", "sort", "next", "prev", "end", "clear",
     ]
     id: str = ""
     combatant: dict[str, Any] = {}
     changes: dict[str, Any] = {}
     srd_id: str = ""
+    monster_id: str = ""
+    npc_id: str = ""
     count: int = Field(1, ge=1, le=50)
     average_hp: bool = True
     character_id: str = ""

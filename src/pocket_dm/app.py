@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, dice, game, rules, schemas, srd, transfer
+from . import __version__, dice, game, models, rules, schemas, srd, transfer
 from .db import Database
 from .repo import KINDS, SCHEMAS, SINGULAR, NotFound, Repo, title_of
 
@@ -51,6 +51,8 @@ def meta(request: Request) -> dict:
         "data_dir": str(db.data_dir or ""),
         "database": str(db.path or ""),
         "srd": srd.meta(),
+        "editions": srd.EDITION_LABELS,
+        "xp_budget": rules.XP_BUDGET,
         "abilities": rules.ABILITY_NAMES,
         "skills": rules.SKILLS,
         "conditions": rules.CONDITIONS,
@@ -95,9 +97,13 @@ def slots(body: schemas.ClassesIn) -> dict:
     return {"slots": rules.spell_slots_for([c.model_dump() for c in body.classes])}
 
 
+Edition = Annotated[str, Query(description="Rules edition: 2014 (SRD 5.1) or 2024 (SRD 5.2.1)")]
+
+
 @tools.get("/srd/categories")
-def srd_categories() -> dict:
-    return {"categories": srd.categories(), "meta": srd.meta()}
+def srd_categories(edition: Edition = srd.DEFAULT_EDITION) -> dict:
+    edition = srd.check_edition(edition)
+    return {"categories": srd.categories(edition), "meta": srd.meta(edition)}
 
 
 @tools.get("/srd/search")
@@ -107,15 +113,17 @@ def srd_search(
     category: str = "",
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    edition: Edition = srd.DEFAULT_EDITION,
 ) -> dict:
     # Any other query parameter filters on the entry's structured data (level=3, cr_label=1/4, ...).
-    filters = {k: v for k, v in request.query_params.items() if k not in ("q", "category", "limit", "offset")}
-    return srd.search(q, category, limit=limit, offset=offset, **filters)
+    reserved = ("q", "category", "limit", "offset", "edition")
+    filters = {k: v for k, v in request.query_params.items() if k not in reserved}
+    return srd.search(q, category, limit=limit, offset=offset, edition=srd.check_edition(edition), **filters)
 
 
 @tools.get("/srd/entry")
-def srd_entry(id: str) -> dict:
-    entry = srd.get(id)
+def srd_entry(id: str, edition: Edition = srd.DEFAULT_EDITION) -> dict:
+    entry = srd.get(id, srd.check_edition(edition))
     if not entry:
         raise NotFound("entry not found")
     return entry
@@ -128,8 +136,8 @@ transfers = APIRouter(tags=["import/export"])
 
 
 @transfers.get("/export")
-def export_bundle(repo: RepoDep, campaign_id: str = "") -> JSONResponse:
-    bundle = transfer.export_bundle(repo, campaign_id or None)
+def export_bundle(request: Request, repo: RepoDep, campaign_id: str = "") -> JSONResponse:
+    bundle = transfer.export_bundle(repo, campaign_id or None, request.app.state.db.files_dir)
     name = repo.get("campaigns", campaign_id)["name"] if campaign_id else "pocket-dm-backup"
     return JSONResponse(bundle, headers=_attachment(f"{_slug(name)}.pocketdm.json"))
 
@@ -157,8 +165,8 @@ def export_one(repo: RepoDep, kind: str, doc_id: str, format: str = "json") -> R
 
 
 @transfers.post("/import")
-def import_data(repo: RepoDep, payload: Annotated[Any, Body()], mode: str = "overwrite") -> dict:
-    return transfer.import_data(repo, payload, mode)
+def import_data(request: Request, repo: RepoDep, payload: Annotated[Any, Body()], mode: str = "overwrite") -> dict:
+    return transfer.import_data(repo, payload, mode, request.app.state.db.files_dir)
 
 
 @transfers.post("/import/markdown")
@@ -180,8 +188,8 @@ def records_router(kind: str) -> APIRouter:
     router = APIRouter(prefix=f"/{kind}", tags=[kind])
 
     @router.get("", response_model=dict[str, list[schema]])
-    def list_(repo: RepoDep, campaign_id: str = ""):
-        return {kind: repo.list(kind, campaign_id=campaign_id or None)}
+    def list_(repo: RepoDep, campaign_id: str = "", session_id: str = "", kind_: Annotated[str, Query(alias="kind")] = ""):
+        return {kind: repo.list(kind, campaign_id=campaign_id, session_id=session_id, kind=kind_)}
 
     @router.post("", status_code=201, response_model=schema)
     def create(repo: RepoDep, body: Annotated[dict[str, Any] | None, Body()] = None):
@@ -203,12 +211,76 @@ def records_router(kind: str) -> APIRouter:
     return router
 
 
-sessions = APIRouter(prefix="/sessions", tags=["sessions"])
+encounters = APIRouter(prefix="/encounters", tags=["encounters"])
 
 
-@sessions.post("/{doc_id}/encounter")
-def encounter(repo: RepoDep, doc_id: str, body: schemas.EncounterAction) -> schemas.Session:
+@encounters.post("/{doc_id}/action")
+def encounter_action(repo: RepoDep, doc_id: str, body: schemas.EncounterAction) -> schemas.Encounter:
     return game.encounter_action(repo, doc_id, body)
+
+
+handouts = APIRouter(prefix="/handouts", tags=["handouts"])
+IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "image/svg+xml": ".svg"}
+MAX_IMAGE = 15 * 1024 * 1024
+
+
+def _handout_dir(request: Request) -> Path:
+    folder = request.app.state.db.files_dir
+    if folder is None:
+        raise ValueError("handout images need a data folder")
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+@handouts.put("/{doc_id}/file", response_model=schemas.Handout)
+async def upload_handout(request: Request, doc_id: str):
+    """Store the request body (an image) as this handout's picture."""
+    mime = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if mime not in IMAGE_TYPES:
+        raise ValueError(f"handouts must be images ({', '.join(IMAGE_TYPES)})")
+    data = await request.body()
+    if not data or len(data) > MAX_IMAGE:
+        raise ValueError("image is empty or larger than 15 MB")
+    folder = _handout_dir(request)
+    with request.app.state.db.session() as s:
+        repo = Repo(s)
+        doc = repo.get("handouts", doc_id)
+        old = doc["filename"]
+        name = f"{doc_id}-{models.new_id()[:6]}{IMAGE_TYPES[mime]}"
+        (folder / name).write_bytes(data)
+        saved = repo.update("handouts", doc_id, {"filename": name, "mime": mime})
+    if old and old != name:
+        (folder / old).unlink(missing_ok=True)
+    return saved
+
+
+@handouts.get("/{doc_id}/file")
+def handout_file(request: Request, repo: RepoDep, doc_id: str) -> FileResponse:
+    doc = repo.get("handouts", doc_id)
+    path = _handout_dir(request) / doc["filename"] if doc["filename"] else None
+    if not path or not path.is_file():
+        raise NotFound("this handout has no image yet")
+    return FileResponse(path, media_type=doc["mime"] or None, headers={"Cache-Control": "no-cache"})
+
+
+@handouts.delete("/{doc_id}")
+def delete_handout(request: Request, repo: RepoDep, doc_id: str) -> dict:
+    doc = repo.get("handouts", doc_id)
+    repo.delete("handouts", doc_id)
+    if doc["filename"]:
+        (_handout_dir(request) / doc["filename"]).unlink(missing_ok=True)
+    return {"deleted": doc_id}
+
+
+@tools.get("/encounter-budget")
+def encounter_budget(party_size: int = 4, party_level: int = 1, xp: int = 0) -> dict:
+    return {
+        "budget": rules.encounter_budget(party_size, party_level),
+        "difficulty": rules.encounter_difficulty(xp, party_size, party_level),
+    }
+
+
+sessions = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 @sessions.post("/{doc_id}/award")
@@ -237,7 +309,8 @@ def create_app(db: Database, web_dir: Path | None = WEB_DIR) -> FastAPI:
     app.state.db = db
 
     api = APIRouter(prefix="/api")
-    for router in (tools, transfers, sessions, characters, *(records_router(k) for k in KINDS)):
+    # Specific routes first, so e.g. DELETE /handouts/{id} (which also removes the file) wins.
+    for router in (tools, transfers, sessions, encounters, handouts, characters, *(records_router(k) for k in KINDS)):
         api.include_router(router)
     app.include_router(api)
 

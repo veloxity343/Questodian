@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import re
+from pathlib import Path
 
 from . import models, rules
-from .repo import KINDS, SINGULAR, Repo, normalize, valid_id
+from .repo import KINDS, LINKS, SINGULAR, Repo, normalize, valid_id
 
 FORMAT = "pocket-dm"
-VERSION = 1
+VERSION = 2  # 2: DM screen records; sessions no longer hold an encounter
 IMPORT_MODES = ("overwrite", "skip", "copy")
 
 
@@ -19,21 +21,27 @@ class TransferError(ValueError):
 # --------------------------------------------------------------------------- export
 
 
-def export_bundle(repo: Repo, campaign_id: str | None = None) -> dict:
-    """Everything, or one campaign together with the records linked to it."""
+def export_bundle(repo: Repo, campaign_id: str | None = None, files_dir: Path | None = None) -> dict:
+    """Everything, or one campaign together with the records linked to it.
+
+    With ``files_dir``, handout images are embedded (base64) so the bundle is self-contained.
+    """
     if campaign_id:
         campaign = repo.get("campaigns", campaign_id)
         linked_chars = {p.get("character_id") for p in campaign["players"] if p.get("character_id")}
-        collections = {
-            "campaigns": [campaign],
-            "sessions": repo.list("sessions", campaign_id=campaign_id),
-            "characters": [
-                c for c in repo.list("characters") if c["campaign_id"] == campaign_id or c["id"] in linked_chars
-            ],
-            "handbook": repo.list("handbook", campaign_id=campaign_id),
-        }
+        collections = {"campaigns": [campaign]}
+        for kind in KINDS[1:]:
+            docs = repo.list(kind, campaign_id=campaign_id)
+            if kind == "characters":
+                docs = [c for c in repo.list("characters") if c["campaign_id"] == campaign_id or c["id"] in linked_chars]
+            collections[kind] = docs
     else:
         collections = {kind: repo.list(kind) for kind in KINDS}
+    if files_dir is not None:
+        for h in collections.get("handouts", []):
+            path = files_dir / h["filename"] if h["filename"] else None
+            if path and path.is_file():
+                h["file_b64"] = base64.b64encode(path.read_bytes()).decode("ascii")
     return {"format": FORMAT, "version": VERSION, "exported": models.now(), "collections": collections}
 
 
@@ -70,63 +78,73 @@ def _collections_from(payload) -> dict[str, list[dict]]:
             if not isinstance(docs, list):
                 raise TransferError(f"'{kind}' must be a list")
             out[kind] = [d for d in docs if isinstance(d, dict)]
-        return out
+        return _upgrade_v1(out)
     if "kind" in payload and "data" in payload:
         kind = _KIND_BY_SINGULAR.get(payload["kind"]) or (payload["kind"] if payload["kind"] in KINDS else None)
         if not kind:
             raise TransferError(f"unknown record kind {payload['kind']!r}")
         docs = payload["data"] if isinstance(payload["data"], list) else [payload["data"]]
-        return {kind: [d for d in docs if isinstance(d, dict)]}
+        return _upgrade_v1({kind: [d for d in docs if isinstance(d, dict)]})
     raise TransferError("file has neither 'collections' nor 'kind'/'data'")
 
 
-def import_data(repo: Repo, payload, mode: str = "overwrite") -> dict:
+def _upgrade_v1(cols: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Version 1 sessions carried one `encounter`; turn those into encounter records."""
+    for s in cols.get("sessions", []):
+        enc = s.get("encounter")
+        if isinstance(enc, dict) and enc.get("combatants"):
+            cols.setdefault("encounters", []).append({
+                **{k: enc.get(k) for k in ("round", "turn", "active", "combatants") if k in enc},
+                "id": f"{s.get('id') or models.new_id()}-enc"[:64],
+                "campaign_id": s.get("campaign_id", ""),
+                "session_id": s.get("id", ""),
+                "name": f"Session {s.get('number', '')}: {s.get('title', '')}".strip(),
+            })
+    return cols
+
+
+def import_data(repo: Repo, payload, mode: str = "overwrite", files_dir: Path | None = None) -> dict:
     """Import a bundle or single-record export.
 
     ``overwrite`` keeps ids and replaces existing records, ``skip`` keeps ids but
     leaves existing records alone, and ``copy`` gives every imported record a
     fresh id (rewriting the links between them) so nothing is ever replaced.
+    Embedded handout images are written to ``files_dir``.
     """
     if mode not in IMPORT_MODES:
         raise TransferError(f"mode must be one of {', '.join(IMPORT_MODES)}")
     cols = _collections_from(payload)
+    images = {}
+    for h in cols.get("handouts", []):
+        if h.get("file_b64"):
+            try:
+                images[id(h)] = base64.b64decode(h["file_b64"], validate=True)
+            except ValueError as exc:
+                raise TransferError(f"handout {h.get('title', '')!r} has a broken image") from exc
     # validate everything before writing anything
     try:
-        docs = {kind: [normalize(kind, d) for d in cols.get(kind, [])] for kind in KINDS}
+        docs = {kind: [(normalize(kind, d), images.get(id(d))) for d in cols.get(kind, [])] for kind in KINDS}
     except ValueError as exc:
         raise TransferError(f"invalid record: {exc}") from exc
 
-    remap: dict[str, str] = {}
     if mode == "copy":
-        for kind in KINDS:
-            for d in docs[kind]:
-                old = d.get("id") or models.new_id()
-                d["id"] = remap[old] = models.new_id()
-        for d in docs["sessions"] + docs["characters"] + docs["handbook"]:
-            if d.get("campaign_id") in remap:
-                d["campaign_id"] = remap[d["campaign_id"]]
-        for c in docs["campaigns"]:
-            for p in c["players"]:
-                if isinstance(p, dict) and p.get("character_id") in remap:
-                    p["character_id"] = remap[p["character_id"]]
-        for s in docs["sessions"]:
-            for cb in s["encounter"]["combatants"]:
-                if cb.get("character_id") in remap:
-                    cb["character_id"] = remap[cb["character_id"]]
-            s["attendance"] = [remap.get(a, a) for a in s["attendance"]]
+        _remap_ids({kind: [d for d, _ in pairs] for kind, pairs in docs.items()})
 
     summary = {"imported": {}, "skipped": {}, "mode": mode}
     for kind in KINDS:
         n_in = n_skip = 0
-        for d in docs[kind]:
+        for d, image in docs[kind]:
             if not valid_id(d["id"]):
                 d["id"] = models.new_id()
             if mode == "skip" and repo.exists(kind, d["id"]):
                 n_skip += 1
                 continue
-            # campaigns are written first, so a link that still dangles points outside this import
-            if kind != "campaigns" and d["campaign_id"] and not repo.exists("campaigns", d["campaign_id"]):
-                d["campaign_id"] = ""
+            # linked kinds are written first, so a link that still dangles points outside this import
+            for field, target in LINKS.items():
+                if d.get(field) and not repo.exists(target, d[field]):
+                    d[field] = ""
+            if kind == "handouts":
+                d["filename"] = _store_image(files_dir, d, image) if image else ""
             repo.save(kind, d, keep_timestamps=True)
             n_in += 1
         if n_in:
@@ -134,6 +152,47 @@ def import_data(repo: Repo, payload, mode: str = "overwrite") -> dict:
         if n_skip:
             summary["skipped"][kind] = n_skip
     return summary
+
+
+def _store_image(files_dir: Path | None, doc: dict, data: bytes) -> str:
+    if files_dir is None:
+        return ""
+    files_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(doc.get("filename") or "").suffix or ".png"
+    name = f"{doc['id']}-{models.new_id()[:6]}{ext}"
+    (files_dir / name).write_bytes(data)
+    return name
+
+
+def _remap_ids(docs: dict[str, list[dict]]) -> None:
+    """Give every record a new id and rewrite the references between them."""
+    remap: dict[str, str] = {}
+    for kind in KINDS:
+        for d in docs[kind]:
+            old = d.get("id") or models.new_id()
+            d["id"] = remap[old] = models.new_id()
+
+    def swap(value: str) -> str:
+        return remap.get(value, value)
+
+    for kind in KINDS:
+        for d in docs[kind]:
+            for field in LINKS:
+                if d.get(field):
+                    d[field] = swap(d[field])
+    for c in docs["campaigns"]:
+        for p in c["players"]:
+            p["character_id"] = swap(p["character_id"])
+    for s in docs["sessions"]:
+        s["attendance"] = [swap(a) for a in s["attendance"]]
+    for e in docs["encounters"]:
+        for cb in e["combatants"]:
+            for field in ("character_id", "monster_id", "npc_id"):
+                if cb.get(field):
+                    cb[field] = swap(cb[field])
+    for n in docs["npcs"]:
+        if n["stat_ref"].startswith("monster:"):
+            n["stat_ref"] = "monster:" + swap(n["stat_ref"].split(":", 1)[1])
 
 
 # --------------------------------------------------------------------------- markdown

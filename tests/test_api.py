@@ -61,28 +61,79 @@ def test_crud_and_cross_origin_block(api):
 def test_encounter_flow(api):
     _, camp = api("POST", "/api/campaigns", {"name": "C"})
     _, ch = api("POST", "/api/characters", {"name": "Hero", "campaign_id": camp["id"], "hp": {"max": 20, "current": 20, "temp": 0}})
-    _, s = api("POST", "/api/sessions", {"campaign_id": camp["id"]})
-    path = f"/api/sessions/{s['id']}/encounter"
-    _, s = api("POST", path, {"action": "add_character", "character_ids": [ch["id"]]})
-    _, s = api("POST", path, {"action": "add_monster", "srd_id": "monsters/goblin", "count": 2})
-    names = [c["name"] for c in s["encounter"]["combatants"]]
+    _, e = api("POST", "/api/encounters", {"campaign_id": camp["id"], "name": "Ambush"})
+    path = f"/api/encounters/{e['id']}/action"
+    _, e = api("POST", path, {"action": "add_character", "character_ids": [ch["id"]]})
+    _, e = api("POST", path, {"action": "add_monster", "srd_id": "monsters/goblin", "count": 2})
+    names = [c["name"] for c in e["combatants"]]
     assert names == ["Hero", "Goblin 1", "Goblin 2"]
-    assert s["encounter"]["combatants"][1]["xp"] == 50
-    _, s = api("POST", path, {"action": "roll_initiative"})
-    assert all(c["initiative"] for c in s["encounter"]["combatants"])
-    _, s = api("POST", path, {"action": "next"})
-    assert s["encounter"]["active"] and s["encounter"]["round"] == 1
-    hero = next(c for c in s["encounter"]["combatants"] if c["kind"] == "pc")
-    _, s = api("POST", path, {"action": "hp", "id": hero["id"], "amount": -8})
+    assert e["combatants"][1]["xp"] == 50
+    _, e = api("POST", path, {"action": "roll_initiative"})
+    assert all(c["initiative"] for c in e["combatants"])
+    _, e = api("POST", path, {"action": "next"})
+    assert e["active"] and e["round"] == 1
+    hero = next(c for c in e["combatants"] if c["kind"] == "pc")
+    _, e = api("POST", path, {"action": "hp", "id": hero["id"], "amount": -8})
     _, sheet = api("GET", f"/api/characters/{ch['id']}")
     assert sheet["hp"]["current"] == 12  # synced back to the character sheet
     for _ in range(3):
-        _, s = api("POST", path, {"action": "next"})
-    assert s["encounter"]["round"] == 2
-    _, s = api("POST", path, {"action": "end"})
-    assert not s["encounter"]["active"]
-    assert any("Combat begins" in e["text"] for e in s["log"])
+        _, e = api("POST", path, {"action": "next"})
+    assert e["round"] == 2
+    _, e = api("POST", path, {"action": "end"})
+    assert not e["active"]
+    assert any("Combat begins" in x["text"] for x in e["log"])
     assert api("POST", path, {"action": "explode"})[0] == 422
+    _, listed = api("GET", f"/api/encounters?campaign_id={camp['id']}")
+    assert [x["name"] for x in listed["encounters"]] == ["Ambush"]
+
+
+def test_encounter_uses_campaign_edition_and_homebrew(api):
+    _, camp = api("POST", "/api/campaigns", {"name": "Seven Bells", "edition": "2024"})
+    _, e = api("POST", "/api/encounters", {"campaign_id": camp["id"]})
+    path = f"/api/encounters/{e['id']}/action"
+    _, e = api("POST", path, {"action": "add_monster", "srd_id": "monsters/zombie"})
+    z = e["combatants"][0]
+    assert (z["ac"], z["hp"], z["init_bonus"], z["xp"]) == (8, 15, -2, 50)
+    _, m = api("POST", "/api/monsters", {"campaign_id": camp["id"], "name": "The Bell-Ringer", "ac": 12, "hp": 40, "xp": 200})
+    _, e = api("POST", path, {"action": "add_monster", "monster_id": m["id"]})
+    assert e["combatants"][1]["name"] == "The Bell-Ringer" and e["combatants"][1]["monster_id"] == m["id"]
+    _, e = api("POST", path, {"action": "add_monster", "srd_id": "monsters/zombie"})
+    assert [c["name"] for c in e["combatants"]] == ["Zombie 1", "The Bell-Ringer", "Zombie 2"]
+    _, npc = api("POST", "/api/npcs", {"campaign_id": camp["id"], "name": "Pell", "stat_ref": "srd:monsters/commoner"})
+    _, e = api("POST", path, {"action": "add_npc", "npc_id": npc["id"]})
+    pell = e["combatants"][-1]
+    assert pell["kind"] == "npc" and pell["npc_id"] == npc["id"] and pell["hp"] == 4
+    _, budget = api("GET", "/api/encounter-budget?party_size=4&party_level=1&xp=200")
+    assert budget == {"budget": {"low": 200, "moderate": 300, "high": 400}, "difficulty": "low"}
+
+
+def test_srd_editions(api):
+    _, r = api("GET", "/api/srd/search?q=zombie&category=monsters&edition=2024")
+    assert r["results"][0]["name"] == "Zombie"
+    _, z = api("GET", "/api/srd/entry?id=monsters/zombie&edition=2024")
+    assert "Undead Fortitude" in z["body"]
+    _, cats = api("GET", "/api/srd/categories?edition=2024")
+    ids = [c["id"] for c in cats["categories"]]
+    assert "species" in ids and "races" not in ids and cats["meta"]["edition"] == "2024"
+    assert api("GET", "/api/srd/search?q=x&edition=1999")[0] == 400
+
+
+def test_handout_image_roundtrip(api, client):
+    _, camp = api("POST", "/api/campaigns", {"name": "C"})
+    _, h = api("POST", "/api/handouts", {"campaign_id": camp["id"], "title": "Map", "folder": "Maps"})
+    assert api("GET", f"/api/handouts/{h['id']}/file")[0] == 404
+    png = b"\x89PNG\r\n\x1a\nfake"
+    res = client.put(f"/api/handouts/{h['id']}/file", content=png, headers={"content-type": "image/png"})
+    assert res.status_code == 200 and res.json()["mime"] == "image/png"
+    got = client.get(f"/api/handouts/{h['id']}/file")
+    assert got.content == png
+    assert client.put(f"/api/handouts/{h['id']}/file", content=b"x", headers={"content-type": "text/plain"}).status_code == 400
+    _, bundle = api("GET", f"/api/export?campaign_id={camp['id']}")
+    assert bundle["collections"]["handouts"][0]["file_b64"]
+    assert api("DELETE", f"/api/handouts/{h['id']}")[0] == 200
+    _, summary = api("POST", "/api/import?mode=copy", bundle)
+    new = next(x for x in api("GET", "/api/handouts")[1]["handouts"])
+    assert client.get(f"/api/handouts/{new['id']}/file").content == png
 
 
 def test_award_xp_and_loot(api):

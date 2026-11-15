@@ -66,6 +66,17 @@ CR_XP = {
     "30": 155000,
 }
 
+# XP budget per character by party level: (low, moderate, high). SRD 5.2.1 "Combat Encounter
+# Difficulty". The SRD 5.1 has no encounter-building table, so 2014 campaigns use this one too
+# (monster XP values are the same scale in both editions).
+XP_BUDGET = [
+    (50, 75, 100), (100, 150, 200), (150, 225, 400), (250, 375, 500), (500, 750, 1100),
+    (600, 1000, 1400), (750, 1300, 1700), (1000, 1700, 2100), (1300, 2000, 2600), (1600, 2300, 3100),
+    (1900, 2900, 4100), (2200, 3700, 4700), (2600, 4200, 5400), (2900, 4900, 6200), (3300, 5400, 7800),
+    (3800, 6100, 9800), (4500, 7200, 11700), (5000, 8700, 14200), (5500, 10700, 17200), (6400, 13200, 22000),
+]
+DIFFICULTIES = ("low", "moderate", "high")
+
 POINT_BUY_COST = {8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9}
 POINT_BUY_BUDGET = 27
 STANDARD_ARRAY = [15, 14, 13, 12, 10, 8]
@@ -203,3 +214,20 @@ def derive(character: dict) -> dict:
         "carrying_capacity": abilities.get("str", 10) * 15,
         "next_level_xp": xp_for_next_level(level),
     }
+
+
+def encounter_budget(party_size: int, party_level: int) -> dict[str, int]:
+    """Total XP budgets for a party: {"low": .., "moderate": .., "high": ..}."""
+    row = XP_BUDGET[max(1, min(int(party_level), 20)) - 1]
+    return {d: v * max(1, int(party_size)) for d, v in zip(DIFFICULTIES, row)}
+
+
+def encounter_difficulty(monster_xp: int, party_size: int, party_level: int) -> str:
+    """"trivial" below the low budget, "deadly" beyond high, else the budget it fits."""
+    budget = encounter_budget(party_size, party_level)
+    if monster_xp <= 0 or monster_xp < budget["low"] * 0.5:
+        return "trivial"
+    for d in DIFFICULTIES:
+        if monster_xp <= budget[d]:
+            return d
+    return "deadly"

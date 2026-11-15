@@ -20,9 +20,9 @@ def test_normalize_coerces_and_rejects():
 
 
 def test_defaults_are_not_shared():
-    a = normalize("sessions", {})
-    a["encounter"]["combatants"].append({"name": "x"})
-    assert normalize("sessions", {})["encounter"]["combatants"] == []
+    a = normalize("encounters", {})
+    a["combatants"].append({"name": "x"})
+    assert normalize("encounters", {})["combatants"] == []
 
 
 def test_handbook_tags_from_string():
@@ -99,3 +99,34 @@ def test_hp_changes_use_temp_hp_first():
     assert c["hp"] == 12
     game.apply_hp_change(c, -50)
     assert c["hp"] == 0
+
+
+def test_session_delete_unlinks_but_campaign_delete_removes(repo):
+    c = repo.create("campaigns", {"name": "C"})
+    s = repo.create("sessions", {"campaign_id": c["id"]})
+    scene = repo.create("scenes", {"campaign_id": c["id"], "session_id": s["id"], "title": "Lanternfest"})
+    note = repo.create("notes", {"campaign_id": c["id"], "session_id": s["id"]})
+    repo.delete("sessions", s["id"])
+    assert repo.get("scenes", scene["id"])["session_id"] == ""
+    assert repo.get("notes", note["id"])["session_id"] == ""
+    for kind in ("npcs", "monsters", "encounters", "trackers", "handouts"):
+        repo.create(kind, {"campaign_id": c["id"]})
+    repo.delete("campaigns", c["id"])
+    for kind in ("scenes", "notes", "npcs", "monsters", "encounters", "trackers", "handouts"):
+        assert repo.list(kind) == [], kind
+
+
+def test_links_are_checked_and_filterable(repo):
+    c = repo.create("campaigns", {"name": "C"})
+    with pytest.raises(ValueError, match="session"):
+        repo.create("scenes", {"campaign_id": c["id"], "session_id": "missing"})
+    s = repo.create("sessions", {"campaign_id": c["id"]})
+    repo.create("scenes", {"campaign_id": c["id"], "session_id": s["id"], "position": 2, "title": "B"})
+    repo.create("scenes", {"campaign_id": c["id"], "session_id": s["id"], "position": 1, "title": "A"})
+    repo.create("scenes", {"campaign_id": c["id"], "title": "Loose"})
+    assert [x["title"] for x in repo.list("scenes", session_id=s["id"])] == ["A", "B"]
+    repo.create("notes", {"campaign_id": c["id"], "kind": "quest"})
+    repo.create("notes", {"campaign_id": c["id"], "kind": "pin"})
+    assert [n["kind"] for n in repo.list("notes", kind="quest")] == ["quest"]
+    with pytest.raises(ValueError):
+        repo.list("notes", title="x")

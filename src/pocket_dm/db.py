@@ -37,7 +37,7 @@ class Database:
             self.path = None
         self.engine: Engine = create_engine(url, connect_args={"check_same_thread": False})
         event.listen(self.engine, "connect", _sqlite_pragmas)
-        migrate.upgrade(self.engine)
+        self.backup = migrate.upgrade(self.engine, backup=self.path)
         self._sessions = sessionmaker(self.engine, expire_on_commit=False)
 
     @contextmanager
@@ -50,6 +50,11 @@ class Database:
             except BaseException:
                 s.rollback()
                 raise
+
+    @property
+    def files_dir(self) -> Path | None:
+        """Where handout images live (None for a database given only by URL)."""
+        return self.data_dir / "handouts" if self.data_dir else None
 
     def dispose(self) -> None:
         self.engine.dispose()

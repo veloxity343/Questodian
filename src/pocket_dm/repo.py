@@ -14,20 +14,64 @@ from sqlalchemy.orm import Session
 
 from . import models, schemas
 
-KINDS = ("campaigns", "sessions", "characters", "handbook")
-SINGULAR = {"campaigns": "campaign", "sessions": "session", "characters": "character", "handbook": "handbook"}
+# Order matters: records are imported after the records they link to.
+KINDS = (
+    "campaigns", "sessions", "characters", "handbook",
+    "scenes", "npcs", "monsters", "notes", "encounters", "trackers", "handouts",
+)
+SINGULAR = {
+    "campaigns": "campaign", "sessions": "session", "characters": "character", "handbook": "handbook",
+    "scenes": "scene", "npcs": "npc", "monsters": "monster", "notes": "note",
+    "encounters": "encounter", "trackers": "tracker", "handouts": "handout",
+}
 TABLES: dict[str, type[models.Record]] = {
     "campaigns": models.Campaign,
     "sessions": models.Session,
     "characters": models.Character,
     "handbook": models.HandbookEntry,
+    "scenes": models.Scene,
+    "npcs": models.Npc,
+    "monsters": models.Monster,
+    "notes": models.Note,
+    "encounters": models.Encounter,
+    "trackers": models.Tracker,
+    "handouts": models.Handout,
 }
 SCHEMAS: dict[str, type[schemas.Record]] = {
     "campaigns": schemas.Campaign,
     "sessions": schemas.Session,
     "characters": schemas.Character,
     "handbook": schemas.HandbookEntry,
+    "scenes": schemas.Scene,
+    "npcs": schemas.Npc,
+    "monsters": schemas.Monster,
+    "notes": schemas.Note,
+    "encounters": schemas.Encounter,
+    "trackers": schemas.Tracker,
+    "handouts": schemas.Handout,
 }
+# Link fields (stored as NULL when empty) and the kind they point to.
+LINKS = {"campaign_id": "campaigns", "session_id": "sessions", "scene_id": "scenes"}
+# Fields `list` can filter on.
+FILTERS = ("campaign_id", "session_id", "scene_id", "kind", "folder")
+
+
+def _order(kind: str, t) -> list:
+    match kind:
+        case "sessions":
+            return [t.campaign_id, t.number]
+        case "scenes":
+            return [t.session_id, t.position, func.lower(t.title)]
+        case "handbook":
+            return [func.lower(t.title)]
+        case "notes":
+            return [t.pinned.desc(), t.updated.desc()]
+        case "encounters":
+            return [t.created]
+        case "handouts":
+            return [func.lower(t.folder), func.lower(t.title)]
+        case _:
+            return [func.lower(t.name)]
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -53,7 +97,7 @@ def normalize(kind: str, data: dict) -> dict:
 
 
 def title_of(kind: str, doc: dict) -> str:
-    return doc.get("title", "") if kind in ("sessions", "handbook") else doc.get("name", "")
+    return doc.get("title") or doc.get("name") or ""
 
 
 def _fields(kind: str) -> list[str]:
@@ -79,17 +123,17 @@ class Repo:
 
     # ------------------------------------------------------------------ reads
 
-    def list(self, kind: str, campaign_id: str | None = None) -> list[dict]:
+    def list(self, kind: str, /, **filters: str | None) -> list[dict]:
+        """All records of a kind, optionally filtered by FILTERS fields (empty values are ignored)."""
         check_kind(kind)
         table = TABLES[kind]
         stmt = select(table)
-        if campaign_id and kind != "campaigns":
-            stmt = stmt.where(table.campaign_id == campaign_id)
-        if kind == "sessions":
-            stmt = stmt.order_by(table.campaign_id, table.number)
-        else:
-            stmt = stmt.order_by(func.lower(table.title if kind == "handbook" else table.name))
-        return [self._to_dict(kind, row) for row in self.db.scalars(stmt)]
+        for field, value in filters.items():
+            if field not in FILTERS:
+                raise ValueError(f"can't filter on {field!r}")
+            if value and hasattr(table, field):
+                stmt = stmt.where(getattr(table, field) == value)
+        return [self._to_dict(kind, row) for row in self.db.scalars(stmt.order_by(*_order(kind, table)))]
 
     def get(self, kind: str, doc_id: str) -> dict:
         return self._to_dict(kind, self._row(kind, doc_id))
@@ -108,10 +152,10 @@ class Repo:
         doc["id"] = doc["id"] or models.new_id()
         if not valid_id(doc["id"]):
             raise ValueError(f"invalid id {doc['id']!r}")
-        if kind != "campaigns":
-            cid = doc["campaign_id"]
-            if cid and not self.exists("campaigns", cid):
-                raise ValueError(f"campaign {cid} not found")
+        for field, target in LINKS.items():
+            ref = doc.get(field)
+            if ref and not self.exists(target, ref):
+                raise ValueError(f"{SINGULAR[target]} {ref} not found")
         row = self.db.get(TABLES[kind], doc["id"])
         if row is None:
             row = TABLES[kind](id=doc["id"])
@@ -121,7 +165,7 @@ class Repo:
         row.updated = doc["updated"] if keep_timestamps and doc["updated"] else stamp
         for f in _fields(kind):
             value = doc[f]
-            setattr(row, f, (value or None) if f == "campaign_id" else value)
+            setattr(row, f, (value or None) if f in LINKS else value)
         self.db.flush()
         return self._to_dict(kind, row)
 
