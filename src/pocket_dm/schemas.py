@@ -356,7 +356,7 @@ class Handout(Record):
 class EncounterAction(Doc):
     action: Literal[
         "add", "add_monster", "add_character", "add_npc", "update", "remove", "hp",
-        "roll_initiative", "sort", "next", "prev", "end", "clear",
+        "roll_initiative", "roll_hp", "sort", "next", "prev", "end", "clear",
     ]
     id: str = ""
     combatant: dict[str, Any] = {}

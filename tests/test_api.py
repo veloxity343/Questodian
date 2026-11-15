@@ -99,6 +99,9 @@ def test_encounter_uses_campaign_edition_and_homebrew(api):
     assert e["combatants"][1]["name"] == "The Bell-Ringer" and e["combatants"][1]["monster_id"] == m["id"]
     _, e = api("POST", path, {"action": "add_monster", "srd_id": "monsters/zombie"})
     assert [c["name"] for c in e["combatants"]] == ["Zombie 1", "The Bell-Ringer", "Zombie 2"]
+    _, e = api("POST", path, {"action": "roll_hp"})
+    zombies = [c for c in e["combatants"] if c["srd_id"]]
+    assert all(c["hp"] == c["max_hp"] and 9 <= c["hp"] <= 22 for c in zombies)  # 2d8 + 6
     _, npc = api("POST", "/api/npcs", {"campaign_id": camp["id"], "name": "Pell", "stat_ref": "srd:monsters/commoner"})
     _, e = api("POST", path, {"action": "add_npc", "npc_id": npc["id"]})
     pell = e["combatants"][-1]

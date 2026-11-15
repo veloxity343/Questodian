@@ -2,7 +2,7 @@
 // quick-roll tray, and click-to-roll on any rendered `.dice-link`.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { usePref } from "../lib/hooks";
 import { fmtDate } from "../lib/util";
@@ -55,6 +55,10 @@ export function Breakdown({ result }: { result: RollResult }) {
 export function DiceProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const { sessionId } = useApp();
+  // The DM screen has its own dice dock, so rolls there don't pop up a toast.
+  const quiet = useLocation().pathname === "/";
+  const quietRef = useRef(quiet);
+  quietRef.current = quiet;
   const [history, setHistory] = usePref<RollEntry[]>("rolls", []);
   const [macros, setMacros] = usePref<Macro[]>("macros", DEFAULT_MACROS);
 
@@ -65,7 +69,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
         const entry: RollEntry = { ...result, label, time: new Date().toISOString() };
         setHistory((h) => [entry, ...h].slice(0, 100));
         const flag = entry.critical ? <span className="tag crit">NAT 20</span> : entry.fumble ? <span className="tag fumble">NAT 1</span> : null;
-        toast(
+        if (!quietRef.current) toast(
           <div className="roll-toast">
             <div className="roll-toast-head"><span>{label || expression}</span>{flag}</div>
             <div className="roll-total">{entry.total}</div>
@@ -137,6 +141,11 @@ export function HistoryItem({ r }: { r: RollEntry }) {
 }
 
 function DiceTray() {
+  const onDm = useLocation().pathname === "/";
+  return onDm ? null : <Tray />;
+}
+
+function Tray() {
   const { roll, history } = useDice();
   const [open, setOpen] = useState(false);
   const [expr, setExpr] = useState("");

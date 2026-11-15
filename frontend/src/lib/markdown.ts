@@ -1,19 +1,30 @@
-// A small Markdown renderer. Input is HTML-escaped before any markup is added,
-// and dice notation ("2d6+3", "+5 to hit") becomes clickable roll buttons.
+// A small Markdown renderer. Input is HTML-escaped before any markup is added.
+// Dice notation ("2d6+3", "+5 to hit", "Attack Roll: +3") becomes clickable roll
+// buttons, and [[Name]] / [[kind:Name]] / [[Name|label]] become links to records.
 
 const esc = (s: string) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 const DICE_RE = /(^|[^\w/])((?:\d{1,3})?d(?:\d{1,3}|%)(?:\s?[+−-]\s?\d{1,3}(?!\s?d\d))?)(?![\w])/g;
 const TO_HIT_RE = /(^|[^\w])([+-]\d{1,2}) to hit/g;
+// 2024 stat blocks: "Melee Attack Roll: +3", and the shorthand "Melee +5, reach 5 ft."
+const ATTACK_ROLL_RE = /((?:Attack Roll|Melee|Ranged):?[_*]*\s+)([+\u2212-]\d{1,2})(?=[\s,.;)]|$)/g;
+const DC_RE = /\bDC\s?(\d{1,2})\b/g;
+const LINK_RE = /\[\[([^\]|]{1,80})(?:\|([^\]]{1,80}))?\]\]/g;
+
+const rollButton = (bonus: string, label = bonus) => {
+  const b = bonus.replace("\u2212", "-");
+  return `<button type="button" class="dice-link" data-roll="d20${b}" title="Roll d20${b}">${label}</button>`;
+};
 
 function diceify(text: string) {
   // Stash "+5 to hit" buttons first so the dice pass can't match inside their attributes.
   const held: string[] = [];
   const hold = (html: string) => `\u0001${held.push(html) - 1}\u0001`;
   return text
-    .replace(TO_HIT_RE, (_, pre, bonus) =>
-      `${pre}${hold(`<button type="button" class="dice-link" data-roll="d20${bonus}" title="Roll d20${bonus}">${bonus}</button>`)} to hit`)
+    .replace(TO_HIT_RE, (_, pre, bonus) => `${pre}${hold(rollButton(bonus))} to hit`)
+    .replace(ATTACK_ROLL_RE, (_, pre, bonus) => `${pre}${hold(rollButton(bonus))}`)
+    .replace(DC_RE, (m) => hold(`<span class="dc-chip">${m}</span>`))
     .replace(DICE_RE, (_, pre, expr: string) => {
       const clean = expr.replace(/\s/g, "").replace("−", "-");
       return `${pre}<button type="button" class="dice-link" data-roll="${clean}" title="Roll ${clean}">${expr}</button>`;
@@ -25,12 +36,22 @@ export interface MarkdownOptions {
   dice?: boolean;
 }
 
+function refLink(target: string, label?: string) {
+  const [kind, name] = target.includes(":") ? target.split(/:(.*)/s).map((x) => x.trim()) : ["", target.trim()];
+  return `<button type="button" class="ref-link" data-ref="${name}" data-kind="${kind}">${(label || name).trim()}</button>`;
+}
+
 function inline(text: string, { dice = true }: MarkdownOptions = {}) {
   let s = esc(text);
   const codes: string[] = [];
   s = s.replace(/`([^`]+)`/g, (_, c) => {
     codes.push(c);
     return `\u0000${codes.length - 1}\u0000`;
+  });
+  // Links are stashed like code spans so the dice pass can't rewrite names such as "Room 4".
+  s = s.replace(LINK_RE, (_, target, label) => {
+    codes.push(refLink(target, label));
+    return `\u0002${codes.length - 1}\u0002`;
   });
   if (dice) s = diceify(s);
   s = s
@@ -41,7 +62,9 @@ function inline(text: string, { dice = true }: MarkdownOptions = {}) {
     .replace(/~~(.+?)~~/g, "<del>$1</del>")
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/ {2}$/g, "<br>");
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
+  return s
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`)
+    .replace(/\u0002(\d+)\u0002/g, (_, i) => codes[Number(i)]);
 }
 
 const LIST_RE = /^\s*([-*+]|\d+\.)\s+/;

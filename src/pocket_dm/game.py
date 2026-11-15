@@ -205,6 +205,18 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
                 continue
             c["initiative"] = int(dice.roll(f"d20{c['init_bonus']:+d}").total)
         sort_initiative(enc)
+    elif action == "roll_hp":
+        edition = _edition(repo, enc)
+        for c in combatants:
+            if c["kind"] != "monster" or not (c["srd_id"] or c["monster_id"]):
+                continue
+            try:
+                src = _stat_source(repo, schemas.EncounterAction(action="add_monster", srd_id=c["srd_id"], monster_id=c["monster_id"]), edition)
+            except NotFound:
+                continue
+            hp = _roll_hp(src["hp"], src["hp_roll"], average=False)
+            c.update(hp=hp, max_hp=hp)
+        _log(enc, "Rolled hit points for the monsters", "combat")
     elif action == "sort":
         sort_initiative(enc)
     elif action == "next":

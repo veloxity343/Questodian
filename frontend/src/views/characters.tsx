@@ -12,7 +12,8 @@ import { Modal, useDialogs, useToast } from "../context/ui";
 import { derive, type Derived } from "../lib/derive";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, download, downloadJson, pickFiles, signed, slug, titleCase } from "../lib/util";
-import type { Ability, Campaign, Character, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
+import { targetEncounter } from "../lib/encounters";
+import type { Ability, Campaign, Character, Edition, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
 
 const ALIGNMENTS = ["", "Lawful Good", "Neutral Good", "Chaotic Good", "Lawful Neutral", "True Neutral", "Chaotic Neutral", "Lawful Evil", "Neutral Evil", "Chaotic Evil", "Unaligned"];
 const BACKGROUNDS = ["Acolyte", "Charlatan", "Criminal", "Entertainer", "Folk Hero", "Guild Artisan", "Hermit", "Noble", "Outlander", "Sage", "Sailor", "Soldier", "Urchin"];
@@ -31,12 +32,14 @@ interface SrdLists {
   races: SrdEntry[];
   backgrounds: SrdEntry[];
 }
-let srdCache: Promise<SrdLists> | null = null;
-function srdLists() {
-  srdCache ??= Promise.all(["classes", "races", "backgrounds"].map((category) => api.srdSearch({ category, limit: 50 }))).then(
+const srdCache: Partial<Record<Edition, Promise<SrdLists>>> = {};
+function srdLists(edition: Edition) {
+  // 2024 rules call races "species".
+  const races = edition === "2024" ? "species" : "races";
+  srdCache[edition] ??= Promise.all(["classes", races, "backgrounds"].map((category) => api.srdSearch({ category, limit: 50, edition }))).then(
     ([c, r, b]) => ({ classes: c.results, races: r.results, backgrounds: b.results }),
   );
-  return srdCache;
+  return srdCache[edition]!;
 }
 
 // ------------------------------------------------------------------ list
@@ -112,7 +115,8 @@ export function CharacterList() {
 
 export function CharacterSheet() {
   const { id = "" } = useParams();
-  const { data, error } = useLoad(() => Promise.all([api.get("characters", id), api.list("campaigns"), srdLists()]), [id]);
+  const { edition } = useApp();
+  const { data, error } = useLoad(() => Promise.all([api.get("characters", id), api.list("campaigns"), srdLists(edition)]), [id, edition]);
   if (error) return <LoadError error={error} />;
   if (!data) return <Loading />;
   const [ch, campaigns, lists] = data;
@@ -123,7 +127,7 @@ type Edit = (fn: (d: Character) => void) => void;
 type Roll = (expr: string, label: string) => void;
 
 function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: Campaign[]; lists: SrdLists }) {
-  const { meta, sessionId } = useApp();
+  const { meta } = useApp();
   const dice = useDice();
   const toast = useToast();
   const { confirm } = useDialogs();
@@ -137,11 +141,12 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
   const roll: Roll = (expr, label) => void dice.roll(expr, `${ch.name}: ${label}`);
 
   const addToEncounter = async () => {
-    if (!sessionId) return toast("Open a session first", "error");
     await flush();
+    const target = await targetEncounter(ch.campaign_id);
+    if (!target) return toast("Link this character to a campaign that has an encounter first", "error");
     try {
-      await api.encounter(sessionId, { action: "add_character", character_ids: [id] });
-      toast("Added to the current session's encounter");
+      await api.encounter(target.id, { action: "add_character", character_ids: [id] });
+      toast(`Added to ${target.name}`);
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -174,7 +179,7 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
         <Link to="/characters" className="small">← Characters</Link>
         <div className="row gap wrap">
           <SaveStatus status={status} />
-          <button type="button" className="btn" title="Add to the encounter of the last opened session" onClick={addToEncounter}>⚔️ To encounter</button>
+          <button type="button" className="btn" title="Add to the campaign's running (or last edited) encounter" onClick={addToEncounter}>⚔️ To encounter</button>
           <button type="button" className="btn" onClick={async () => { await flush(); download(`${slug(ch.name, "character")}.md`, await api.exportMarkdown("characters", id), "text/markdown"); }}>Export .md</button>
           <button type="button" className="btn" onClick={async () => { await flush(); downloadJson(`${slug(ch.name, "character")}.character.json`, await api.exportOne("characters", id)); }}>Export .json</button>
           <button type="button" className="btn" onClick={duplicate}>Duplicate</button>
@@ -258,7 +263,7 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
 }
 
 function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Derived; edit: Edit; campaigns: Campaign[]; lists: SrdLists }) {
-  const { meta } = useApp();
+  const { meta, edition } = useApp();
   const next = meta?.xp_by_level?.[d.level];
 
   const setClass = (i: number, patch: Partial<Character["classes"][number]>) =>
@@ -294,7 +299,7 @@ function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Deri
       </div>
       <div className="form-grid">
         <Field label="Player"><TextInput value={ch.player} onChange={(v) => edit((x) => void (x.player = v))} /></Field>
-        <Field label="Race"><TextInput list="dl-races" value={ch.race} onChange={(v) => edit((x) => void (x.race = v))} /></Field>
+        <Field label={edition === "2024" ? "Species" : "Race"}><TextInput list="dl-races" value={ch.race} onChange={(v) => edit((x) => void (x.race = v))} /></Field>
         <Field label="Background"><TextInput list="dl-backgrounds" value={ch.background} onChange={(v) => edit((x) => void (x.background = v))} /></Field>
         <Field label="Alignment"><Select value={ch.alignment} options={ALIGNMENTS.map((a): Option => [a, a || "—"])} onChange={(v) => edit((x) => void (x.alignment = v))} /></Field>
         <Field label="Campaign">

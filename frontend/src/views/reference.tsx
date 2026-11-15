@@ -5,7 +5,8 @@ import { EmptyState, LoadError, Loading, Markdown, NumInput, Select, type Option
 import { useApp } from "../context/app";
 import { Modal, useToast } from "../context/ui";
 import { useDebounced, useLoad, usePref } from "../lib/hooks";
-import type { Character, HandbookEntry, SrdCategory, SrdEntry, SrdMeta } from "../types";
+import { targetEncounter } from "../lib/encounters";
+import type { Character, Edition, Encounter, HandbookEntry, SrdCategory, SrdEntry, SrdMeta } from "../types";
 
 const SCHOOLS = ["", "Abjuration", "Conjuration", "Divination", "Enchantment", "Evocation", "Illusion", "Necromancy", "Transmutation"];
 const CASTERS = ["", "Bard", "Cleric", "Druid", "Paladin", "Ranger", "Sorcerer", "Warlock", "Wizard"];
@@ -28,33 +29,34 @@ const FILTERS: Record<string, { key: string; label: string; options: Option[] }[
   "magic-items": [{ key: "rarity", label: "Rarity", options: RARITIES.map((c): Option => [c, c || "Any rarity"]) }],
 };
 
-let categoriesCache: Promise<{ categories: SrdCategory[]; meta: SrdMeta }> | null = null;
+const categoriesCache: Partial<Record<Edition, Promise<{ categories: SrdCategory[]; meta: SrdMeta }>>> = {};
 
 export function Reference() {
   const splat = useParams()["*"] || "";
   const parts = splat.split("/").filter(Boolean);
   const category = parts[0] || "";
   const openId = parts.length > 1 ? parts.join("/") : "";
-  const { data, error } = useLoad(() => (categoriesCache ??= api.srdCategories()), []);
+  const { edition } = useApp();
+  const { data, error } = useLoad(() => (categoriesCache[edition] ??= api.srdCategories(edition)), [edition]);
   if (error) return <LoadError error={error} />;
   if (!data) return <Loading />;
   const labelFor = (cat: string) => data.categories.find((c) => c.id === cat)?.label || cat;
 
   return (
     <>
-      <header className="page-head"><h1>{category ? labelFor(category) : "Rules & SRD"}</h1></header>
+      <header className="page-head"><h1>{category ? labelFor(category) : "Rules Library"}</h1><span className="tag">{data.meta.edition_label}</span></header>
       <div className={`ref-layout ${openId ? "has-detail" : ""}`}>
         <nav className="ref-cats" aria-label="Categories">
-          <Link to="/reference" className={!category ? "active" : ""}>All</Link>
+          <Link to="/library" className={!category ? "active" : ""}>All</Link>
           {data.categories.map((c) => (
-            <Link key={c.id} to={`/reference/${c.id}`} className={c.id === category ? "active" : ""}>
+            <Link key={c.id} to={`/library/${c.id}`} className={c.id === category ? "active" : ""}>
               {c.label}<span className="muted small"> {c.count}</span>
             </Link>
           ))}
         </nav>
-        <ResultList key={category} category={category} openId={openId} labelFor={labelFor} />
+        <ResultList key={`${edition}:${category}`} category={category} openId={openId} labelFor={labelFor} />
         <div className="ref-detail">
-          {openId ? <EntryView key={openId} id={openId} category={category} /> : (
+          {openId ? <EntryView key={`${edition}:${openId}`} id={openId} category={category} /> : (
             <EmptyState title="Pick an entry" text="Dice in rules text are clickable — tap “2d6” or “+5 to hit” to roll." />
           )}
         </div>
@@ -66,6 +68,7 @@ export function Reference() {
 
 function ResultList({ category, openId, labelFor }: { category: string; openId: string; labelFor: (c: string) => string }) {
   const toast = useToast();
+  const { edition } = useApp();
   const [query, setQuery] = usePref(`ref.q.${category}`, "");
   const [filters, setFilters] = usePref<Record<string, string>>(`ref.filters.${category}`, {});
   const [results, setResults] = useState<SrdEntry[]>([]);
@@ -76,7 +79,7 @@ function ResultList({ category, openId, labelFor }: { category: string; openId: 
   const run = async (q: string, f: Record<string, string>, offset = 0) => {
     const n = ++request.current;
     try {
-      const res = await api.srdSearch({ q: q.trim(), category, limit: 60, offset, ...f });
+      const res = await api.srdSearch({ q: q.trim(), category, limit: 60, offset, edition, ...f });
       if (n !== request.current) return; // a newer search superseded this one
       setResults((prev) => (offset ? [...prev, ...res.results] : res.results));
       setTotal(res.total);
@@ -123,7 +126,7 @@ function ResultList({ category, openId, labelFor }: { category: string; openId: 
       <ul className="list results">
         {results.map((e) => (
           <li key={e.id}>
-            <Link className={`list-link ${e.id === openId ? "selected" : ""}`} to={`/reference/${e.id}`}>
+            <Link className={`list-link ${e.id === openId ? "selected" : ""}`} to={`/library/${e.id}`}>
               <span className="grow">{e.name}</span>
               {!category && <span className="tag">{labelFor(e.category)}</span>}
               <span className="muted small">{e.summary}</span>
@@ -137,7 +140,8 @@ function ResultList({ category, openId, labelFor }: { category: string; openId: 
 }
 
 function EntryView({ id, category }: { id: string; category: string }) {
-  const { data: e, error } = useLoad(() => api.srdEntry(id), [id]);
+  const { edition } = useApp();
+  const { data: e, error } = useLoad(() => api.srdEntry(id, edition), [id, edition]);
   const [dialog, setDialog] = useState<"" | "monster" | "spell" | "item">("");
   const close = useCallback(() => setDialog(""), []);
   const ref = useRef<HTMLElement>(null);
@@ -146,7 +150,7 @@ function EntryView({ id, category }: { id: string; category: string }) {
   if (!e) return <Loading />;
   return (
     <article className="panel entry" ref={ref}>
-      <Link className="small back-link" to={`/reference/${category}`}>← Back to results</Link>
+      <Link className="small back-link" to={`/library/${category}`}>← Back to results</Link>
       <h2>{e.name}</h2>
       {e.summary && <p className="muted">{e.summary}</p>}
       <div className="row gap wrap">
@@ -164,23 +168,27 @@ function EntryView({ id, category }: { id: string; category: string }) {
 }
 
 function AddMonster({ e, onClose }: { e: SrdEntry; onClose: () => void }) {
-  const { sessionId } = useApp();
+  const { campaignId } = useApp();
   const toast = useToast();
   const [count, setCount] = useState(1);
+  const [target, setTarget] = useState<Encounter | null | undefined>(undefined);
   useEffect(() => {
-    if (!sessionId) {
-      toast("Open a session first — the monster goes into its encounter", "error");
-      onClose();
-    }
-  }, [sessionId, toast, onClose]);
-  if (!sessionId) return null;
+    targetEncounter(campaignId).then((t) => {
+      if (!t) {
+        toast("Create an encounter in this campaign first (DM screen → Encounters)", "error");
+        onClose();
+      }
+      setTarget(t);
+    });
+  }, [campaignId, toast, onClose]);
+  if (!target) return null;
   return (
-    <Modal title={`Add ${e.name}`} onClose={onClose} actions={[
+    <Modal title={`Add ${e.name} to ${target.name}`} onClose={onClose} actions={[
       { label: "Cancel" },
       { label: "Add", primary: true, onClick: async () => {
         try {
-          await api.encounter(sessionId, { action: "add_monster", srd_id: e.id, count: count || 1 });
-          toast("Added to encounter");
+          await api.encounter(target.id, { action: "add_monster", srd_id: e.id, count: count || 1 });
+          toast(`Added to ${target.name}`);
         } catch (err) {
           toast((err as Error).message, "error");
         }

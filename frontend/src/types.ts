@@ -1,6 +1,10 @@
 // Mirrors src/pocket_dm/schemas.py.
 
-export type Kind = "campaigns" | "sessions" | "characters" | "handbook";
+export type Kind =
+  | "campaigns" | "sessions" | "characters" | "handbook"
+  | "scenes" | "npcs" | "monsters" | "notes" | "encounters" | "trackers" | "handouts";
+
+export type Edition = "2014" | "2024";
 
 export interface RecordBase {
   id: string;
@@ -18,6 +22,7 @@ export interface Player {
 export interface Campaign extends RecordBase {
   name: string;
   system: string;
+  edition: Edition;
   description: string;
   setting: string;
   players: Player[];
@@ -40,15 +45,10 @@ export interface Combatant {
   notes: string;
   character_id: string;
   srd_id: string;
+  monster_id: string;
+  npc_id: string;
   xp: number;
   hidden: boolean;
-}
-
-export interface Encounter {
-  round: number;
-  turn: number;
-  active: boolean;
-  combatants: Combatant[];
 }
 
 export interface LogEntry {
@@ -77,7 +77,6 @@ export interface Session extends RecordBase {
   prep: string;
   recap: string;
   log: LogEntry[];
-  encounter: Encounter;
   loot: LootItem[];
   xp_awarded: number;
 }
@@ -177,11 +176,110 @@ export interface HandbookEntry extends RecordBase {
   body: string;
 }
 
+export type SceneStatus = "planned" | "active" | "completed" | "skipped";
+
+export interface Scene extends RecordBase {
+  campaign_id: string;
+  session_id: string;
+  position: number;
+  title: string;
+  location: string;
+  status: SceneStatus;
+  summary: string;
+  read_aloud: string;
+  body: string;
+}
+
+export interface Npc extends RecordBase {
+  campaign_id: string;
+  name: string;
+  role: string;
+  first_appears: string;
+  looks: string;
+  voice: string;
+  wants: string;
+  secret: string;
+  knows: string;
+  stats: string;
+  stat_ref: string;
+  notes: string;
+  tags: string[];
+}
+
+export interface Monster extends RecordBase {
+  campaign_id: string;
+  name: string;
+  kind: string;
+  cr: string;
+  xp: number;
+  ac: number;
+  hp: number;
+  hp_roll: string;
+  init_bonus: number;
+  speed: string;
+  abilities: Record<Ability, number>;
+  body: string;
+  notes: string;
+}
+
+export type NoteKind = "general" | "session" | "quest" | "pin";
+
+export interface Note extends RecordBase {
+  campaign_id: string;
+  session_id: string;
+  kind: NoteKind;
+  title: string;
+  body: string;
+  pinned: boolean;
+  done: boolean;
+}
+
+export interface Encounter extends RecordBase {
+  campaign_id: string;
+  session_id: string;
+  scene_id: string;
+  name: string;
+  round: number;
+  turn: number;
+  active: boolean;
+  combatants: Combatant[];
+  party_size: number;
+  party_level: number;
+  log: LogEntry[];
+  notes: string;
+}
+
+export interface Tracker extends RecordBase {
+  campaign_id: string;
+  session_id: string;
+  name: string;
+  value: number;
+  max: number;
+  steps: { label: string }[];
+  notes: string;
+}
+
+export interface Handout extends RecordBase {
+  campaign_id: string;
+  folder: string;
+  title: string;
+  filename: string;
+  mime: string;
+  body: string;
+}
+
 export interface KindMap {
   campaigns: Campaign;
   sessions: Session;
   characters: Character;
   handbook: HandbookEntry;
+  scenes: Scene;
+  npcs: Npc;
+  monsters: Monster;
+  notes: Note;
+  encounters: Encounter;
+  trackers: Tracker;
+  handouts: Handout;
 }
 
 export interface RollResult {
@@ -218,6 +316,8 @@ export interface SrdCategory {
 export interface SrdMeta {
   attribution: string;
   source: string;
+  edition: Edition;
+  edition_label: string;
 }
 
 export interface Meta {
@@ -225,6 +325,8 @@ export interface Meta {
   data_dir: string;
   database: string;
   srd: SrdMeta;
+  editions: Record<Edition, string>;
+  xp_budget: [number, number, number][];
   abilities: Record<Ability, string>;
   skills: Record<string, Ability>;
   conditions: string[];
@@ -244,11 +346,13 @@ export interface ImportSummary {
 
 export type EncounterAction =
   | { action: "add"; combatant: Partial<Combatant> }
-  | { action: "add_monster"; srd_id: string; count?: number; average_hp?: boolean }
+  | { action: "add_monster"; srd_id?: string; monster_id?: string; count?: number; average_hp?: boolean }
   | { action: "add_character"; character_ids: string[] }
+  | { action: "add_npc"; npc_id: string }
   | { action: "update"; id: string; changes: Partial<Combatant> }
   | { action: "remove"; id: string }
   | { action: "hp"; id: string; amount: number }
   | { action: "roll_initiative"; which: "all" | "monsters" | "unset" }
+  | { action: "roll_hp" }
   | { action: "sort" | "next" | "prev" | "end" }
   | { action: "clear"; all?: boolean };

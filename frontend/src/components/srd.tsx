@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { useApp } from "../context/app";
 import { Modal, useDrawer, useToast } from "../context/ui";
 import { useDebounced } from "../lib/hooks";
 import type { SrdEntry } from "../types";
@@ -9,10 +10,11 @@ import { Checkbox, Markdown } from "./ui";
 export function useStatblock() {
   const drawer = useDrawer();
   const toast = useToast();
+  const { edition } = useApp();
   return useCallback(
     async (srdId: string, title?: string) => {
       try {
-        const e = await api.srdEntry(srdId);
+        const e = await api.srdEntry(srdId, edition);
         drawer.open(title || e.name, (
           <>
             <p className="muted">{e.summary}</p>
@@ -23,7 +25,7 @@ export function useStatblock() {
         toast((err as Error).message, "error");
       }
     },
-    [drawer, toast],
+    [drawer, toast, edition],
   );
 }
 
@@ -35,12 +37,13 @@ export function SrdPicker({ category, className = "", onPick, onClose }: {
   onClose: () => void;
 }) {
   const toast = useToast();
+  const { edition } = useApp();
   const [q, setQ] = useState("");
   const [onlyClass, setOnlyClass] = useState(category === "spells" && !!className);
   const [results, setResults] = useState<SrdEntry[]>([]);
   const search = useDebounced((text: string, cls: boolean) => {
     api
-      .srdSearch({ q: text.trim(), category, limit: 60, classes: cls ? className : undefined })
+      .srdSearch({ q: text.trim(), category, limit: 60, classes: cls ? className : undefined, edition })
       .then((r) => setResults(r.results), (e: Error) => toast(e.message, "error"));
   }, 200);
   useEffect(() => search(q, onlyClass), [q, onlyClass, search]);

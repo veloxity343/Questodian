@@ -3,12 +3,15 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { usePref } from "../lib/hooks";
-import type { Campaign, Meta } from "../types";
+import type { Campaign, Edition, Meta } from "../types";
 import { useToast } from "./ui";
 
 interface AppState {
   meta: Meta | null;
   campaigns: Campaign[];
+  /** The active campaign, if any, and the rules edition it uses (2014 when there is none). */
+  campaign: Campaign | undefined;
+  edition: Edition;
   refreshCampaigns: () => Promise<void>;
   campaignId: string;
   setCampaignId: (id: string) => void;
@@ -47,7 +50,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshCampaigns, toast]);
 
   return (
-    <AppContext.Provider value={{ meta, campaigns, refreshCampaigns, campaignId, setCampaignId, sessionId, setSessionId }}>
+    <AppContext.Provider value={{
+      meta, campaigns, refreshCampaigns, campaignId, setCampaignId, sessionId, setSessionId,
+      campaign: campaigns.find((c) => c.id === campaignId),
+      edition: campaigns.find((c) => c.id === campaignId)?.edition ?? "2014",
+    }}>
       {children}
     </AppContext.Provider>
   );

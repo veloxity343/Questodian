@@ -1,8 +1,8 @@
 // Typed wrappers around the FastAPI JSON API.
 
 import type {
-  Character, ClassLevel, EncounterAction, ImportSummary, Kind, KindMap, Meta, RollResult, Session,
-  SrdCategory, SrdEntry, SrdMeta, HandbookEntry,
+  Character, ClassLevel, Edition, Encounter, EncounterAction, Handout, ImportSummary, Kind, KindMap, Meta, RollResult,
+  Session, SrdCategory, SrdEntry, SrdMeta, HandbookEntry,
 } from "./types";
 
 type Params = Record<string, string | number | boolean | undefined | null>;
@@ -49,7 +49,7 @@ export interface SrdSearchResult {
 
 export const api = {
   meta: () => request<Meta>("GET", "meta"),
-  list: <K extends Kind>(kind: K, params?: { campaign_id?: string }) =>
+  list: <K extends Kind>(kind: K, params?: { campaign_id?: string; session_id?: string; kind?: string }) =>
     request<Record<K, KindMap[K][]>>("GET", `${kind}${qs(params)}`).then((r) => r[kind]),
   get: <K extends Kind>(kind: K, id: string) => request<KindMap[K]>("GET", `${kind}/${id}`),
   create: <K extends Kind>(kind: K, data: Partial<KindMap[K]> = {}) => request<KindMap[K]>("POST", kind, data),
@@ -58,14 +58,23 @@ export const api = {
   roll: (expression: string) => request<RollResult>("POST", "roll", { expression }),
   stats: () => request<{ results: RollResult[] }>("POST", "stats"),
   slots: (classes: ClassLevel[]) => request<{ slots: number[] }>("POST", "slots", { classes }).then((r) => r.slots),
-  encounter: (sessionId: string, action: EncounterAction) => request<Session>("POST", `sessions/${sessionId}/encounter`, action),
+  encounter: (encounterId: string, action: EncounterAction) =>
+    request<Encounter>("POST", `encounters/${encounterId}/action`, action),
+  uploadHandout: async (id: string, file: File) => {
+    const res = await fetch(`/api/handouts/${id}/file`, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(data, res));
+    return data as Handout;
+  },
+  handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),
   log: (sessionId: string, text: string, kind = "note") => request<Session>("POST", `sessions/${sessionId}/log`, { text, kind }),
   rest: (charId: string, type: "short" | "long") => request<Character>("POST", `characters/${charId}/rest`, { type }),
-  srdCategories: () => request<{ categories: SrdCategory[]; meta: SrdMeta }>("GET", "srd/categories"),
-  srdSearch: (params: Params) => request<SrdSearchResult>("GET", `srd/search${qs(params)}`),
-  srdEntry: (id: string) => request<SrdEntry>("GET", `srd/entry${qs({ id })}`),
+  srdCategories: (edition?: Edition) =>
+    request<{ categories: SrdCategory[]; meta: SrdMeta }>("GET", `srd/categories${qs({ edition })}`),
+  srdSearch: (params: Params & { edition?: Edition }) => request<SrdSearchResult>("GET", `srd/search${qs(params)}`),
+  srdEntry: (id: string, edition?: Edition) => request<SrdEntry>("GET", `srd/entry${qs({ id, edition })}`),
   exportAll: (campaign_id?: string) => request<unknown>("GET", `export${qs({ campaign_id })}`),
   exportOne: (kind: Kind, id: string) => request<unknown>("GET", `export/${kind}/${id}`),
   exportMarkdown: async (kind: Kind, id: string) => {
