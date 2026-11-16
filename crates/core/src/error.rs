@@ -48,8 +48,8 @@ impl From<DiceError> for Error {
     }
 }
 
-impl From<sea_orm::DbErr> for Error {
-    fn from(e: sea_orm::DbErr) -> Self {
+impl From<sqlx::Error> for Error {
+    fn from(e: sqlx::Error) -> Self {
         Error::Internal(format!("database error: {e}"))
     }
 }

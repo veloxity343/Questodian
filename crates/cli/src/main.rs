@@ -90,19 +90,23 @@ fn main() -> ExitCode {
 
 fn serve(data_dir: Option<PathBuf>, args: ServeArgs) -> ExitCode {
     let data_dir = data_dir.unwrap_or_else(db::default_data_dir);
-    let database = data_dir.join(db::DB_FILENAME);
     let web_dir = args.web_dir.unwrap_or_else(|| PathBuf::from("src/questodian/web"));
     let ui = if web_dir.join("index.html").is_file() { Ui::Folder(web_dir) } else { Ui::Missing };
-    let app = App::new(Some(data_dir), Some(database.clone()), ui);
 
     let shown_host = if matches!(args.host.as_str(), "127.0.0.1" | "0.0.0.0" | "") { "localhost" } else { &args.host };
     let url = format!("http://{shown_host}:{}/", args.port);
     let runtime = tokio::runtime::Runtime::new().expect("start the async runtime");
     let result: anyhow::Result<()> = runtime.block_on(async {
+        let database = db::Database::open(&data_dir).await?;
+        if let Some(backup) = &database.backup {
+            println!("Upgraded the database; the previous version is saved as {}", backup.display());
+        }
+        let database_path = database.path.clone();
+        let app = App::new(database, ui);
         let address: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
         let listener = tokio::net::TcpListener::bind(address).await?;
         println!("Questodian {} running at {url}", env!("CARGO_PKG_VERSION"));
-        println!("Database: {}", database.display());
+        println!("Database: {}", database_path.display());
         println!("Press Ctrl+C to stop.");
         if !args.no_browser {
             open_browser(&url);

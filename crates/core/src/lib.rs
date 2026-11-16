@@ -4,6 +4,8 @@
 pub mod db;
 pub mod dice;
 pub mod error;
+pub mod kinds;
+pub mod repo;
 pub mod rules;
 pub mod schemas;
 pub mod server;

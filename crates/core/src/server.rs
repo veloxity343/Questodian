@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Path as UrlPath, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -17,7 +17,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
+use crate::db::Database;
 use crate::error::{Error, Result, invalid, not_found};
+use crate::kinds::Kind;
 use crate::schemas::{self, Character, Check, ClassesIn, Expression, Lenient, Projection};
 use crate::{dice, rules, srd};
 
@@ -36,8 +38,7 @@ pub enum Ui {
 
 /// Everything the routes share.
 pub struct App {
-    pub data_dir: Option<PathBuf>,
-    pub database_path: Option<PathBuf>,
+    pub db: Database,
     /// What the players' screen shows. Kept in memory; the players' window polls it.
     pub projection: Mutex<Projection>,
     pub ui: Ui,
@@ -46,8 +47,8 @@ pub struct App {
 pub type Shared = Arc<App>;
 
 impl App {
-    pub fn new(data_dir: Option<PathBuf>, database_path: Option<PathBuf>, ui: Ui) -> Shared {
-        Arc::new(App { data_dir, database_path, projection: Mutex::new(Projection::default()), ui })
+    pub fn new(db: Database, ui: Ui) -> Shared {
+        Arc::new(App { db, projection: Mutex::new(Projection::default()), ui })
     }
 }
 
@@ -63,6 +64,8 @@ pub fn router(app: Shared) -> Router {
         .route("/srd/search", get(srd_search))
         .route("/srd/entry", get(srd_entry))
         .route("/projection", get(get_projection).put(set_projection))
+        .route("/{kind}", get(list_records).post(create_record))
+        .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
 
     Router::new()
@@ -185,11 +188,10 @@ fn percent_decode(text: &str, plus_is_space: bool) -> String {
 // --------------------------------------------------------------------------- tools
 
 async fn meta(State(app): State<Shared>) -> Json<Value> {
-    let path = |p: &Option<PathBuf>| p.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
     let mut out = json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "data_dir": path(&app.data_dir),
-        "database": path(&app.database_path),
+        "data_dir": app.db.data_dir.display().to_string(),
+        "database": app.db.path.display().to_string(),
         "srd": srd::meta(schemas::Edition::E2014),
         "editions": {"2014": srd::edition_label(schemas::Edition::E2014), "2024": srd::edition_label(schemas::Edition::E2024)},
     });
@@ -283,6 +285,97 @@ async fn set_projection(State(app): State<Shared>, Valid(mut body): Valid<Projec
     body.seq = current.seq + 1;
     *current = body.clone();
     Json(body)
+}
+
+// --------------------------------------------------------------------------- records
+
+fn kind_from_path(name: &str) -> Result<Kind> {
+    Kind::from_plural(name).ok_or_else(|| not_found("not found"))
+}
+
+/// A JSON body that may be empty (`None`). Malformed JSON is a 422.
+pub struct JsonBody(pub Option<Value>);
+
+impl<S: Send + Sync> FromRequest<S> for JsonBody {
+    type Rejection = Error;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self> {
+        let bytes = Bytes::from_request(req, state).await.map_err(|e| match e.status() {
+            StatusCode::PAYLOAD_TOO_LARGE => Error::TooLarge,
+            _ => body_error(e.body_text()),
+        })?;
+        if bytes.is_empty() {
+            return Ok(JsonBody(None));
+        }
+        serde_json::from_slice(&bytes).map(|v| JsonBody(Some(v))).map_err(|e| body_error(format!("invalid JSON: {e}")))
+    }
+}
+
+/// An object body, or 422 (FastAPI's `dict` bodies).
+fn object_body(body: Option<Value>, required: bool) -> Result<Option<Value>> {
+    match body {
+        Some(Value::Object(map)) => Ok(Some(Value::Object(map))),
+        None | Some(Value::Null) if !required => Ok(None),
+        _ => Err(body_error("Input should be a valid dictionary")),
+    }
+}
+
+async fn list_records(
+    State(app): State<Shared>,
+    UrlPath((kind,)): UrlPath<(String,)>,
+    params: Params,
+) -> Result<Json<Value>> {
+    let kind = kind_from_path(&kind)?;
+    let filters = [
+        ("campaign_id", params.text("campaign_id")),
+        ("session_id", params.text("session_id")),
+        ("kind", params.text("kind")),
+    ];
+    let filters: Vec<(&str, &str)> = filters.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let docs = app.db.read().await?.list(kind, &filters).await?;
+    Ok(Json(json!({ kind.plural(): docs })))
+}
+
+async fn create_record(
+    State(app): State<Shared>,
+    UrlPath((kind,)): UrlPath<(String,)>,
+    JsonBody(body): JsonBody,
+) -> Result<(StatusCode, Json<Value>)> {
+    let kind = kind_from_path(&kind)?;
+    let body = object_body(body, false)?;
+    let mut repo = app.db.write().await?;
+    let doc = repo.create(kind, body).await?;
+    repo.commit().await?;
+    Ok((StatusCode::CREATED, Json(doc)))
+}
+
+async fn read_record(State(app): State<Shared>, UrlPath((kind, id)): UrlPath<(String, String)>) -> Result<Json<Value>> {
+    let kind = kind_from_path(&kind)?;
+    Ok(Json(app.db.read().await?.get(kind, &id).await?))
+}
+
+async fn update_record(
+    State(app): State<Shared>,
+    UrlPath((kind, id)): UrlPath<(String, String)>,
+    JsonBody(body): JsonBody,
+) -> Result<Json<Value>> {
+    let kind = kind_from_path(&kind)?;
+    let body = object_body(body, true)?.expect("required");
+    let mut repo = app.db.write().await?;
+    let doc = repo.update(kind, &id, body).await?;
+    repo.commit().await?;
+    Ok(Json(doc))
+}
+
+async fn delete_record(
+    State(app): State<Shared>,
+    UrlPath((kind, id)): UrlPath<(String, String)>,
+) -> Result<Json<Value>> {
+    let kind = kind_from_path(&kind)?;
+    let mut repo = app.db.write().await?;
+    repo.delete(kind, &id).await?;
+    repo.commit().await?;
+    Ok(Json(json!({"deleted": id})))
 }
 
 // --------------------------------------------------------------------------- write guard

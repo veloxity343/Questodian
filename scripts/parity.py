@@ -16,6 +16,7 @@ import argparse
 import gzip
 import json
 import random
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -247,6 +248,158 @@ def check_ui(c: Checker) -> None:
             c.failures.append(f"GET {path}\n    python {ps} {str(pb)[:120]!r}\n    rust   {rs} {str(rb)[:120]!r}")
 
 
+# --------------------------------------------------------------------------- scenarios with records
+
+import re
+
+ID_RE = re.compile(r"^[0-9a-f]{12}$")
+TIME_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
+
+
+def anonymize(value, ids: dict):
+    """Replace record ids with ID1, ID2... (in order of appearance) and times with TS."""
+    if isinstance(value, dict):
+        return {k: anonymize(v, ids) for k, v in value.items()}
+    if isinstance(value, list):
+        return [anonymize(v, ids) for v in value]
+    if isinstance(value, str):
+        if ID_RE.match(value):
+            return ids.setdefault(value, f"ID{len(ids) + 1}")
+        if TIME_RE.match(value):
+            return "TS"
+        for raw, token in ids.items():
+            value = value.replace(raw, token)
+    return value
+
+
+class Session:
+    """Runs a scenario against one server, remembering what it created."""
+
+    def __init__(self, port: int):
+        self.port = port
+        self.log: list[tuple[str, int, object]] = []
+        self.ids: dict[str, str] = {}
+
+    def __call__(self, method: str, path: str, body=None, keep_body=True):
+        for name, real in self.ids.items():
+            path = path.replace("{" + name + "}", real)
+            if body is not None:
+                body = json.loads(json.dumps(body).replace("{" + name + "}", real))
+        status, out = call(self.port, method, path, body)
+        self.log.append((f"{method} {path}", status, out if keep_body and status != 422 else None))
+        return out
+
+    def keep(self, name: str, doc) -> None:
+        if isinstance(doc, dict) and "id" in doc:
+            self.ids[name] = doc["id"]
+
+
+def record_scenario(api: Session) -> None:
+    keep = api.keep
+    keep("camp", api("POST", "/api/campaigns", {"name": "Seven Bells", "edition": "2024", "players": [{"name": "Ann"}]}))
+    keep("old", api("POST", "/api/campaigns", {"name": "old school"}))
+    api("POST", "/api/campaigns", None)
+    api("POST", "/api/campaigns", [1, 2])
+    api("POST", "/api/campaigns", {"edition": "2015"})
+    api("POST", "/api/campaigns", {"players": "x"})
+    keep("pip", api("POST", "/api/characters", {"name": "Pip", "campaign_id": "{camp}", "xp": "300", "inspiration": "yes",
+                                               "abilities": {"str": "12"}, "skills": {"stealth": "expertise"}, "extra": 1}))
+    keep("bo", api("POST", "/api/characters", {"name": "bo", "classes": [{"name": "Wizard", "level": "3"}]}))
+    api("POST", "/api/characters", {"classes": []})
+    api("POST", "/api/characters", {"exhaustion": 7})
+    api("POST", "/api/characters", {"campaign_id": "missing"})
+    api("POST", "/api/characters", {"campaign_id": None, "name": None})
+    api("POST", "/api/characters", {"id": "my-own_id", "created": "2001-01-01T00:00:00+00:00"})
+    api("PUT", "/api/characters/{pip}", {"hp": {"current": 5}, "name": "Pip the Bold", "id": "ignored"})
+    api("PUT", "/api/characters/{pip}", [])
+    api("PUT", "/api/characters/{pip}", None)
+    api("PUT", "/api/characters/nope", {"name": "x"})
+    api("GET", "/api/characters/{pip}")
+    api("GET", "/api/characters/bad%20id!")
+    keep("s1", api("POST", "/api/sessions", {"campaign_id": "{camp}", "number": 2, "title": "Second"}))
+    keep("s2", api("POST", "/api/sessions", {"campaign_id": "{camp}", "number": "1", "status": "done"}))
+    api("POST", "/api/sessions", {"status": "later"})
+    keep("scene", api("POST", "/api/scenes", {"campaign_id": "{camp}", "session_id": "{s1}", "title": "b gate", "position": 1}))
+    api("POST", "/api/scenes", {"campaign_id": "{camp}", "session_id": "{s1}", "title": "A gate", "position": 1})
+    api("POST", "/api/npcs", {"campaign_id": "{camp}", "name": "Mara", "tags": "spy, ally ,"})
+    api("POST", "/api/npcs", {"campaign_id": "{camp}", "name": "aldo", "tags": ["x"]})
+    api("POST", "/api/monsters", {"name": "Bell-Ringer", "cr": "2", "abilities": {"str": 14}})
+    api("POST", "/api/notes", {"campaign_id": "{camp}", "kind": "quest", "pinned": 1, "title": "Find the bell"})
+    api("POST", "/api/notes", {"campaign_id": "{camp}", "kind": "pin", "done": "on"})
+    api("POST", "/api/notes", {"kind": "todo"})
+    keep("enc", api("POST", "/api/encounters", {"campaign_id": "{camp}", "session_id": "{s1}", "scene_id": "{scene}", "party_size": "5"}))
+    api("POST", "/api/encounters", {"party_level": 21})
+    api("POST", "/api/trackers", {"campaign_id": "{camp}", "name": "Tolls", "max": 7, "steps": [{"label": "one"}]})
+    api("POST", "/api/trackers", {"max": 0})
+    api("POST", "/api/handouts", {"campaign_id": "{camp}", "folder": "Maps", "title": "city"})
+    api("POST", "/api/handouts", {"campaign_id": "{camp}", "folder": "letters", "title": "Note"})
+    api("POST", "/api/handbook", {"title": "zeta rules", "tags": "a,b", "campaign_id": "{camp}"})
+    api("POST", "/api/handbook", {"title": "Alpha", "category": "Lore"})
+    for kind in ("campaigns", "sessions", "characters", "handbook", "scenes", "npcs", "monsters", "notes", "encounters", "trackers", "handouts"):
+        api("GET", f"/api/{kind}")
+        api("GET", f"/api/{kind}?campaign_id={{camp}}")
+    api("GET", "/api/scenes?session_id={s1}")
+    api("GET", "/api/notes?kind=quest")
+    api("GET", "/api/nothings")
+    api("DELETE", "/api/sessions/{s1}")
+    api("GET", "/api/scenes")
+    api("GET", "/api/encounters")
+    api("DELETE", "/api/campaigns/{camp}")
+    api("DELETE", "/api/campaigns/{camp}")
+    for kind in ("sessions", "characters", "handbook", "scenes", "npcs", "notes", "encounters", "trackers", "handouts"):
+        api("GET", f"/api/{kind}")
+
+
+def check_records(c: Checker) -> None:
+    py, rust = Session(PY_PORT), Session(RUST_PORT)
+    record_scenario(py)
+    record_scenario(rust)
+    py_ids: dict = {}
+    rust_ids: dict = {}
+    for (label, ps, pb), (_, rs, rb) in zip(py.log, rust.log):
+        c.count += 1
+        label = anonymize(label, py_ids)
+        if c.verbose:
+            print(f"  {ps} {rs}  {label}")
+        pb, rb = anonymize(pb, py_ids), anonymize(rb, rust_ids)
+        if ps != rs:
+            c.failures.append(f"{label}\n    status: python {ps}, rust {rs}\n    python: {str(pb)[:300]}\n    rust:   {str(rb)[:300]}")
+            continue
+        if ps >= 400:
+            continue  # error wording may differ; the status is what the UI acts on
+        diff = first_difference(strip(pb), strip(rb))
+        if diff:
+            c.failures.append(f"{label}\n    {diff}")
+
+
+KINDS = ("campaigns", "sessions", "characters", "handbook", "scenes", "npcs", "monsters", "notes", "encounters",
+         "trackers", "handouts")
+
+
+def check_python_reads_rust_database(c: Checker, data_dir: Path, rust_records: dict) -> None:
+    """The Python app opens the database the Rust server wrote and sees the same records."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from questodian.db import Database
+    from questodian.models import Base
+    from questodian.repo import Repo
+
+    c.count += 1
+    db = Database(data_dir)
+    with db.engine.connect() as conn:
+        diffs = compare_metadata(MigrationContext.configure(conn), Base.metadata)
+    if diffs:
+        c.failures.append(f"schema of the Rust database differs from the Python models: {diffs}")
+    with db.session() as s:
+        repo = Repo(s)
+        for kind in KINDS:
+            diff = first_difference(rust_records[kind], repo.list(kind), kind)
+            if diff:
+                c.failures.append(f"Python reading the Rust database: {diff}")
+    db.dispose()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -262,11 +415,29 @@ def main() -> int:
             rng = random.Random(args.seed)
             check_tools(checker, rng)
             check_srd(checker, rng)
+            check_records(checker)
             if (ROOT / "src/questodian/web/index.html").is_file():
                 check_ui(checker)
+            rust_records = {k: call(RUST_PORT, "GET", f"/api/{k}")[1][k] for k in KINDS}
         finally:
             py.terminate()
             rust.terminate()
+            rust.wait()
+        check_python_reads_rust_database(checker, Path(tmp) / "rust", rust_records)
+
+        # A database the Rust app upgraded from revision 0001.
+        upgraded = Path(tmp) / "upgraded"
+        upgraded.mkdir()
+        con = sqlite3.connect(upgraded / "questodian.db")
+        con.executescript((ROOT / "crates/core/tests/fixtures/v0001.sql").read_text())
+        con.close()
+        rust = start([str(RUST_BIN), "--data-dir", str(upgraded), "serve", "--port", str(RUST_PORT), "--no-browser"], RUST_PORT, ROOT)
+        try:
+            rust_records = {k: call(RUST_PORT, "GET", f"/api/{k}")[1][k] for k in KINDS}
+        finally:
+            rust.terminate()
+            rust.wait()
+        check_python_reads_rust_database(checker, upgraded, rust_records)
     for f in checker.failures:
         print(f"DIFF {f}")
     print(f"{checker.count} requests, {len(checker.failures)} differences")
