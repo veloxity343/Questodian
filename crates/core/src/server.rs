@@ -23,7 +23,7 @@ use crate::kinds::Kind;
 use crate::schemas::{
     self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
 };
-use crate::{dice, game, rules, srd};
+use crate::{dice, game, rules, srd, transfer};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -72,6 +72,10 @@ pub fn router(app: Shared) -> Router {
         .route("/characters/{id}/rest", post(rest))
         .route("/handouts/{id}/file", get(handout_file).put(upload_handout))
         .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
+        .route("/export", get(export_bundle))
+        .route("/export/{kind}/{id}", get(export_one))
+        .route("/import", post(import_data))
+        .route("/import/markdown", post(import_markdown))
         .route("/{kind}", get(list_records).post(create_record))
         .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
@@ -525,6 +529,109 @@ async fn update_handout(
     body: JsonBody,
 ) -> Result<Json<Value>> {
     update_record(state, UrlPath(("handouts".to_string(), id)), body).await
+}
+
+// --------------------------------------------------------------------------- import / export
+
+/// `My Campaign!` -> `my-campaign` (for file names).
+fn slug(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() { "export".into() } else { out }
+}
+
+/// `Content-Disposition` for a download, with the name percent-encoded as UTF-8.
+fn attachment(filename: &str) -> (header::HeaderName, String) {
+    let mut encoded = String::new();
+    for byte in filename.bytes() {
+        if byte.is_ascii_alphanumeric() || b"_.-~/".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    (header::CONTENT_DISPOSITION, format!("attachment; filename*=UTF-8''{encoded}"))
+}
+
+async fn export_bundle(State(app): State<Shared>, params: Params) -> Result<Response> {
+    let campaign_id = params.text("campaign_id");
+    let mut repo = app.db.read().await?;
+    let campaign = (!campaign_id.is_empty()).then_some(campaign_id.as_str());
+    let bundle = transfer::export_bundle(&mut repo, campaign).await?;
+    let name = match campaign {
+        Some(id) => repo.get(Kind::Campaigns, id).await?["name"].as_str().unwrap_or("").to_string(),
+        None => "questodian-backup".into(),
+    };
+    Ok(([attachment(&format!("{}.questodian.json", slug(&name)))], Json(bundle)).into_response())
+}
+
+async fn export_one(
+    State(app): State<Shared>,
+    UrlPath((kind, id)): UrlPath<(String, String)>,
+    params: Params,
+) -> Result<Response> {
+    let kind = Kind::from_plural(&kind).ok_or_else(|| not_found("unknown kind"))?;
+    let mut repo = app.db.read().await?;
+    let doc = repo.get(kind, &id).await?;
+    let title = slug(&crate::repo::title_of(&doc));
+    if params.get("format").unwrap_or("json") != "md" {
+        let envelope = transfer::export_one(&mut repo, kind, &id).await?;
+        return Ok(([attachment(&format!("{title}.{}.json", kind.singular()))], Json(envelope)).into_response());
+    }
+    let text = match kind {
+        Kind::Characters => {
+            let character: Character = serde_json::from_value(doc).expect("normalized records fit their schema");
+            let edition = game::edition_of(&mut repo, &character.campaign_id).await?;
+            transfer::character_markdown(&character, edition)
+        }
+        Kind::Sessions => {
+            let session: schemas::Session = serde_json::from_value(doc).expect("normalized records fit their schema");
+            let campaign = if session.campaign_id.is_empty() {
+                String::new()
+            } else {
+                repo.get(Kind::Campaigns, &session.campaign_id).await?["name"].as_str().unwrap_or("").to_string()
+            };
+            transfer::session_markdown(&session, &campaign)
+        }
+        Kind::Handbook => {
+            format!("# {}\n\n{}\n", doc["title"].as_str().unwrap_or(""), doc["body"].as_str().unwrap_or(""))
+        }
+        _ => return Err(invalid("Markdown export is available for characters, sessions and handbook entries")),
+    };
+    let headers =
+        [(header::CONTENT_TYPE, "text/markdown; charset=utf-8".to_string()), attachment(&format!("{title}.md"))];
+    Ok((headers, text).into_response())
+}
+
+async fn import_data(State(app): State<Shared>, params: Params, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let mode = transfer::Mode::parse(params.get("mode").unwrap_or("overwrite"))?;
+    let payload = body.ok_or_else(|| body_error("Field required"))?;
+    let mut repo = app.db.write().await?;
+    let summary = transfer::import_data(&mut repo, &payload, mode).await?;
+    repo.commit().await?;
+    Ok(Json(summary))
+}
+
+async fn import_markdown(
+    State(app): State<Shared>,
+    Valid(body): Valid<schemas::MarkdownImport>,
+) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let mut created = Vec::new();
+    for file in body.files {
+        let mut entry = transfer::markdown_to_handbook(&file.text, &file.filename);
+        entry["campaign_id"] = json!(body.campaign_id);
+        created.push(repo.create(Kind::Handbook, Some(entry)).await?);
+    }
+    repo.commit().await?;
+    Ok(Json(json!({"created": created})))
 }
 
 // --------------------------------------------------------------------------- write guard

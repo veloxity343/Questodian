@@ -407,6 +407,7 @@ def game_scenario(api: Session) -> None:
     act({"action": "roll_hp"}, keep_body=False)
     act({"action": "roll_initiative", "which": "monsters"}, keep_body=False)
     act({"action": "roll_initiative", "which": "unset"}, keep_body=False)
+    act({"action": "clear", "all": True}, keep_body=False)  # drop the randomly rolled wolf
 
     keep("sess", api("POST", "/api/sessions", {"campaign_id": "{c14}", "loot": [{"name": "Gem", "qty": 0, "value": "50 gp"}]}))
     api("POST", "/api/sessions/{sess}/award", {"xp": 300, "character_ids": ["{pc}", "{pc2}"]})
@@ -482,6 +483,120 @@ def handout_scenario(api: Session) -> None:
     api("PUT", "/api/projection", {"id": "{h}", "zoom": "1.5"})
 
 
+def download(api: Session, path: str):
+    """A download: its headers that matter and its body (JSON or text)."""
+    for name, real in api.ids.items():
+        path = path.replace("{" + name + "}", real)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{api.port}{path}", timeout=30) as res:
+            raw = res.read()
+            out = {"disposition": res.headers["Content-Disposition"], "type": res.headers["Content-Type"]}
+            status = res.status
+    except urllib.error.HTTPError as e:
+        api.log.append((f"GET {path} (download)", e.code, None))
+        return None
+    try:
+        out["body"] = json.loads(raw)
+    except ValueError:
+        out["body"] = raw.decode()
+    api.log.append((f"GET {path} (download)", status, out))
+    return out["body"]
+
+
+def transfer_scenario(api: Session) -> dict:
+    keep = api.keep
+    keep("tc", api("POST", "/api/campaigns", {"name": "Export Me! ünï", "edition": "2024"}))
+    keep("tch", api("POST", "/api/characters", {
+        "name": "Wren Ash", "campaign_id": "{tc}", "race": "Elf", "background": "Sage", "alignment": "Neutral Good",
+        "player": "Kim", "classes": [{"name": "Wizard", "subclass": "Evoker", "level": 5}, {"name": "Bard", "level": 1}],
+        "abilities": {"str": 8, "dex": 14, "con": 13, "int": 18, "wis": 12, "cha": 10}, "save_proficiencies": ["int", "wis"],
+        "skills": {"arcana": "expertise", "animal-handling": "proficient", "sleight-of-hand": "half"},
+        "jack_of_all_trades": True, "hp": {"max": 30, "current": 22, "temp": 4}, "exhaustion": 1,
+        "proficiencies": {"armor": "", "weapons": "Daggers", "tools": "", "languages": "Common, Elvish"},
+        "attacks": [{"name": "Dagger", "bonus": "+5", "damage": "1d4+2", "notes": "finesse"}],
+        "spellcasting": {"ability": "int", "slots": {"2": {"max": 3, "used": 1}, "1": {"max": 4, "used": 0}},
+                         "spells": [{"name": "Fire Bolt", "level": 0}, {"name": "Shield", "level": 1, "prepared": True},
+                                    {"name": "Misty Step", "level": 2}]},
+        "resources": [{"name": "Arcane Recovery", "current": 1, "max": 1, "reset": "long"}],
+        "features": [{"name": "Sculpt Spells", "source": "Evoker", "description": "Protect allies."}],
+        "inventory": [{"name": "Spellbook", "qty": 1, "equipped": True}, {"name": "Ink", "qty": 3}],
+        "currency": {"gp": 15, "sp": 3}, "personality": {"traits": "Curious", "flaws": "Arrogant"},
+        "appearance": "Tall", "backstory": "Raised in a library.", "notes": "Owes the guild."}))
+    api("PUT", "/api/campaigns/{tc}", {"players": [{"name": "Kim", "character_id": "{tch}"}]})
+    keep("ts", api("POST", "/api/sessions", {"campaign_id": "{tc}", "number": 3, "title": "The Vault", "date": "2026-11-01",
+                                            "recap": "They found it.", "prep": "Traps.", "attendance": ["{tch}"],
+                                            "loot": [{"name": "Wand", "qty": 1, "assigned_to": "Wren Ash"}, {"name": "Coins", "qty": 40}],
+                                            "xp_awarded": 450}))
+    api("POST", "/api/sessions/{ts}/log", {"text": "Door opened", "kind": "combat"})
+    keep("tm", api("POST", "/api/monsters", {"campaign_id": "{tc}", "name": "Vault Guard"}))
+    keep("tn", api("POST", "/api/npcs", {"campaign_id": "{tc}", "name": "Keeper", "stat_ref": "monster:{tm}"}))
+    keep("te", api("POST", "/api/encounters", {"campaign_id": "{tc}", "session_id": "{ts}", "combatants": [
+        {"name": "Wren", "kind": "pc", "character_id": "{tch}"}, {"name": "Guard", "monster_id": "{tm}"},
+        {"name": "Keeper", "kind": "npc", "npc_id": "{tn}"}]}))
+    keep("th", api("POST", "/api/handouts", {"campaign_id": "{tc}", "title": "Vault map"}))
+    upload(api, "/api/handouts/{th}/file", PNG, "image/png")
+    keep("tb", api("POST", "/api/handbook", {"title": "Vault Rules", "body": "No running.", "tags": "vault"}))
+
+    download(api, "/api/export/characters/{tch}?format=md")
+    download(api, "/api/export/sessions/{ts}?format=md")
+    download(api, "/api/export/handbook/{tb}?format=md")
+    download(api, "/api/export/npcs/{tn}?format=md")
+    download(api, "/api/export/characters/{tch}")
+    download(api, "/api/export/nothings/x")
+    download(api, "/api/export/characters/missing")
+    campaign = download(api, "/api/export?campaign_id={tc}")
+    full = download(api, "/api/export")
+
+    api("POST", "/api/import?mode=skip", full)
+    api("POST", "/api/import?mode=overwrite", campaign)
+    single = download(api, "/api/export/characters/{tch}")
+    api("POST", "/api/import?mode=copy", single)
+    api("POST", "/api/import?mode=copy", campaign)
+    api("POST", "/api/import?mode=sideways", campaign)
+    for bad in ([], {"format": "other"}, {"version": 99, "collections": {}}, {"version": "x"}, {"collections": []},
+                {"collections": {"characters": {}}}, {"kind": "dragon", "data": {}}, {"nothing": 1},
+                {"collections": {"handouts": [{"title": "Bad", "file_b64": "!!!"}]}},
+                {"collections": {"handbook": [{"title": "ok"}], "characters": [{"classes": "bad"}]}}):
+        api("POST", "/api/import", bad)
+    api("POST", "/api/import", None)
+    v1 = {"format": "questodian", "version": 1, "collections": {
+        "campaigns": [{"id": "v1camp", "name": "Old"}],
+        "sessions": [{"id": "v1sess", "campaign_id": "v1camp", "number": 4, "title": "Ambush",
+                      "encounter": {"round": 2, "turn": 1, "active": True, "combatants": [{"name": "Orc", "hp": 15}]}},
+                     {"id": "v1empty", "campaign_id": "v1camp", "encounter": {"combatants": []}}],
+        "characters": [{"id": "v1pc", "campaign_id": "gone", "name": "Lost link"}], "junk": [1]}}
+    api("POST", "/api/import", v1)
+    api("GET", "/api/encounters")
+    api("POST", "/api/import", {"kind": "handbook", "data": [{"title": "A"}, 5, {"title": "B"}]})
+    api("POST", "/api/import", {"kind": "notes", "data": {"title": "plural kind works"}})
+    api("POST", "/api/import/markdown", {"files": [{"filename": "house_rules.md", "text": "# Crits\r\n\nDouble dice."},
+                                                  {"filename": "lore.MARKDOWN", "text": "no heading"}], "campaign_id": "{tc}"})
+    api("POST", "/api/import/markdown", {"files": [{"text": "# x"}], "campaign_id": "missing"})
+    for kind in KINDS:
+        api("GET", f"/api/{kind}")
+    return full
+
+
+def cross_import(c: Checker, py_bundle, rust_bundle) -> None:
+    """Each server imports the other's full backup; the records must come out the same."""
+    for label, target_port, bundle in (("python bundle into rust", RUST_PORT, py_bundle),
+                                       ("rust bundle into python", PY_PORT, rust_bundle)):
+        c.count += 1
+        status, summary = call(target_port, "POST", "/api/import?mode=overwrite", bundle)
+        if status != 200:
+            c.failures.append(f"{label}: status {status}: {str(summary)[:300]}")
+            continue
+        for kind in KINDS:
+            by_id = {d["id"]: d for d in call(target_port, "GET", f"/api/{kind}")[1][kind]}
+            for doc in bundle["collections"][kind]:
+                doc = {k: v for k, v in doc.items() if k not in ("file_b64", "filename")}
+                got = {k: v for k, v in by_id.get(doc["id"], {}).items() if k != "filename"}
+                diff = first_difference(doc, got, f"{label} {kind}")
+                if diff:
+                    c.failures.append(diff)
+                    break
+
+
 def check_records(c: Checker) -> None:
     py, rust = Session(PY_PORT), Session(RUST_PORT)
     record_scenario(py)
@@ -490,6 +605,8 @@ def check_records(c: Checker) -> None:
     game_scenario(rust)
     handout_scenario(py)
     handout_scenario(rust)
+    py_bundle = transfer_scenario(py)
+    rust_bundle = transfer_scenario(rust)
     py_ids: dict = {}
     rust_ids: dict = {}
     for (label, ps, pb), (_, rs, rb) in zip(py.log, rust.log):
@@ -498,6 +615,11 @@ def check_records(c: Checker) -> None:
         if c.verbose:
             print(f"  {ps} {rs}  {label}")
         pb, rb = anonymize(pb, py_ids), anonymize(rb, rust_ids)
+        if label == "GET /api/sessions" and ps == 200:
+            # Sorted by campaign id first, and ids are random: compare as a set.
+            key = lambda d: json.dumps(d, sort_keys=True)
+            pb["sessions"].sort(key=key)
+            rb["sessions"].sort(key=key)
         if ps != rs:
             c.failures.append(f"{label}\n    status: python {ps}, rust {rs}\n    python: {str(pb)[:300]}\n    rust:   {str(rb)[:300]}")
             continue
@@ -506,6 +628,7 @@ def check_records(c: Checker) -> None:
         diff = first_difference(strip(pb), strip(rb))
         if diff:
             c.failures.append(f"{label}\n    {diff}")
+    cross_import(c, py_bundle, rust_bundle)
 
 
 KINDS = ("campaigns", "sessions", "characters", "handbook", "scenes", "npcs", "monsters", "notes", "encounters",

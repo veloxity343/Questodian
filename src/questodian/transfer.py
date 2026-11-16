@@ -215,8 +215,8 @@ def _signed(n: int) -> str:
     return f"+{n}" if n >= 0 else str(n)
 
 
-def character_markdown(c: dict) -> str:
-    d = rules.derive(c)
+def character_markdown(c: dict, edition: str = "2014") -> str:
+    d = rules.derive(c, edition)
     classes = " / ".join(
         f"{k['name']}{' (' + k['subclass'] + ')' if k.get('subclass') else ''} {k['level']}" for k in c["classes"]
     )

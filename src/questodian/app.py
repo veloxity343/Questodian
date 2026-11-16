@@ -153,7 +153,7 @@ def export_one(repo: RepoDep, kind: str, doc_id: str, format: str = "json") -> R
             transfer.export_one(repo, kind, doc_id), headers=_attachment(f"{title}.{SINGULAR[kind]}.json")
         )
     if kind == "characters":
-        text = transfer.character_markdown(doc)
+        text = transfer.character_markdown(doc, game.character_edition(repo, doc))
     elif kind == "sessions":
         cid = doc["campaign_id"]
         text = transfer.session_markdown(doc, repo.get("campaigns", cid)["name"] if cid else "")

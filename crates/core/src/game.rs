@@ -18,7 +18,7 @@ fn log(entries: &mut Vec<LogEntry>, text: impl Into<String>, kind: &str) {
 }
 
 /// The rules edition of a record's campaign (2014 without one).
-async fn edition_of(repo: &mut Repo<'_>, campaign_id: &str) -> Result<Edition> {
+pub async fn edition_of(repo: &mut Repo<'_>, campaign_id: &str) -> Result<Edition> {
     if campaign_id.is_empty() {
         return Ok(Edition::E2014);
     }
