@@ -181,11 +181,14 @@ fn upgrade_v1(collections: &mut HashMap<Kind, Vec<Value>>) {
     }
 }
 
+/// Validated records by kind, each with its embedded image (handouts only).
+type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
+
 /// Import a bundle or single-record export. Everything is checked before anything is
 /// written, and the caller's unit of work makes it all-or-nothing.
 pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Result<Value> {
     let collections = collections_from(payload)?;
-    let mut docs: HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>> = HashMap::new();
+    let mut docs: Checked = HashMap::new();
     for kind in Kind::ALL {
         let mut checked = Vec::new();
         for raw in collections.get(&kind).into_iter().flatten() {
@@ -275,7 +278,7 @@ fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
 }
 
 /// Give every record a new id and rewrite the references between them.
-fn remap_ids(docs: &mut HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>) {
+fn remap_ids(docs: &mut Checked) {
     let mut remap: HashMap<String, String> = HashMap::new();
     for kind in Kind::ALL {
         for (doc, _) in docs.get_mut(&kind).into_iter().flatten() {
