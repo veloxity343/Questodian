@@ -305,19 +305,24 @@ Decided while working through the milestones; each is easy to revisit.
 `scripts/parity.py`: 1254 requests, no differences. `ui-tester` ran the main flows
 through the real UI on the Rust server: all working.
 
+### Since the first push (same day)
+
+- Real app icon in every format (`src-tauri/icons/source.svg` → `tauri icon`).
+- `questodian.lock`: a database is never upgraded while another copy has it open.
+- Rules audit: lair XP (#11), grouped initiative (#12), tiefling size and the build
+  script (#16), warlock Pact Magic auto-fill (#3), all in both apps.
+- UI: sheet suggestions follow a relinked campaign; AC box fits three digits; phone
+  header layout. The Data page counts and phone scrolling issues didn't reproduce.
+- Dependabot for Rust, npm and Actions; the release workflow runs every CI check
+  first and smoke-tests the Linux build.
+
 ### Follow-ups
 
-- Run the Release workflow once; real icons (`npx tauri icon`); macOS signing and
-  notarisation; Windows SmartScreen.
-- Mobile (iOS/Android) builds.
-- Rules audit findings still open: lair XP (11), initiative ties and group rolls (12),
-  SRD data conversion errors (16). See `docs/rules-audit.md`.
-- Only one app should have a database open at a time: a running older app breaks
-  when the other upgrades the file, and edits from both are last-write-wins. Consider
-  a lock file.
+- Run the Release workflow once; macOS signing and notarisation; Windows SmartScreen.
+- Mobile (iOS/Android) builds (needs the Android SDK/NDK and Xcode).
+- Rules audit still open: monster XP values that match upstream but may not match
+  the official SRD (#16; needs the SRD PDF to check); 2024 Surprise.
 - Python's 0002 migration isn't atomic: if it fails halfway, both apps refuse the
-  file until it's repaired by hand.
-- UI quirks found while testing (not from the port): sheet suggestions don't switch
-  edition until reload after linking a campaign; the Data page counts don't refresh
-  after an import; the character sheet scrolls sideways at phone width; the AC box
-  in encounter rows is cut off at 1280px.
+  file until it's repaired by hand. Moot once Python is retired.
+- Retire the Python app after the first Rust release (see the plan in the chat log:
+  move the SRD data and UI build output out of `src/questodian`, then delete it).
