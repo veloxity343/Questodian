@@ -18,6 +18,7 @@ use crate::kinds::{Column, ColumnKind, Kind};
 use crate::repo::{Repo, new_id, now};
 
 pub const DB_FILENAME: &str = "questodian.db";
+const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
 pub const HEAD: &str = "0002";
@@ -61,15 +62,30 @@ pub struct Database {
     /// The copy saved before an upgrade, if this open upgraded the schema.
     pub backup: Option<PathBuf>,
     columns: HashMap<Kind, Vec<Column>>,
+    /// Held (shared) while the database is open; see [`Database::open`].
+    _lock: std::fs::File,
 }
 
 impl Database {
     /// Open (or create) `questodian.db` in `data_dir`, upgrading it if it's older.
+    ///
+    /// Every open copy of the app shares a lock on `questodian.lock` in the data folder.
+    /// Changing the schema needs it exclusively, so a database is never upgraded under
+    /// another running copy (which would then break).
     pub async fn open(data_dir: impl AsRef<Path>) -> Result<Database> {
         let data_dir = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir)?;
         let path = data_dir.join(DB_FILENAME);
-        let backup = upgrade(&path).await?;
+        let lock =
+            std::fs::File::options().create(true).truncate(false).write(true).open(data_dir.join(LOCK_FILENAME))?;
+        let alone = lock.try_lock().is_ok();
+        let backup = upgrade(&path, alone).await;
+        if alone {
+            // Done changing things: share the folder with other copies from now on.
+            lock.unlock()?;
+        }
+        lock.lock_shared()?;
+        let backup = backup?;
 
         let options = SqliteConnectOptions::new()
             .filename(&path)
@@ -78,7 +94,7 @@ impl Database {
             .busy_timeout(Duration::from_secs(10));
         let pool = SqlitePoolOptions::new().max_connections(4).connect_with(options).await?;
         let columns = read_columns(&pool).await?;
-        Ok(Database { pool, data_dir, path, backup, columns })
+        Ok(Database { pool, data_dir, path, backup, columns, _lock: lock })
     }
 
     /// A unit of work that may write: nothing is saved unless [`Repo::commit`] is called.
@@ -160,7 +176,8 @@ fn refused(path: &Path, why: &str) -> Error {
 }
 
 /// Bring the file at `path` up to [`HEAD`]. Returns the backup made first, if any.
-async fn upgrade(path: &Path) -> Result<Option<PathBuf>> {
+/// `alone` says no other copy of the app has the folder open, so the schema may change.
+async fn upgrade(path: &Path, alone: bool) -> Result<Option<PathBuf>> {
     // Foreign keys stay off while tables change, so nothing cascades; the pragma only
     // takes effect outside a transaction.
     let options = SqliteConnectOptions::new()
@@ -169,13 +186,21 @@ async fn upgrade(path: &Path) -> Result<Option<PathBuf>> {
         .foreign_keys(false)
         .busy_timeout(Duration::from_secs(10));
     let mut conn = SqliteConnection::connect_with(&options).await?;
-    let result = upgrade_with(&mut conn, path).await;
+    let result = upgrade_with(&mut conn, path, alone).await;
     conn.close().await?;
     result
 }
 
-async fn upgrade_with(conn: &mut SqliteConnection, path: &Path) -> Result<Option<PathBuf>> {
+async fn upgrade_with(conn: &mut SqliteConnection, path: &Path, alone: bool) -> Result<Option<PathBuf>> {
     let state = read_state(conn, path).await?;
+    let current = matches!(&state, State::At(version) if version == HEAD);
+    if !alone && !current && state != State::Empty {
+        return Err(refused(
+            path,
+            "it needs upgrading to this version of Questodian, but another copy of Questodian has it open. \
+             Close the other copy and try again",
+        ));
+    }
     match &state {
         State::Empty => {
             run_locked(conn, path, &state, |tx| Box::pin(async move { create_schema(tx).await })).await?;

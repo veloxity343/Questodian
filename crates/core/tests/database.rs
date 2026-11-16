@@ -150,7 +150,12 @@ async fn newer_database_is_refused_untouched() {
     let error = Database::open(dir.path()).await.err().expect("refused");
     assert!(error.to_string().contains("newer version"), "{error}");
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no backup or other files");
+    let others: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != DB_FILENAME && name != "questodian.lock")
+        .collect();
+    assert_eq!(others, Vec::<String>::new(), "no backup or other files");
 }
 
 #[tokio::test]
@@ -260,4 +265,29 @@ async fn nan_from_python_and_one_bad_record_dont_hide_the_rest() {
     assert_eq!(records["trackers"], json!([]), "the unreadable tracker is left out");
     assert_eq!(records["handbook"].as_array().unwrap().len(), 1);
     db.close().await;
+}
+
+#[tokio::test]
+async fn no_upgrade_while_another_copy_has_the_database_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let sql = std::fs::read_to_string(format!("{FIXTURES}/v0001.sql")).unwrap();
+    db::load_sql(&dir.path().join(DB_FILENAME), &sql).await.unwrap();
+    // Another copy holds the folder open.
+    let other = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.path().join("questodian.lock"))
+        .unwrap();
+    other.lock_shared().unwrap();
+    let error = Database::open(dir.path()).await.err().expect("refused").to_string();
+    assert!(error.contains("another copy of Questodian has it open"), "{error}");
+    drop(other);
+    let db = Database::open(dir.path()).await.unwrap();
+    assert!(db.backup.is_some());
+    // Up to date: a second copy can open it alongside.
+    let second = Database::open(dir.path()).await.unwrap();
+    assert!(second.backup.is_none());
+    db.close().await;
+    second.close().await;
 }
