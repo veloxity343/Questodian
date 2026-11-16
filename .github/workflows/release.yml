@@ -65,7 +65,10 @@ jobs:
         run: |
           sudo apt-get install -y xvfb
           mkdir -p "$RUNNER_TEMP/smoke-data"
+          # There's no GPU in the virtual display: have WebKitGTK render in software, or it
+          # stalls before loading the page.
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
           QUESTODIAN_DATA="$RUNNER_TEMP/smoke-data" QUESTODIAN_LOG=1 \
-            timeout 30 xvfb-run -a target/release/questodian-app > smoke.log 2>&1 || true
+            timeout 60 xvfb-run -a target/release/questodian-app > smoke.log 2>&1 || true
           cat smoke.log
           grep -q "GET /api/meta -> 200" smoke.log
