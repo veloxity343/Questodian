@@ -57,7 +57,7 @@ Three columns, built for running a session:
   - **NPCs:** looks, voice, wants, secret, what they know, and a linked stat block.
   - **Encounters:** party size × level with the 2024 difficulty (low / moderate / high), initiative,
     a "now" banner, HP pills (damage, heal, temp), conditions, hidden combatants, Roll HP.
-  - **Sessions:** their scenes in order, trackers (clocks like "tolls of the bell"), encounters, prep,
+  - **Sessions:** their scenes in order, trackers (clocks like "hours until the ritual"), encounters, prep,
     recap, a timestamped log, loot that goes straight into inventories, and XP.
   - **Handouts:** images with zoom and pan; **Show to players** opens a second window (or any browser on
     your network at `/project`) that follows what you show.
@@ -66,7 +66,7 @@ Three columns, built for running a session:
   and more, plus your homebrew), a **View** tab for whatever you clicked, quick notes, and a dice tray
   with history. Attacks and damage in any stat block or note roll when clicked: `+6`, `2d8+3`.
 
-Type `[[Ada Brae]]` in any notes to link to a record (or `[[spell:Fireball]]`, `[[monster:Zombie]]` for
+Type `[[Captain Vane]]` in any notes to link to a record (or `[[spell:Fireball]]`, `[[monster:Zombie]]` for
 the rules); typing `[[` suggests names. **Ctrl K** searches everything: records, the rules, and quick actions.
 
 ## Everything else

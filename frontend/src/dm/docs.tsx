@@ -49,7 +49,7 @@ export function SceneDoc({ initial }: { initial: Scene }) {
       <Section label="Read aloud" variant="read-aloud" value={doc.read_aloud} editing={editing} onChange={set("read_aloud")} rows={5}
         placeholder="Boxed text to read to the players." />
       <Section label="DM notes" value={doc.body} editing={editing} onChange={set("body")} rows={18} rollContext={doc.title}
-        placeholder="Checks (DC 12 Wisdom), NPCs ([[Ada Brae]]), monsters, secrets, tables… Markdown." />
+        placeholder="Checks (DC 12 Wisdom), NPCs ([[Captain Vane]]), monsters, secrets, tables… Markdown." />
       {!editing && !doc.summary && !doc.read_aloud && !doc.body && (
         <p className="muted">Nothing here yet. Press <strong>Edit</strong> to write this scene.</p>
       )}

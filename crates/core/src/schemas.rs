@@ -630,7 +630,7 @@ schema! {
 }
 
 schema! {
-    /// A clock or counter, e.g. "Tolls 3 of 7" with a label for each step.
+    /// A clock or counter, e.g. "Alarm 3 of 7" with a label for each step.
     pub struct Tracker {
         id: String = String::new(),
         created: String = String::new(),

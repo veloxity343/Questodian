@@ -105,7 +105,7 @@ export function SessionDoc({ initial }: { initial: Session }) {
               <button type="button" className="link small" onClick={() => dm.open({ kind: "trackers", id: t.id })}>Edit steps</button>
             </div>
           ))}
-          {!trackers.length && <p className="muted small">Clocks and counters for this session, e.g. tolls of a bell or rounds until the ritual finishes.</p>}
+          {!trackers.length && <p className="muted small">Clocks and counters for this session, e.g. hours until dawn or rounds until the ritual finishes.</p>}
         </div>
       </section>
 

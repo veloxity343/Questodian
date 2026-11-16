@@ -4,7 +4,7 @@
    "id": "camp1",
    "created": "2026-11-16T06:51:06+00:00",
    "updated": "2026-11-16T06:51:06+00:00",
-   "name": "Seven Bells",
+   "name": "Test Campaign",
    "system": "5e (SRD 5.1)",
    "edition": "2024",
    "description": "",
@@ -29,7 +29,7 @@
    "log": [],
    "loot": [
     {
-     "name": "Bell",
+     "name": "Gem",
      "qty": 2,
      "value": "",
      "assigned_to": ""
@@ -133,7 +133,7 @@
    "title": "Lore",
    "category": "House Rules",
    "tags": [
-    "bells",
+    "lore",
     "town"
    ],
    "campaign_id": "",
@@ -184,7 +184,7 @@
    "created": "2026-11-16T06:51:06+00:00",
    "updated": "2026-11-16T06:51:06+00:00",
    "campaign_id": "",
-   "name": "Bell-Ringer",
+   "name": "Gate Guard",
    "kind": "Medium humanoid, neutral",
    "cr": "2",
    "xp": 450,
@@ -263,7 +263,7 @@
    "updated": "2026-11-16T06:51:06+00:00",
    "campaign_id": "camp1",
    "session_id": "",
-   "name": "Tolls",
+   "name": "Alarm",
    "value": 3,
    "max": 7,
    "steps": [],
