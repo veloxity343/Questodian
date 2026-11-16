@@ -288,3 +288,36 @@ Decided while working through the milestones; each is easy to revisit.
 - No `/docs` or `/openapi.json` (FastAPI's generated API docs).
 - Error *messages* for invalid input are worded differently; status codes match.
 - `min()`/`max()` with one argument return it (Python crashed).
+
+## 11. Status (2026-11-16)
+
+| Milestone | Status |
+|---|---|
+| M0 desktop shell | Done. Loads the UI and API through `questodian://` (checked under WSLg); release `.deb` builds (8.8 MB, depends on `libwebkit2gtk-4.1-0, libgtk-3-0`). Icons are placeholders. |
+| M1 no-database endpoints | Done; matches Python. |
+| M2 database and records | Done; reviewed by `data-guardian` and its fixes applied. |
+| M3 game logic | Done; matches Python. |
+| M4 handouts and players' window | Done. The desktop players' window opens via `POST /desktop/players`; not yet clicked through in the desktop app itself. |
+| M5 import/export | Done; byte-identical Markdown, and each backend imports the other's backups. |
+| M6 CLI | Done: `serve`, `roll`, `calc`, `srd`, `export`, `import`. |
+| M7 release | Workflows written (`ci.yml` Rust job with parity, `release.yml` with tauri-action); not yet run on GitHub. Python not retired. |
+
+`scripts/parity.py`: 1254 requests, no differences. `ui-tester` ran the main flows
+through the real UI on the Rust server: all working.
+
+### Follow-ups
+
+- Run the Release workflow once; real icons (`npx tauri icon`); macOS signing and
+  notarisation; Windows SmartScreen.
+- Mobile (iOS/Android) builds.
+- Rules audit findings still open: lair XP (11), initiative ties and group rolls (12),
+  SRD data conversion errors (16). See `docs/rules-audit.md`.
+- Only one app should have a database open at a time: a running older app breaks
+  when the other upgrades the file, and edits from both are last-write-wins. Consider
+  a lock file.
+- Python's 0002 migration isn't atomic: if it fails halfway, both apps refuse the
+  file until it's repaired by hand.
+- UI quirks found while testing (not from the port): sheet suggestions don't switch
+  edition until reload after linking a campaign; the Data page counts don't refresh
+  after an import; the character sheet scrolls sideways at phone width; the AC box
+  in encounter rows is cut off at 1280px.

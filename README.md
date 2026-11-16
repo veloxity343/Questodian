@@ -126,6 +126,23 @@ uv build                                # dist/questodian-*.whl and .tar.gz
 workflow builds Windows and macOS on GitHub: run it from the Actions tab, or push a version tag
 (`git tag v0.2.0 && git push origin v0.2.0`) to also publish a Release with both zips.
 
+### The Rust backend and desktop app
+
+The backend is being ported to Rust, with a Tauri 2 desktop app; see
+[docs/rust-port.md](docs/rust-port.md). It opens the same databases and serves the
+same API, and `scripts/parity.py` checks the two servers give the same answers.
+
+```sh
+make rust-test     # format check, lint and tests
+make rust-serve    # the app on the Rust backend (http://localhost:8765)
+make parity        # compare the Rust and Python servers request by request
+make tauri-dev     # the desktop app (Linux needs the WebKitGTK packages Tauri lists)
+make tauri-build   # installers for this OS into target/release/bundle/
+```
+
+Release builds for Windows, macOS and Linux come from the `Release` workflow, which
+runs when a `v*` tag is pushed and attaches the installers to a draft GitHub release.
+
 ### Continuous integration
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on

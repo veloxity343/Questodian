@@ -4,8 +4,8 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 
 ## Stack
 
-- **Now:** React + TypeScript UI (`frontend/`, Vite), Python backend (`src/questodian/`: FastAPI, SQLAlchemy on SQLite, Alembic migrations), desktop build with pywebview + PyInstaller (`packaging/`).
-- **Planned:** Tauri 2 with the backend rewritten in Rust (axum, SeaORM on SQLite, same schema so existing databases open unchanged). The React UI stays. Keep an optional built-in web server (for the players' handout screen and browser use). Desktop first, then mobile (iOS/Android) via Tauri. The Python version keeps working until the Rust one reaches parity.
+- **Python (current release):** React + TypeScript UI (`frontend/`, Vite), Python backend (`src/questodian/`: FastAPI, SQLAlchemy on SQLite, Alembic migrations), desktop build with pywebview + PyInstaller (`packaging/`).
+- **Rust (port, at parity on the API):** a Cargo workspace with `crates/core` (dice, rules, SRD, schemas, sqlx repo, migrations, game logic, import/export and the axum router), `crates/cli` (the `questodian` command) and `src-tauri` (Tauri 2 desktop app serving the router through its `questodian://` scheme). Same schema and `alembic_version`, so existing databases open unchanged. Plan, decisions and status: `docs/rust-port.md`. `scripts/parity.py` must report no differences before Rust changes are committed. Next: mobile (iOS/Android) via Tauri, then retire the Python version.
 
 ## Commands
 
@@ -13,7 +13,8 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 
 - `make install`: Python and frontend dependencies.
 - `make dev`: API and UI dev servers with hot reload.
-- `make check`: backend tests and frontend typecheck. Run this before committing.
+- `make check`: Python tests, frontend typecheck and Rust tests. Run this before committing.
+- `make parity`: compare the Rust and Python servers. `make tauri-dev` opens the Rust desktop app.
 - `make run` builds the UI and serves the app; `make app` opens it in a window.
 - `make migration m="..."` after changing models.
 - `make package` builds the wheel; `make desktop` builds the desktop app.
@@ -36,7 +37,7 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 ### Project conventions
 
 - The app is called Questodian, and has always been. Don't add notes or compatibility code for any earlier name.
-- Schema changes always come with a migration and a test that upgrades a database containing real data.
+- Schema changes always come with a migration and a test that upgrades a database containing real data. While both backends exist, write the migration in Alembic first, then add the same upgrade to `crates/core/src/db.rs` (bump `HEAD`) and regenerate the fixtures with `scripts/make_fixtures.py`.
 - Match the surrounding code's style and comment density. Keep user-facing text plain and specific.
 
 ## Agents (`.claude/agents/`)
