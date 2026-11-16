@@ -121,7 +121,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
 
       {enc.combatants.length ? (
         <ol className="initiative">
-          {enc.combatants.map((c, i) => <CombatantRow key={c.id} c={c} isTurn={enc.active && i === enc.turn} act={act} />)}
+          {enc.combatants.map((c, i) => <CombatantRow key={c.id} c={c} isTurn={enc.active && i === enc.turn} started={enc.active} act={act} />)}
         </ol>
       ) : (
         <div className="empty">
@@ -147,7 +147,12 @@ function KindBadge({ c }: { c: Combatant }) {
   return <span className={`kind-badge k-${c.kind}`}>{label}</span>;
 }
 
-function CombatantRow({ c, isTurn, act }: { c: Combatant; isTurn: boolean; act: (a: EncounterAction) => Promise<void> }) {
+const SURPRISE_HELP = {
+  "2024": "Surprised: Disadvantage on its Initiative roll",
+  "2014": "Surprised: can't move or take an action on its first turn, or take a reaction until that turn ends",
+};
+
+function CombatantRow({ c, isTurn, started, act }: { c: Combatant; isTurn: boolean; started: boolean; act: (a: EncounterAction) => Promise<void> }) {
   const dm = useDM();
   const [hpOpen, setHpOpen] = useState(false);
   const update = (changes: Partial<Combatant>) => act({ action: "update", id: c.id, changes });
@@ -164,6 +169,11 @@ function CombatantRow({ c, isTurn, act }: { c: Combatant; isTurn: boolean; act: 
       <div className="who">
         <button type="button" className="name" onClick={showSheet}>{c.name}</button> <KindBadge c={c} />
         {c.init_bonus !== 0 && <span className="muted small"> {signed(c.init_bonus)}</span>}
+        {!started ? (
+          <label className="check small" title={SURPRISE_HELP[dm.edition]}>
+            <Checkbox checked={c.surprised} onChange={(v) => update({ surprised: v })} /> surprised
+          </label>
+        ) : c.surprised && <span className="muted small" title={SURPRISE_HELP[dm.edition]}> surprised</span>}
         {c.xp_in_lair > 0 && (
           <label className="check small lair" title={`${c.xp.toLocaleString()} XP, or ${c.xp_in_lair.toLocaleString()} XP fought in its lair`}>
             <Checkbox checked={c.in_lair} onChange={(v) => update({ in_lair: v })} /> in lair

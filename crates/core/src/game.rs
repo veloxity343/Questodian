@@ -28,6 +28,15 @@ pub async fn edition_of(repo: &mut Repo<'_>, campaign_id: &str) -> Result<Editio
 
 // --------------------------------------------------------------------------- encounter helpers
 
+const SURPRISE_2014: &str = "can't move or take an action on its first turn, or take a reaction until that turn ends";
+
+/// The Initiative roll. In 2024 a surprised combatant has Disadvantage on it
+/// (rules/playing-the-game-combat); in 2014 surprise costs the first turn instead.
+pub fn initiative_roll(init_bonus: i64, surprised: bool, edition: Edition) -> String {
+    let die = if surprised && edition == Edition::E2024 { "2d20kl1" } else { "d20" };
+    format!("{die}{init_bonus:+}")
+}
+
 /// Highest initiative first; ties go to the higher bonus, then by name. The SRD leaves
 /// ties to the GM; this is just the starting order.
 pub fn sort_initiative(combatants: &mut [Combatant]) {
@@ -259,7 +268,8 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
             // With `group`, identical monsters (same SRD entry or stat block) share one roll. SRD 5.1:
             // "The GM makes one roll for an entire group of identical creatures"; SRD 5.2.1: "For a
             // group of identical creatures, the GM makes a single roll".
-            let mut group_rolls: std::collections::HashMap<(String, String, i64), i64> = Default::default();
+            let mut group_rolls: std::collections::HashMap<(String, String, i64, bool), i64> = Default::default();
+            let edition = edition_of(repo, &enc.campaign_id).await?;
             for c in &mut enc.combatants {
                 let skip = match body.which {
                     Which::Monsters => c.kind == CombatantKind::Pc,
@@ -271,12 +281,12 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
                 }
                 let identical =
                     body.group && c.kind == CombatantKind::Monster && !(c.srd_id.is_empty() && c.monster_id.is_empty());
-                let key = identical.then(|| (c.srd_id.clone(), c.monster_id.clone(), c.init_bonus));
+                let key = identical.then(|| (c.srd_id.clone(), c.monster_id.clone(), c.init_bonus, c.surprised));
                 if let Some(roll) = key.as_ref().and_then(|k| group_rolls.get(k)) {
                     c.initiative = *roll;
                     continue;
                 }
-                c.initiative = dice::roll(&format!("d20{:+}", c.init_bonus))?.total_f64() as i64;
+                c.initiative = dice::roll(&initiative_roll(c.init_bonus, c.surprised, edition))?.total_f64() as i64;
                 if let Some(key) = key {
                     group_rolls.insert(key, c.initiative);
                 }
@@ -307,6 +317,13 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
             advance_turn(&mut enc, 1);
             if !was_active && enc.active {
                 log(&mut enc.log, "Combat begins — round 1", "combat");
+                if edition_of(repo, &enc.campaign_id).await? != Edition::E2024 {
+                    let surprised: Vec<String> =
+                        enc.combatants.iter().filter(|c| c.surprised).map(|c| c.name.clone()).collect();
+                    for name in surprised {
+                        log(&mut enc.log, format!("{name} is surprised: {SURPRISE_2014}"), "combat");
+                    }
+                }
             } else if enc.round != round_before {
                 let text = format!("Round {} begins", enc.round);
                 log(&mut enc.log, text, "combat");
@@ -318,8 +335,9 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
                 let text = format!("Combat ends after {} round(s)", enc.round);
                 log(&mut enc.log, text, "combat");
             }
-            for c in &enc.combatants {
+            for c in &mut enc.combatants {
                 sync_pc(repo, c, 0, false).await?;
+                c.surprised = false;
             }
             (enc.active, enc.round, enc.turn) = (false, 0, 0);
         }
@@ -510,4 +528,16 @@ pub async fn rest(repo: &mut Repo<'_>, character_id: &str, kind: RestKind) -> Re
         }
     }
     repo.save_as(Kind::Characters, &ch).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surprise_gives_disadvantage_on_initiative_in_2024_only() {
+        assert_eq!(initiative_roll(2, true, Edition::E2024), "2d20kl1+2");
+        assert_eq!(initiative_roll(-1, true, Edition::E2014), "d20-1");
+        assert_eq!(initiative_roll(0, false, Edition::E2024), "d20+0");
+    }
 }

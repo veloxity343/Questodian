@@ -83,6 +83,7 @@ class Combatant(Doc):
     xp: int = 0
     xp_in_lair: int = 0  # legendary monsters are worth more fought in their lair (0: no lair value)
     in_lair: bool = False
+    surprised: bool = False  # caught unawares when combat starts (cleared when it ends)
     hidden: bool = False
 
 

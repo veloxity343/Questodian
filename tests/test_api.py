@@ -310,3 +310,20 @@ def test_grouped_initiative_gives_identical_monsters_one_roll(api):
 def test_warlock_slots_come_from_the_srd_table(api):
     assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 5}]})[1]["slots"] == [0, 0, 2]
     assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 1}], "edition": "2024"})[1]["slots"] == [1]
+
+
+def test_surprise_by_edition(api, monkeypatch):
+    from questodian import game
+    rolled = []
+    real_roll = game.dice.roll
+    monkeypatch.setattr(game.dice, "roll", lambda expr: rolled.append(expr) or real_roll(expr))
+    for edition, expected in (("2024", "2d20kl1+0"), ("2014", "d20+0")):
+        _, camp = api("POST", "/api/campaigns", {"edition": edition})
+        _, enc = api("POST", "/api/encounters", {"campaign_id": camp["id"], "combatants": [{"name": "Guard", "surprised": True}]})
+        rolled.clear()
+        api("POST", f"/api/encounters/{enc['id']}/action", {"action": "roll_initiative"})
+        assert rolled == [expected]
+        _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "next"})
+        assert any("is surprised" in e["text"] for e in enc["log"]) == (edition == "2014")
+        _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "end"})
+        assert enc["combatants"][0]["surprised"] is False

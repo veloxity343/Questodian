@@ -417,6 +417,13 @@ def game_scenario(api: Session) -> None:
     api.log.append(("grouped initiative: one roll per kind of monster", 200, all(len(v) == 1 for v in by_kind.values())))
     act({"action": "clear", "all": True}, keep_body=False)  # drop the randomly rolled monsters
 
+    keep("enc14", api("POST", "/api/encounters", {"campaign_id": "{c14}", "combatants": [{"name": "Guard", "surprised": True}, {"name": "Scout"}]}))
+    api("POST", "/api/encounters/{enc14}/action", {"action": "next"})
+    api("POST", "/api/encounters/{enc14}/action", {"action": "end"})
+    api("POST", "/api/encounters/{enc}/action", {"action": "add", "combatant": {"name": "Sentry", "surprised": True}})
+    api("POST", "/api/encounters/{enc}/action", {"action": "roll_initiative"}, keep_body=False)
+    api("POST", "/api/encounters/{enc}/action", {"action": "clear", "all": True}, keep_body=False)
+
     keep("sess", api("POST", "/api/sessions", {"campaign_id": "{c14}", "loot": [{"name": "Gem", "qty": 0, "value": "50 gp"}]}))
     api("POST", "/api/sessions/{sess}/award", {"xp": 300, "character_ids": ["{pc}", "{pc2}"]})
     api("POST", "/api/sessions/{sess}/award", {"xp": -1000, "character_ids": ["{pc2}"]})

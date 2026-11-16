@@ -279,6 +279,8 @@ schema! {
         /// Legendary monsters are worth more fought in their lair (0: no lair value).
         xp_in_lair: i64 = 0,
         in_lair: bool = false,
+        /// Caught unawares when combat starts (cleared when it ends).
+        surprised: bool = false,
         hidden: bool = false,
     }
 }

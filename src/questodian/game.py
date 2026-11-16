@@ -17,6 +17,16 @@ def _log(doc: dict, text: str, kind: str) -> None:
 # --------------------------------------------------------------------------- encounter helpers
 
 
+SURPRISE_2014 = "can't move or take an action on its first turn, or take a reaction until that turn ends"
+
+
+def initiative_roll(init_bonus: int, surprised: bool, edition: str) -> str:
+    """The Initiative roll. In 2024 a surprised combatant has Disadvantage on it
+    (rules/playing-the-game-combat); in 2014 surprise costs the first turn instead."""
+    die = "2d20kl1" if surprised and edition == "2024" else "d20"
+    return f"{die}{init_bonus:+d}"
+
+
 def sort_initiative(encounter: dict) -> None:
     """Order combatants by initiative, breaking ties on initiative bonus, then name.
 
@@ -230,16 +240,17 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
         # "The GM makes one roll for an entire group of identical creatures"; SRD 5.2.1: "For a
         # group of identical creatures, the GM makes a single roll".
         group_rolls: dict[tuple, int] = {}
+        edition = _edition(repo, enc)
         for c in combatants:
             if body.which == "monsters" and c["kind"] == "pc":
                 continue
             if body.which == "unset" and c["initiative"]:
                 continue
-            key = (c["srd_id"], c["monster_id"], c["init_bonus"]) if body.group and c["kind"] == "monster" and (c["srd_id"] or c["monster_id"]) else None
+            key = (c["srd_id"], c["monster_id"], c["init_bonus"], c["surprised"]) if body.group and c["kind"] == "monster" and (c["srd_id"] or c["monster_id"]) else None
             if key is not None and key in group_rolls:
                 c["initiative"] = group_rolls[key]
                 continue
-            c["initiative"] = int(dice.roll(f"d20{c['init_bonus']:+d}").total)
+            c["initiative"] = int(dice.roll(initiative_roll(c["init_bonus"], c["surprised"], edition)).total)
             if key is not None:
                 group_rolls[key] = c["initiative"]
         sort_initiative(enc)
@@ -262,6 +273,10 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
         advance_turn(enc, 1)
         if not was_active and enc["active"]:
             _log(enc, "Combat begins — round 1", "combat")
+            if _edition(repo, enc) != "2024":
+                for c in enc["combatants"]:
+                    if c["surprised"]:
+                        _log(enc, f"{c['name']} is surprised: {SURPRISE_2014}", "combat")
         elif enc["round"] != prev_round:
             _log(enc, f"Round {enc['round']} begins", "combat")
     elif action == "prev":
@@ -271,6 +286,7 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             _log(enc, f"Combat ends after {enc['round']} round(s)", "combat")
         for c in combatants:
             _sync_pc(repo, c)
+            c["surprised"] = False
         enc.update(active=False, round=0, turn=0)
     elif action == "clear":
         kept = [] if body.all else [c for c in combatants if c["kind"] == "pc"]

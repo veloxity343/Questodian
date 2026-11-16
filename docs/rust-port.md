@@ -321,7 +321,8 @@ through the real UI on the Rust server: all working.
 - Run the Release workflow once; macOS signing and notarisation; Windows SmartScreen.
 - Mobile (iOS/Android) builds (needs the Android SDK/NDK and Xcode).
 - Rules audit still open: monster XP values that match upstream but may not match
-  the official SRD (#16; needs the SRD PDF to check); 2024 Surprise.
+  the official SRD (#16; needs the SRD PDF to check); 2024 Invisible/Incapacitated
+  effects on Initiative rolls aren't automated.
 - Python's 0002 migration isn't atomic: if it fails halfway, both apps refuse the
   file until it's repaired by hand. Moot once Python is retired.
 - Retire the Python app after the first Rust release has been tried on Windows and
