@@ -114,8 +114,12 @@ export function CharacterList() {
 
 export function CharacterSheet() {
   const { id = "" } = useParams();
-  const { edition } = useApp();
-  const { data, error } = useLoad(() => Promise.all([api.get("characters", id), api.list("campaigns"), srdLists(edition)]), [id, edition]);
+  // Suggestions (classes, races, backgrounds) follow the character's own campaign edition.
+  const { data, error } = useLoad(async () => {
+    const [ch, campaigns] = await Promise.all([api.get("characters", id), api.list("campaigns")]);
+    const edition = campaigns.find((c) => c.id === ch.campaign_id)?.edition ?? "2014";
+    return [ch, campaigns, await srdLists(edition)] as const;
+  }, [id]);
   if (error) return <LoadError error={error} />;
   if (!data) return <Loading />;
   const [ch, campaigns, lists] = data;
@@ -264,7 +268,7 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
 }
 
 function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Derived; edit: Edit; campaigns: Campaign[]; lists: SrdLists }) {
-  const { meta, edition } = useApp();
+  const { meta } = useApp();
   const next = meta?.xp_by_level?.[d.level];
 
   const setClass = (i: number, patch: Partial<Character["classes"][number]>) =>
@@ -300,7 +304,7 @@ function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Deri
       </div>
       <div className="form-grid">
         <Field label="Player"><TextInput value={ch.player} onChange={(v) => edit((x) => void (x.player = v))} /></Field>
-        <Field label={edition === "2024" ? "Species" : "Race"}><TextInput list="dl-races" value={ch.race} onChange={(v) => edit((x) => void (x.race = v))} /></Field>
+        <Field label={d.edition === "2024" ? "Species" : "Race"}><TextInput list="dl-races" value={ch.race} onChange={(v) => edit((x) => void (x.race = v))} /></Field>
         <Field label="Background"><TextInput list="dl-backgrounds" value={ch.background} onChange={(v) => edit((x) => void (x.background = v))} /></Field>
         <Field label="Alignment"><Select value={ch.alignment} options={ALIGNMENTS.map((a): Option => [a, a || "—"])} onChange={(v) => edit((x) => void (x.alignment = v))} /></Field>
         <Field label="Campaign">
@@ -424,8 +428,9 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
   const toast = useToast();
   const [amount, setAmount] = useState("");
   const changeHp = (sign: number) => {
-    const n = parseInt(amount, 10);
+    const n = Math.abs(parseInt(amount, 10));
     if (!n) return;
+    const dead = ch.death_saves.failures >= 3;
     const before = ch.hp.current;
     // Damage left after temp HP and reaching 0 (rules/damage-and-healing in both SRDs).
     const overflow = n - ch.hp.temp - before;
@@ -437,7 +442,8 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
         if (before === 0 && overflow > 0) x.death_saves.failures = Math.min(3, x.death_saves.failures + 1);
       } else {
         x.hp.current = Math.min(x.hp.max || Infinity, x.hp.current + n);
-        if (before === 0) x.death_saves = { successes: 0, failures: 0 };
+        // A dead character (3 failures) keeps them: coming back takes revival magic.
+        if (before === 0 && !dead) x.death_saves = { successes: 0, failures: 0 };
       }
     });
     if (sign < 0 && ch.hp.max && overflow >= ch.hp.max) {
@@ -445,6 +451,7 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
       toast("Massive damage: the remaining damage equals or exceeds max HP, so the character dies", "error");
     }
     else if (sign < 0 && before === 0 && overflow > 0) toast("Damage at 0 HP: one death save failure (two if it was a critical hit)");
+    else if (sign > 0 && dead) toast("This character has 3 failed death saves; clear them if revival magic brought them back");
     setAmount("");
   };
   const spendHitDie = () => {

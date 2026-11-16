@@ -103,7 +103,9 @@ def _sync_pc(repo: Repo, combatant: dict, death_save_failures: int = 0, healed_f
     ch["hp"]["current"] = combatant["hp"]
     ch["hp"]["temp"] = combatant["temp_hp"]
     saves = ch["death_saves"]
-    if healed_from_zero:
+    # Healing from 0 resets death saves, unless the character is already dead (3 failures):
+    # that takes revival magic, which the DM records by hand.
+    if healed_from_zero and saves["failures"] < 3:
         saves.update(successes=0, failures=0)
     saves["failures"] = min(3, saves["failures"] + death_save_failures)
     repo.save("characters", ch)

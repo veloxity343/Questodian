@@ -232,6 +232,24 @@ def test_damage_at_zero_hp_and_massive_damage(api):
     log = act(-14)["log"]  # 4 HP, then 10 left over = max HP
     assert "massive damage" in log[-2]["text"]
     assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 3
+    act(5)  # healing doesn't undo a death
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 3
+
+
+def test_massive_damage_counts_after_temp_hp(api):
+    _, enc = api("POST", "/api/encounters", {})
+    _, ch = api("POST", "/api/characters", {"hp": {"max": 10, "current": 5, "temp": 5}})
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_character", "character_id": ch["id"]})
+    cid = enc["combatants"][0]["id"]
+    api("POST", f"/api/encounters/{enc['id']}/action", {"action": "hp", "id": cid, "amount": -19})
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 0  # 9 left over < 10
+
+
+def test_derive_endpoint_takes_edition(api):
+    sheet = {"classes": [{"name": "Bard", "level": 5}], "abilities": {"dex": 14}, "jack_of_all_trades": True, "exhaustion": 1}
+    assert api("POST", "/api/derive", sheet)[1]["initiative"] == 3
+    assert api("POST", "/api/derive?edition=2024", sheet)[1]["initiative"] == 2 - 2
+    assert api("POST", "/api/derive?edition=1999", sheet)[0] == 400
 
 
 def test_export_import_endpoints(api):
