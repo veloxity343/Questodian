@@ -1,6 +1,6 @@
 """Questodian: a campaign manager and DM screen for 5e tabletop games."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def main() -> None:

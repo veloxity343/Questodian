@@ -12,9 +12,10 @@ roller. Fully offline: one local database file, no account, nothing to connect.
 
 ## Install
 
-**Desktop app (Windows, macOS):** download the zip for your system from the
-[Releases](https://github.com/veloxity343/Questodian/releases) page, unzip it and run
-*Questodian*. The builds aren't code-signed yet, so the first launch needs one extra step:
+**Desktop app (Windows, macOS, Linux):** download the installer for your system from the
+[Releases](https://github.com/veloxity343/Questodian/releases) page (Windows `.msi` or `.exe`,
+macOS `.dmg`, Linux `.deb`, `.rpm` or `.AppImage`) and install it. The builds aren't code-signed
+yet, so the first launch needs one extra step:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
 - **macOS:** after moving *Questodian.app* to Applications, run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
@@ -122,9 +123,12 @@ uv build                                # dist/questodian-*.whl and .tar.gz
 
 ### Desktop builds
 
-`make desktop` builds the app for the OS you're on into `dist-desktop/`. The **Desktop app**
-workflow builds Windows and macOS on GitHub: run it from the Actions tab, or push a version tag
-(`git tag v0.2.0 && git push origin v0.2.0`) to also publish a Release with both zips.
+`make tauri-build` builds the desktop app and its installers for the OS you're on into
+`target/release/bundle/`. Releases come from the **Release** workflow: push a version tag
+(`git tag v0.2.0 && git push origin v0.2.0`) or run it from the Actions tab. It runs every CI
+check, builds Windows, macOS (Apple Silicon and Intel) and Linux on GitHub, and attaches the
+installers to a draft Release for you to publish. (`make desktop` still builds the older Python
+version with PyInstaller.)
 
 ### The Rust backend and desktop app
 
