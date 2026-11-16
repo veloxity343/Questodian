@@ -248,6 +248,8 @@ class Binary(Node):
         elif op == "^":
             if abs(b) > 1000 or (abs(a) > 1 and b * math.log10(abs(a)) > 300):
                 raise DiceError("exponent too large")
+            if a == 0 and b < 0:
+                raise DiceError("division by zero")
             v = a**b
             if isinstance(v, complex):
                 raise DiceError("result is not a real number")

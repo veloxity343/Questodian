@@ -28,3 +28,7 @@ src/questodian/web/
 # Claude Code: per-person settings and worktrees (shared settings, agents and hooks are committed)
 .claude/settings.local.json
 .claude/worktrees/
+
+# Rust
+/target/
+src-tauri/gen/
