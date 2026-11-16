@@ -4,14 +4,15 @@ FRONTEND := frontend
 NPM := npm --prefix $(FRONTEND)
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev api web run app build ui package desktop test typecheck check migration clean
+.PHONY: help install dev api web run app build ui package desktop test typecheck check migration clean rust-test rust-serve tauri-dev tauri-build parity
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: ## Install Python and frontend dependencies
+install: ## Install Python, frontend and Tauri CLI dependencies
 	uv sync
 	$(NPM) install
+	npm install
 
 dev: ## Run API + UI dev servers with hot reload (one Ctrl+C stops both)
 	$(NPM) run dev:all
@@ -47,11 +48,29 @@ test: ## Run backend tests
 typecheck: ## Typecheck the frontend
 	$(NPM) run typecheck
 
-check: test typecheck ## Run everything CI runs except packaging (tests also catch models/migrations drift)
+rust-test: ## Rust backend: format check, lint and tests
+	cargo fmt --all --check
+	cargo clippy -p questodian-core -p questodian-cli --all-targets -- -D warnings
+	cargo test -p questodian-core -p questodian-cli
+
+rust-serve: ui ## Serve the app from the Rust backend (:8765)
+	cargo run -p questodian-cli -- serve --no-browser
+
+parity: ## Compare the Rust and Python servers request by request
+	cargo build -p questodian-cli
+	uv run python scripts/parity.py
+
+tauri-dev: ui ## Open the Rust/Tauri desktop app (debug build)
+	cargo run -p questodian-app
+
+tauri-build: ## Build the Rust/Tauri desktop app and installers for this OS
+	npx tauri build
+
+check: test typecheck rust-test ## Run everything CI runs except packaging (tests also catch models/migrations drift)
 
 migration: ## Create a migration from model changes: make migration m="add portraits"
 	@test -n "$(m)" || { echo 'usage: make migration m="describe the change"'; exit 1; }
 	uv run alembic revision --autogenerate -m "$(m)"
 
 clean: ## Remove build output (keeps your database)
-	rm -rf dist dist-desktop build-desktop src/questodian/web $(FRONTEND)/*.tsbuildinfo
+	rm -rf dist dist-desktop build-desktop src/questodian/web $(FRONTEND)/*.tsbuildinfo target

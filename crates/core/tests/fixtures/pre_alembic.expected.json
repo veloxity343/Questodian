@@ -1,0 +1,327 @@
+{
+ "campaigns": [
+  {
+   "id": "camp1",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "name": "Lost Mine",
+   "system": "5e (SRD 5.1)",
+   "edition": "2014",
+   "description": "",
+   "setting": "",
+   "players": [
+    {
+     "name": "Ann",
+     "contact": "",
+     "character_id": "char1",
+     "notes": ""
+    }
+   ],
+   "notes": ""
+  }
+ ],
+ "sessions": [
+  {
+   "id": "sess1",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "campaign_id": "camp1",
+   "number": 1,
+   "title": "Part 1",
+   "date": "",
+   "status": "planned",
+   "attendance": [],
+   "prep": "",
+   "recap": "",
+   "log": [
+    {
+     "id": "l1",
+     "time": "2025-06-01T10:00:00+00:00",
+     "kind": "note",
+     "text": "Started"
+    }
+   ],
+   "loot": [],
+   "xp_awarded": 0
+  },
+  {
+   "id": "sess2",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "campaign_id": "camp1",
+   "number": 2,
+   "title": "Part 2",
+   "date": "",
+   "status": "planned",
+   "attendance": [],
+   "prep": "",
+   "recap": "",
+   "log": [
+    {
+     "id": "l1",
+     "time": "2025-06-01T10:00:00+00:00",
+     "kind": "note",
+     "text": "Started"
+    }
+   ],
+   "loot": [],
+   "xp_awarded": 0
+  }
+ ],
+ "characters": [
+  {
+   "id": "char1",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "name": "Ann's Rogue",
+   "player": "",
+   "campaign_id": "camp1",
+   "race": "",
+   "background": "",
+   "alignment": "",
+   "classes": [
+    {
+     "name": "Rogue",
+     "subclass": "",
+     "level": 3
+    }
+   ],
+   "xp": 0,
+   "abilities": {
+    "str": 10,
+    "dex": 10,
+    "con": 10,
+    "int": 10,
+    "wis": 10,
+    "cha": 10
+   },
+   "save_proficiencies": [],
+   "skills": {
+    "stealth": "expertise"
+   },
+   "jack_of_all_trades": false,
+   "ac": 10,
+   "initiative_misc": 0,
+   "speed": 30,
+   "hp": {
+    "max": 21,
+    "current": 9,
+    "temp": 0
+   },
+   "hit_dice": {
+    "total": "1d10",
+    "remaining": 1
+   },
+   "death_saves": {
+    "successes": 0,
+    "failures": 0
+   },
+   "inspiration": false,
+   "conditions": [],
+   "exhaustion": 0,
+   "proficiencies": {
+    "armor": "",
+    "weapons": "",
+    "tools": "",
+    "languages": "Common"
+   },
+   "attacks": [],
+   "spellcasting": {
+    "ability": "",
+    "slots": {},
+    "spells": []
+   },
+   "resources": [],
+   "inventory": [
+    {
+     "name": "Rope",
+     "qty": 1,
+     "weight": 10.0,
+     "equipped": false,
+     "notes": ""
+    }
+   ],
+   "currency": {
+    "cp": 0,
+    "sp": 0,
+    "ep": 0,
+    "gp": 0,
+    "pp": 0
+   },
+   "features": [],
+   "personality": {
+    "traits": "",
+    "ideals": "",
+    "bonds": "",
+    "flaws": ""
+   },
+   "appearance": "",
+   "backstory": "",
+   "notes": ""
+  },
+  {
+   "id": "char2",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "name": "Unlinked",
+   "player": "",
+   "campaign_id": "",
+   "race": "",
+   "background": "",
+   "alignment": "",
+   "classes": [
+    {
+     "name": "Fighter",
+     "subclass": "",
+     "level": 1
+    }
+   ],
+   "xp": 0,
+   "abilities": {
+    "str": 10,
+    "dex": 10,
+    "con": 10,
+    "int": 10,
+    "wis": 10,
+    "cha": 10
+   },
+   "save_proficiencies": [],
+   "skills": {},
+   "jack_of_all_trades": false,
+   "ac": 10,
+   "initiative_misc": 0,
+   "speed": 30,
+   "hp": {
+    "max": 10,
+    "current": 10,
+    "temp": 0
+   },
+   "hit_dice": {
+    "total": "1d10",
+    "remaining": 1
+   },
+   "death_saves": {
+    "successes": 0,
+    "failures": 0
+   },
+   "inspiration": false,
+   "conditions": [],
+   "exhaustion": 0,
+   "proficiencies": {
+    "armor": "",
+    "weapons": "",
+    "tools": "",
+    "languages": "Common"
+   },
+   "attacks": [],
+   "spellcasting": {
+    "ability": "",
+    "slots": {},
+    "spells": []
+   },
+   "resources": [],
+   "inventory": [],
+   "currency": {
+    "cp": 0,
+    "sp": 0,
+    "ep": 0,
+    "gp": 0,
+    "pp": 0
+   },
+   "features": [],
+   "personality": {
+    "traits": "",
+    "ideals": "",
+    "bonds": "",
+    "flaws": ""
+   },
+   "appearance": "",
+   "backstory": "",
+   "notes": ""
+  }
+ ],
+ "handbook": [
+  {
+   "id": "hb1",
+   "created": "2025-06-01T10:00:00+00:00",
+   "updated": "2025-06-01T10:00:00+00:00",
+   "title": "Crits",
+   "category": "House Rules",
+   "tags": [
+    "house"
+   ],
+   "campaign_id": "camp1",
+   "body": ""
+  }
+ ],
+ "scenes": [],
+ "npcs": [],
+ "monsters": [],
+ "notes": [],
+ "encounters": [
+  {
+   "id": "5dee50206dd1",
+   "created": "2026-11-16T06:51:06+00:00",
+   "updated": "2026-11-16T06:51:06+00:00",
+   "campaign_id": "camp1",
+   "session_id": "sess1",
+   "scene_id": "",
+   "name": "Session 1: Part 1",
+   "round": 2,
+   "turn": 1,
+   "active": true,
+   "combatants": [
+    {
+     "id": "c1",
+     "name": "Ann's Rogue",
+     "kind": "pc",
+     "initiative": 17,
+     "init_bonus": 0,
+     "ac": 10,
+     "hp": 9,
+     "max_hp": 21,
+     "temp_hp": 0,
+     "conditions": [],
+     "notes": "",
+     "character_id": "char1",
+     "srd_id": "",
+     "monster_id": "",
+     "npc_id": "",
+     "xp": 0,
+     "xp_in_lair": 0,
+     "in_lair": false,
+     "surprised": false,
+     "hidden": false
+    },
+    {
+     "id": "c2",
+     "name": "Goblin 1",
+     "kind": "monster",
+     "initiative": 12,
+     "init_bonus": 0,
+     "ac": 10,
+     "hp": 7,
+     "max_hp": 7,
+     "temp_hp": 0,
+     "conditions": [],
+     "notes": "",
+     "character_id": "",
+     "srd_id": "monsters/goblin",
+     "monster_id": "",
+     "npc_id": "",
+     "xp": 0,
+     "xp_in_lair": 0,
+     "in_lair": false,
+     "surprised": false,
+     "hidden": false
+    }
+   ],
+   "party_size": 1,
+   "party_level": 1,
+   "log": [],
+   "notes": ""
+  }
+ ],
+ "trackers": [],
+ "handouts": []
+}

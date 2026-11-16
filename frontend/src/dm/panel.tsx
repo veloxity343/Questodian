@@ -193,7 +193,7 @@ function CharacterView({ id }: { id: string }) {
   const { meta } = useApp();
   const ch = dm.lists.characters.find((c) => c.id === id);
   if (!ch) return <p className="muted pad">Character not found.</p>;
-  const d = derive(ch, meta);
+  const d = derive(ch, meta, dm.edition);
   return (
     <div className="view">
       <ViewHead name={ch.name} badge="PC" summary={`${ch.race} ${ch.classes.map((c) => `${c.name} ${c.level}`).join(" / ")}`} />

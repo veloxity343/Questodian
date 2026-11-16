@@ -53,7 +53,7 @@ Edition = Literal["2014", "2024"]
 
 class Campaign(Record):
     name: Str = "New Campaign"
-    system: Str = "D&D 5e (SRD 5.1)"
+    system: Str = "5e (SRD 5.1)"
     edition: Edition = "2014"
     description: Str = ""
     setting: Str = ""
@@ -81,6 +81,9 @@ class Combatant(Doc):
     monster_id: Str = ""  # homebrew stat block
     npc_id: Str = ""
     xp: int = 0
+    xp_in_lair: int = 0  # legendary monsters are worth more fought in their lair (0: no lair value)
+    in_lair: bool = False
+    surprised: bool = False  # caught unawares when combat starts (cleared when it ends)
     hidden: bool = False
 
 
@@ -370,6 +373,7 @@ class EncounterAction(Doc):
     character_ids: list[str] = []
     amount: int = 0
     which: Literal["all", "monsters", "unset"] = "all"
+    group: bool = False  # roll_initiative: one roll per group of identical monsters (the SRD's way)
     all: bool = False
 
 
@@ -415,3 +419,4 @@ class MarkdownImport(Doc):
 
 class ClassesIn(Doc):
     classes: list[ClassLevel] = []
+    edition: Edition = "2014"

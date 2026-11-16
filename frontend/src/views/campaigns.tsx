@@ -25,7 +25,7 @@ export function CampaignList() {
   const create = async (edition: Edition) => {
     const name = await prompt(`New campaign (${editions[edition]})`, { label: "Name", value: "" });
     if (name === null) return;
-    const system = edition === "2024" ? "D&D 2024 (SRD 5.2.1)" : "D&D 5e (SRD 5.1)";
+    const system = edition === "2024" ? "5e 2024 (SRD 5.2.1)" : "5e (SRD 5.1)";
     const c = await api.create("campaigns", { name: name || "New Campaign", edition, system });
     await refreshCampaigns();
     choose(c.id);

@@ -128,7 +128,7 @@ def cmd_import(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="questodian", description="All-in-one D&D table manager.")
+    p = argparse.ArgumentParser(prog="questodian", description="All-in-one 5e table manager.")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--data-dir", help="folder for the SQLite database (env: QUESTODIAN_DATA)")
     sub = p.add_subparsers(dest="command")

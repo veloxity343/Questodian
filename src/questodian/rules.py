@@ -1,4 +1,7 @@
-"""D&D 5e (SRD 5.1) numbers and helper calculations."""
+"""5e rules numbers and helper calculations, for the 2014 (SRD 5.1) and 2024 (SRD 5.2.1) rules.
+
+Where the editions differ, functions take an ``edition`` ("2014" or "2024").
+"""
 
 from __future__ import annotations
 
@@ -146,23 +149,29 @@ def jump(strength: int, running: bool = True) -> dict:
     }
 
 
-def caster_level(classes: list[dict]) -> int:
+def caster_level(classes: list[dict], edition: str = "2014") -> int:
     """Combined caster level for the multiclass slot table (warlock excluded)."""
     total = 0.0
     for c in classes:
         weight = CASTER_PROGRESSION.get(str(c.get("name", "")).lower(), 0)
         lvl = int(c.get("level") or 0)
         if weight == 0.5 and len(classes) == 1:
-            # single-class half casters round up from 2nd level
-            total += math.ceil(lvl / 2) if lvl >= 2 else 0
+            # Single-class half casters round up: from 2nd level in 2014 (classes/paladin),
+            # from 1st level in 2024, where a level 1 Paladin or Ranger has two 1st-level slots.
+            total += math.ceil(lvl / 2) if lvl >= 2 or edition == "2024" else 0
         else:
             total += math.floor(lvl * weight)
     return int(total)
 
 
-def spell_slots_for(classes: list[dict]) -> list[int]:
-    lvl = caster_level(classes)
+def spell_slots_for(classes: list[dict], edition: str = "2014") -> list[int]:
+    lvl = caster_level(classes, edition)
     return list(SPELL_SLOTS[min(lvl, 20)]) if lvl > 0 else []
+
+
+def is_warlock_only(classes: list[dict]) -> bool:
+    """A single-class warlock, whose slots (Pact Magic) all come back on a short rest."""
+    return bool(classes) and all(str(c.get("name", "")).lower() == "warlock" for c in classes)
 
 
 def encounter_xp(monster_crs: list[str]) -> int:
@@ -173,16 +182,59 @@ def total_level(character: dict) -> int:
     return sum(int(c.get("level") or 0) for c in character.get("classes", [])) or 1
 
 
-def derive(character: dict) -> dict:
-    """Compute modifiers, bonuses and passives for a character sheet."""
+# What each level of exhaustion does under the 2014 rules (conditions/exhaustion, SRD 5.1).
+# Effects are cumulative.
+EXHAUSTION_2014 = [
+    "Disadvantage on ability checks",
+    "Speed halved",
+    "Disadvantage on attack rolls and saving throws",
+    "Hit point maximum halved",
+    "Speed reduced to 0",
+    "Death",
+]
+
+
+def exhaustion_effects(level: int, edition: str = "2014") -> dict:
+    """The mechanical effects of an exhaustion level (conditions/exhaustion in each SRD).
+
+    2024: D20 Tests are reduced by 2 per level, Speed by 5 ft per level; level 6 is death.
+    2014: the cumulative six-step table above.
+    """
+    level = max(0, min(int(level or 0), 6))
+    if edition == "2024":
+        effects = [f"D20 Tests -{2 * level}", f"Speed -{5 * level} ft."] if level else []
+        if level == 6:
+            effects.append("Death")
+        return {"d20_penalty": 2 * level, "effects": effects}
+    return {"d20_penalty": 0, "effects": EXHAUSTION_2014[:level]}
+
+
+def exhausted_speed(speed: int, level: int, edition: str = "2014") -> int:
+    level = max(0, min(int(level or 0), 6))
+    if edition == "2024":
+        return max(0, speed - 5 * level)
+    if level >= 5:
+        return 0
+    return speed // 2 if level >= 2 else speed
+
+
+def derive(character: dict, edition: str = "2014") -> dict:
+    """Compute modifiers, bonuses and passives for a character sheet.
+
+    The 2024 exhaustion penalty applies to every D20 Test (ability checks, saves, skills,
+    initiative, spell attacks). The spell save DC isn't a roll. Passive scores aren't rolls
+    either, so they're left alone in 2024 (our reading; the SRD doesn't say). In 2014,
+    exhaustion 1+ gives Disadvantage on ability checks, which is -5 to passive scores
+    (rules/ability-checks).
+    """
     abilities = character.get("abilities", {})
     mods = {a: ability_modifier(abilities.get(a, 10)) for a in ABILITIES}
     level = total_level(character)
     pb = proficiency_bonus(level)
-    saves = {}
+    exhaustion = exhaustion_effects(character.get("exhaustion", 0), edition)
+    penalty = exhaustion["d20_penalty"]
     save_profs = set(character.get("save_proficiencies", []))
-    for a in ABILITIES:
-        saves[a] = mods[a] + (pb if a in save_profs else 0)
+    saves = {a: mods[a] + (pb if a in save_profs else 0) for a in ABILITIES}
     skills = {}
     skill_profs = character.get("skills", {})
     jack = bool(character.get("jack_of_all_trades"))
@@ -196,21 +248,32 @@ def derive(character: dict) -> dict:
         elif prof == "half" or jack:
             bonus += pb // 2
         skills[skill] = bonus
+    # Initiative is a Dexterity check. 2014 Jack of All Trades covers any ability check
+    # without proficiency (classes/bard); the 2024 feature only covers skills.
+    # Plain ability checks have no proficiency, so 2014 Jack of All Trades adds to them.
+    jack_bonus = pb // 2 if jack and edition != "2024" else 0
+    checks = {a: mods[a] + jack_bonus - penalty for a in ABILITIES}
+    initiative = mods["dex"] + int(character.get("initiative_misc") or 0) + jack_bonus
+    passive_minus = 5 if edition != "2024" and int(character.get("exhaustion") or 0) >= 1 else 0
     spell_ability = character.get("spellcasting", {}).get("ability") or None
     spell = {}
     if spell_ability in mods:
-        spell = {"save_dc": 8 + pb + mods[spell_ability], "attack_bonus": pb + mods[spell_ability]}
+        spell = {"save_dc": 8 + pb + mods[spell_ability], "attack_bonus": pb + mods[spell_ability] - penalty}
     return {
         "level": level,
         "proficiency_bonus": pb,
         "modifiers": mods,
-        "saves": saves,
-        "skills": skills,
-        "initiative": mods["dex"] + int(character.get("initiative_misc") or 0),
-        "passive_perception": 10 + skills["perception"],
-        "passive_investigation": 10 + skills["investigation"],
-        "passive_insight": 10 + skills["insight"],
+        "checks": checks,
+        "saves": {a: v - penalty for a, v in saves.items()},
+        "skills": {k: v - penalty for k, v in skills.items()},
+        "initiative": initiative - penalty,
+        "passive_perception": 10 + skills["perception"] - passive_minus,
+        "passive_investigation": 10 + skills["investigation"] - passive_minus,
+        "passive_insight": 10 + skills["insight"] - passive_minus,
         "spell": spell,
+        "speed": exhausted_speed(int(character.get("speed") or 0), character.get("exhaustion", 0), edition),
+        "exhaustion": exhaustion["effects"],
+        # Every SRD species and race is Small or Medium, which carry the same (Str x 15).
         "carrying_capacity": abilities.get("str", 10) * 15,
         "next_level_xp": xp_for_next_level(level),
     }

@@ -34,7 +34,10 @@ def get_repo(request: Request) -> Iterator[Repo]:
         yield Repo(s)
 
 
-RepoDep = Annotated[Repo, Depends(get_repo)]
+# scope="function": commit (or roll back) before the response is sent. With FastAPI's default
+# the commit ran after the response, so a quick next request could read stale data, and a
+# failed commit was reported as a success.
+RepoDep = Annotated[Repo, Depends(get_repo, scope="function")]
 
 
 # --------------------------------------------------------------------------- tools and reference
@@ -87,17 +90,26 @@ def stats() -> dict:
     return {"results": [r.to_dict() for r in dice.roll_stats()]}
 
 
+Edition = Annotated[str, Query(description="Rules edition: 2014 (SRD 5.1) or 2024 (SRD 5.2.1)")]
+
+
 @tools.post("/derive")
-def derive(body: schemas.Character) -> dict:
-    return rules.derive(body.model_dump())
+def derive(body: schemas.Character, edition: Edition = srd.DEFAULT_EDITION) -> dict:
+    return rules.derive(body.model_dump(), srd.check_edition(edition))
 
 
 @tools.post("/slots")
 def slots(body: schemas.ClassesIn) -> dict:
-    return {"slots": rules.spell_slots_for([c.model_dump() for c in body.classes])}
-
-
-Edition = Annotated[str, Query(description="Rules edition: 2014 (SRD 5.1) or 2024 (SRD 5.2.1)")]
+    classes = [c.model_dump() for c in body.classes]
+    if rules.is_warlock_only(classes):
+        # Pact Magic slots, from the Warlock class table in the SRD for this edition.
+        level = max(1, min(rules.total_level({"classes": classes}), 20))
+        table = (srd.get("classes/warlock", body.edition) or {}).get("data", {}).get("spell_slots", {})
+        row = list(table.get(str(level), []))
+        while row and row[-1] == 0:
+            row.pop()
+        return {"slots": row}
+    return {"slots": rules.spell_slots_for(classes, body.edition)}
 
 
 @tools.get("/srd/categories")
@@ -153,7 +165,7 @@ def export_one(repo: RepoDep, kind: str, doc_id: str, format: str = "json") -> R
             transfer.export_one(repo, kind, doc_id), headers=_attachment(f"{title}.{SINGULAR[kind]}.json")
         )
     if kind == "characters":
-        text = transfer.character_markdown(doc)
+        text = transfer.character_markdown(doc, game.character_edition(repo, doc))
     elif kind == "sessions":
         cid = doc["campaign_id"]
         text = transfer.session_markdown(doc, repo.get("campaigns", cid)["name"] if cid else "")
@@ -224,6 +236,13 @@ IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "
 MAX_IMAGE = 15 * 1024 * 1024
 
 
+def _handout_path(folder: Path, filename: str) -> Path | None:
+    """A stored file name is only ever a plain name inside the handouts folder."""
+    if not filename or Path(filename).name != filename or filename in (".", ".."):
+        return None
+    return folder / filename
+
+
 def _handout_dir(request: Request) -> Path:
     folder = request.app.state.db.files_dir
     if folder is None:
@@ -249,15 +268,15 @@ async def upload_handout(request: Request, doc_id: str):
         name = f"{doc_id}-{models.new_id()[:6]}{IMAGE_TYPES[mime]}"
         (folder / name).write_bytes(data)
         saved = repo.update("handouts", doc_id, {"filename": name, "mime": mime})
-    if old and old != name:
-        (folder / old).unlink(missing_ok=True)
+    if old and old != name and (path := _handout_path(folder, old)):
+        path.unlink(missing_ok=True)
     return saved
 
 
 @handouts.get("/{doc_id}/file")
 def handout_file(request: Request, repo: RepoDep, doc_id: str) -> FileResponse:
     doc = repo.get("handouts", doc_id)
-    path = _handout_dir(request) / doc["filename"] if doc["filename"] else None
+    path = _handout_path(_handout_dir(request), doc["filename"])
     if not path or not path.is_file():
         raise NotFound("this handout has no image yet")
     return FileResponse(path, media_type=doc["mime"] or None, headers={"Cache-Control": "no-cache"})
@@ -267,8 +286,8 @@ def handout_file(request: Request, repo: RepoDep, doc_id: str) -> FileResponse:
 def delete_handout(request: Request, repo: RepoDep, doc_id: str) -> dict:
     doc = repo.get("handouts", doc_id)
     repo.delete("handouts", doc_id)
-    if doc["filename"]:
-        (_handout_dir(request) / doc["filename"]).unlink(missing_ok=True)
+    if path := _handout_path(_handout_dir(request), doc["filename"]):
+        path.unlink(missing_ok=True)
     return {"deleted": doc_id}
 
 

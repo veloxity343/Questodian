@@ -5,17 +5,21 @@ import { api } from "../api";
 import { Checkbox, NumInput, TextInput } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs, useToast } from "../context/ui";
-import { useDebounced } from "../lib/hooks";
+import { useDebounced, usePref } from "../lib/hooks";
 import { fmtDate, hpLevel, signed, titleCase } from "../lib/util";
 import type { Combatant, Encounter, EncounterAction, SrdEntry } from "../types";
 import { useDeleteRecord } from "./parts";
 import { useDM, useParty } from "./store";
 
 const DIFFICULTY_LABEL: Record<string, string> = {
-  trivial: "Trivial", low: "Low", moderate: "Moderate", high: "High", deadly: "Beyond high",
+  trivial: "Under half of Low", low: "Low", moderate: "Moderate", high: "High", deadly: "Above High",
 };
 
-/** 2024 XP budget (also used for 2014 campaigns): spend up to the budget for the chosen difficulty. */
+/**
+ * The 2024 XP budget (rules/gameplay-toolbox-combat-encounters), the only encounter table in
+ * either SRD, so 2014 campaigns use it too. The SRD has Low, Moderate and High; "under half of
+ * Low" and "above High" are the app's own bands around them.
+ */
 export function difficulty(xp: number, size: number, level: number, table: [number, number, number][] | undefined) {
   const row = table?.[Math.max(1, Math.min(level, 20)) - 1] ?? [50, 75, 100];
   const budget = { low: row[0] * size, moderate: row[1] * size, high: row[2] * size };
@@ -36,6 +40,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
   const [adding, setAdding] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const party = useParty();
+  const [groupRolls, setGroupRolls] = usePref("group-initiative", false);
   const onDelete = useDeleteRecord("encounters", initial.id, initial.name, () => {});
   // Pick up changes made elsewhere (e.g. "To encounter" on an NPC or a stat block).
   const listed = dm.lists.encounters.find((e) => e.id === initial.id);
@@ -59,7 +64,9 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
   };
   const saveName = useDebounced((name: string) => void patch({ name }), 500);
 
-  const monsterXp = enc.combatants.filter((c) => c.kind === "monster").reduce((a, c) => a + (c.xp || 0), 0);
+  const monsterXp = enc.combatants
+    .filter((c) => c.kind === "monster")
+    .reduce((a, c) => a + ((c.in_lair && c.xp_in_lair) || c.xp || 0), 0);
   const { budget, rating } = difficulty(monsterXp, enc.party_size, enc.party_level, meta?.xp_budget);
   const current = enc.active ? enc.combatants[enc.turn] : null;
 
@@ -73,8 +80,11 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
           <div className="eyebrow">{enc.active ? `Round ${enc.round}` : "Not started"}</div>
         </div>
         <div className="doc-actions">
-          <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_initiative", which: enc.active ? "unset" : "all" })}
-            title="Roll for everyone without an initiative (all, before combat starts)">Roll initiative</button>
+          <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_initiative", which: enc.active ? "unset" : "all", group: groupRolls })}
+            title="Roll for everyone without an initiative (all, before combat starts). Ties start in order of initiative bonus; edit an initiative to change the order.">Roll initiative</button>
+          <label className="check small" title="One roll for each group of identical monsters, who then act together (the SRD's way)">
+            <Checkbox checked={groupRolls} onChange={setGroupRolls} /> group
+          </label>
           <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_hp" })} title="Roll hit dice for every monster">Roll HP</button>
           {enc.active && <button type="button" className="btn small ghost" onClick={() => act({ action: "prev" })} aria-label="Previous turn">←</button>}
           <button type="button" className="btn small primary" onClick={() => act({ action: "next" })}>{enc.active ? "Next →" : "Start combat →"}</button>
@@ -95,7 +105,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
         <label>Party <NumInput className="num-input tiny" min={1} max={12} value={enc.party_size} onChange={(v) => patch({ party_size: Math.max(1, v) })} /></label>
         <span className="muted">×</span>
         <label>Lv <NumInput className="num-input tiny" min={1} max={20} value={enc.party_level} onChange={(v) => patch({ party_level: Math.max(1, Math.min(20, v)) })} /></label>
-        <span className={`difficulty d-${rating}`}>{DIFFICULTY_LABEL[rating]}</span>
+        <span className={`difficulty d-${rating}`} title="XP budget from the 2024 rules (SRD 5.2.1). SRD 5.1 has no encounter-building table, so 2014 campaigns use this one too.">{DIFFICULTY_LABEL[rating]}</span>
         <span className="grow" />
         <span className="muted small">Monsters {monsterXp.toLocaleString()} XP · Low {budget.low.toLocaleString()} · Moderate {budget.moderate.toLocaleString()} · High {budget.high.toLocaleString()}</span>
       </div>
@@ -111,7 +121,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
 
       {enc.combatants.length ? (
         <ol className="initiative">
-          {enc.combatants.map((c, i) => <CombatantRow key={c.id} c={c} isTurn={enc.active && i === enc.turn} act={act} />)}
+          {enc.combatants.map((c, i) => <CombatantRow key={c.id} c={c} isTurn={enc.active && i === enc.turn} started={enc.active} act={act} />)}
         </ol>
       ) : (
         <div className="empty">
@@ -137,7 +147,12 @@ function KindBadge({ c }: { c: Combatant }) {
   return <span className={`kind-badge k-${c.kind}`}>{label}</span>;
 }
 
-function CombatantRow({ c, isTurn, act }: { c: Combatant; isTurn: boolean; act: (a: EncounterAction) => Promise<void> }) {
+const SURPRISE_HELP = {
+  "2024": "Surprised: Disadvantage on its Initiative roll",
+  "2014": "Surprised: can't move or take an action on its first turn, or take a reaction until that turn ends",
+};
+
+function CombatantRow({ c, isTurn, started, act }: { c: Combatant; isTurn: boolean; started: boolean; act: (a: EncounterAction) => Promise<void> }) {
   const dm = useDM();
   const [hpOpen, setHpOpen] = useState(false);
   const update = (changes: Partial<Combatant>) => act({ action: "update", id: c.id, changes });
@@ -154,6 +169,16 @@ function CombatantRow({ c, isTurn, act }: { c: Combatant; isTurn: boolean; act: 
       <div className="who">
         <button type="button" className="name" onClick={showSheet}>{c.name}</button> <KindBadge c={c} />
         {c.init_bonus !== 0 && <span className="muted small"> {signed(c.init_bonus)}</span>}
+        {!started ? (
+          <label className="check small" title={SURPRISE_HELP[dm.edition]}>
+            <Checkbox checked={c.surprised} onChange={(v) => update({ surprised: v })} /> surprised
+          </label>
+        ) : c.surprised && <span className="muted small" title={SURPRISE_HELP[dm.edition]}> surprised</span>}
+        {c.kind === "monster" && c.xp_in_lair > 0 && (
+          <label className="check small lair" title={`${c.xp.toLocaleString()} XP, or ${c.xp_in_lair.toLocaleString()} XP fought in its lair`}>
+            <Checkbox checked={c.in_lair} onChange={(v) => update({ in_lair: v })} /> in lair
+          </label>
+        )}
         <div className="chips">
           {c.conditions.map((k) => (
             <span className="chip" key={k}>{titleCase(k)}<button type="button" className="chip-x" aria-label={`Remove ${k}`}
@@ -192,7 +217,7 @@ function HpBox({ c, act, onClose }: { c: Combatant; act: (a: EncounterAction) =>
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   const apply = async (sign: number) => {
-    const n = parseInt(amount, 10);
+    const n = Math.abs(parseInt(amount, 10)); // a typed minus sign mustn't turn damage into healing
     if (!n) return;
     await act({ action: "hp", id: c.id, amount: sign * n });
     onClose();

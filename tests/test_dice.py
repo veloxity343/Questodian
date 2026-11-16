@@ -113,7 +113,7 @@ def test_breakdown_marks_dropped_dice():
 
 @pytest.mark.parametrize(
     "bad",
-    ["", "2d", "d0", "1001d6", "5d6kh9", "1/0", "foo(2)", "2+", "3d6r6", "(1+2", "2d6kh1dl1", "import os", "__import__('os')", "1d6!" * 200],
+    ["", "2d", "d0", "1001d6", "5d6kh9", "1/0", "foo(2)", "2+", "3d6r6", "(1+2", "2d6kh1dl1", "import os", "__import__('os')", "1d6!" * 200, "0^-1"],
 )
 def test_invalid_expressions_raise(bad):
     with pytest.raises(dice.DiceError):

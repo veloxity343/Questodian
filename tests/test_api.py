@@ -101,7 +101,7 @@ def test_encounter_uses_campaign_edition_and_homebrew(api):
     assert [c["name"] for c in e["combatants"]] == ["Zombie 1", "The Bell-Ringer", "Zombie 2"]
     _, e = api("POST", path, {"action": "roll_hp"})
     zombies = [c for c in e["combatants"] if c["srd_id"]]
-    assert all(c["hp"] == c["max_hp"] and 9 <= c["hp"] <= 22 for c in zombies)  # 2d8 + 6
+    assert all(c["hp"] == c["max_hp"] and 8 <= c["hp"] <= 22 for c in zombies)  # 2d8 + 6
     _, npc = api("POST", "/api/npcs", {"campaign_id": camp["id"], "name": "Pell", "stat_ref": "srd:monsters/commoner"})
     _, e = api("POST", path, {"action": "add_npc", "npc_id": npc["id"]})
     pell = e["combatants"][-1]
@@ -177,6 +177,81 @@ def test_rest(api):
     assert long_["resources"][0]["current"] == 1
 
 
+def _campaign_character(api, edition, **sheet):
+    _, camp = api("POST", "/api/campaigns", {"edition": edition})
+    _, ch = api("POST", "/api/characters", {"campaign_id": camp["id"], **sheet})
+    return ch
+
+
+def test_rest_rules_by_edition(api):
+    sheet = {"classes": [{"name": "Fighter", "level": 6}], "hp": {"max": 50, "current": 10},
+             "hit_dice": {"total": "6d10", "remaining": 0}}
+    old = _campaign_character(api, "2014", **sheet)
+    new = _campaign_character(api, "2024", **sheet)
+    assert api("POST", f"/api/characters/{old['id']}/rest", {"type": "long"})[1]["hit_dice"]["remaining"] == 3
+    assert api("POST", f"/api/characters/{new['id']}/rest", {"type": "long"})[1]["hit_dice"]["remaining"] == 6
+
+
+def test_rests_at_zero_hp(api):
+    old = _campaign_character(api, "2014", hp={"max": 10, "current": 0})
+    new = _campaign_character(api, "2024", hp={"max": 10, "current": 0})
+    status, r = api("POST", f"/api/characters/{old['id']}/rest", {"type": "long"})
+    assert status == 400 and "1 hit point" in r["detail"]
+    # 2014 short rests have no hit point requirement; 2024 ones do.
+    assert api("POST", f"/api/characters/{old['id']}/rest", {"type": "short"})[0] == 200
+    assert api("POST", f"/api/characters/{new['id']}/rest", {"type": "short"})[0] == 400
+
+
+def test_warlock_slots_return_on_short_rest(api):
+    slots = {"spellcasting": {"slots": {"2": {"max": 2, "used": 2}}}}
+    _, warlock = api("POST", "/api/characters", {"classes": [{"name": "Warlock", "level": 3}], **slots})
+    _, wizard = api("POST", "/api/characters", {"classes": [{"name": "Wizard", "level": 3}], **slots})
+    rested = api("POST", f"/api/characters/{warlock['id']}/rest", {"type": "short"})[1]
+    assert rested["spellcasting"]["slots"]["2"]["used"] == 0
+    rested = api("POST", f"/api/characters/{wizard['id']}/rest", {"type": "short"})[1]
+    assert rested["spellcasting"]["slots"]["2"]["used"] == 2
+
+
+def test_slots_endpoint_takes_edition(api):
+    body = {"classes": [{"name": "Ranger", "level": 1}]}
+    assert api("POST", "/api/slots", body)[1]["slots"] == []
+    assert api("POST", "/api/slots", {**body, "edition": "2024"})[1]["slots"] == [2]
+
+
+def test_damage_at_zero_hp_and_massive_damage(api):
+    _, enc = api("POST", "/api/encounters", {})
+    _, ch = api("POST", "/api/characters", {"name": "Pip", "hp": {"max": 10, "current": 2}})
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_character", "character_id": ch["id"]})
+    cid = enc["combatants"][0]["id"]
+    act = lambda amount: api("POST", f"/api/encounters/{enc['id']}/action", {"action": "hp", "id": cid, "amount": amount})[1]
+    act(-2)
+    act(-3)  # at 0 HP: one death save failure
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 1
+    act(4)  # healing from 0 resets death saves
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"] == {"successes": 0, "failures": 0}
+    log = act(-14)["log"]  # 4 HP, then 10 left over = max HP
+    assert "massive damage" in log[-2]["text"]
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 3
+    act(5)  # healing doesn't undo a death
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 3
+
+
+def test_massive_damage_counts_after_temp_hp(api):
+    _, enc = api("POST", "/api/encounters", {})
+    _, ch = api("POST", "/api/characters", {"hp": {"max": 10, "current": 5, "temp": 5}})
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_character", "character_id": ch["id"]})
+    cid = enc["combatants"][0]["id"]
+    api("POST", f"/api/encounters/{enc['id']}/action", {"action": "hp", "id": cid, "amount": -19})
+    assert api("GET", f"/api/characters/{ch['id']}")[1]["death_saves"]["failures"] == 0  # 9 left over < 10
+
+
+def test_derive_endpoint_takes_edition(api):
+    sheet = {"classes": [{"name": "Bard", "level": 5}], "abilities": {"dex": 14}, "jack_of_all_trades": True, "exhaustion": 1}
+    assert api("POST", "/api/derive", sheet)[1]["initiative"] == 3
+    assert api("POST", "/api/derive?edition=2024", sheet)[1]["initiative"] == 2 - 2
+    assert api("POST", "/api/derive?edition=1999", sheet)[0] == 400
+
+
 def test_export_import_endpoints(api):
     _, ch = api("POST", "/api/characters", {"name": "Exported"})
     _, bundle = api("GET", "/api/export")
@@ -200,3 +275,100 @@ def test_failed_import_writes_nothing(api):
     status, _ = api("POST", "/api/import", {"collections": {"handbook": [{"title": "ok"}], "characters": [{"classes": "bad"}]}})
     assert status == 400
     assert api("GET", "/api/handbook")[1]["handbook"] == []
+
+
+def test_handout_file_name_cannot_leave_the_folder(client):
+    h = client.post("/api/handouts", json={"title": "Map"}).json()
+    client.put(f"/api/handouts/{h['id']}", json={"filename": "../questodian.db"})
+    assert client.get(f"/api/handouts/{h['id']}/file").status_code == 404
+    assert client.delete(f"/api/handouts/{h['id']}").status_code == 200
+
+
+def test_lair_xp_comes_from_the_srd(api):
+    _, camp = api("POST", "/api/campaigns", {"edition": "2024"})
+    _, enc = api("POST", "/api/encounters", {"campaign_id": camp["id"]})
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_monster", "srd_id": "monsters/aboleth"})
+    aboleth = enc["combatants"][0]
+    assert (aboleth["xp"], aboleth["xp_in_lair"], aboleth["in_lair"]) == (5900, 7200, False)
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_monster", "srd_id": "monsters/zombie"})
+    assert enc["combatants"][1]["xp_in_lair"] == 0
+
+
+def test_grouped_initiative_gives_identical_monsters_one_roll(api):
+    _, enc = api("POST", "/api/encounters", {})
+    path = f"/api/encounters/{enc['id']}/action"
+    api("POST", path, {"action": "add_monster", "srd_id": "monsters/zombie", "count": 3})
+    api("POST", path, {"action": "add_monster", "srd_id": "monsters/goblin", "count": 2})
+    for _ in range(5):
+        _, enc = api("POST", path, {"action": "roll_initiative", "group": True})
+        by_kind = {}
+        for c in enc["combatants"]:
+            by_kind.setdefault(c["srd_id"], set()).add(c["initiative"])
+        assert all(len(rolls) == 1 for rolls in by_kind.values())
+
+
+def test_warlock_slots_come_from_the_srd_table(api):
+    assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 5}]})[1]["slots"] == [0, 0, 2]
+    assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 1}], "edition": "2024"})[1]["slots"] == [1]
+
+
+def test_surprise_by_edition(api, monkeypatch):
+    from questodian import game
+    rolled = []
+    real_roll = game.dice.roll
+    monkeypatch.setattr(game.dice, "roll", lambda expr: rolled.append(expr) or real_roll(expr))
+    for edition, expected in (("2024", "2d20kl1+0"), ("2014", "d20+0")):
+        _, camp = api("POST", "/api/campaigns", {"edition": edition})
+        _, enc = api("POST", "/api/encounters", {"campaign_id": camp["id"], "combatants": [{"name": "Guard", "surprised": True}]})
+        rolled.clear()
+        api("POST", f"/api/encounters/{enc['id']}/action", {"action": "roll_initiative"})
+        assert rolled == [expected]
+        _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "next"})
+        assert any("is surprised" in e["text"] for e in enc["log"]) == (edition == "2014")
+        _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "end"})
+        assert enc["combatants"][0]["surprised"] is False
+
+
+def test_saves_are_committed_before_the_response(db, monkeypatch):
+    """A client that reads right after a write sees it (the commit used to run after the response)."""
+    import socket
+    import threading
+    import time
+
+    import json
+    import urllib.request
+
+    import uvicorn
+    from sqlalchemy.orm import Session
+
+    from questodian.app import create_app
+
+    real_commit = Session.commit
+
+    def slow_commit(self):
+        time.sleep(0.5)
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", slow_commit)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(create_app(db, None), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{port}/api"
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(base + "/meta")
+                break
+            except OSError:
+                time.sleep(0.05)
+        request = urllib.request.Request(base + "/handbook", data=b'{"title": "Written"}', method="POST",
+                                         headers={"Content-Type": "application/json"})
+        created = json.load(urllib.request.urlopen(request))
+        assert urllib.request.urlopen(f"{base}/handbook/{created['id']}").status == 200
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+

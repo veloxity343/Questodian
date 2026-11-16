@@ -48,6 +48,11 @@ export interface Combatant {
   monster_id: string;
   npc_id: string;
   xp: number;
+  /** Legendary monsters are worth more fought in their lair (0: no lair value). */
+  xp_in_lair: number;
+  in_lair: boolean;
+  /** Caught unawares when combat starts (cleared when it ends). */
+  surprised: boolean;
   hidden: boolean;
 }
 
@@ -352,7 +357,7 @@ export type EncounterAction =
   | { action: "update"; id: string; changes: Partial<Combatant> }
   | { action: "remove"; id: string }
   | { action: "hp"; id: string; amount: number }
-  | { action: "roll_initiative"; which: "all" | "monsters" | "unset" }
+  | { action: "roll_initiative"; which: "all" | "monsters" | "unset"; group?: boolean }
   | { action: "roll_hp" }
   | { action: "sort" | "next" | "prev" | "end" }
   | { action: "clear"; all?: boolean };

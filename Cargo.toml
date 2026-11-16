@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.94"
+
+[workspace.dependencies]
+questodian-core = { path = "crates/core" }
+anyhow = "1.0.104"
+axum = "0.8.9"
+base64 = "0.23.1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.6.7", features = ["derive"] }
+flate2 = "1.1.11"
+indexmap = { version = "2.14.2", features = ["serde"] }
+mime_guess = "2.0.5"
+rand = "0.10.4"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "fs", "net", "signal"] }
+tower = { version = "0.5.3", features = ["util"] }
+uuid = { version = "1.29.2", features = ["v4"] }

@@ -220,7 +220,7 @@ function Calculator() {
   );
 }
 
-// ------------------------------------------------------------------ D&D quick calcs
+// ------------------------------------------------------------------ 5e quick calcs
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return <section className="panel calc-card"><h3>{title}</h3>{children}</section>;
