@@ -224,6 +224,13 @@ IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "
 MAX_IMAGE = 15 * 1024 * 1024
 
 
+def _handout_path(folder: Path, filename: str) -> Path | None:
+    """A stored file name is only ever a plain name inside the handouts folder."""
+    if not filename or Path(filename).name != filename or filename in (".", ".."):
+        return None
+    return folder / filename
+
+
 def _handout_dir(request: Request) -> Path:
     folder = request.app.state.db.files_dir
     if folder is None:
@@ -249,15 +256,15 @@ async def upload_handout(request: Request, doc_id: str):
         name = f"{doc_id}-{models.new_id()[:6]}{IMAGE_TYPES[mime]}"
         (folder / name).write_bytes(data)
         saved = repo.update("handouts", doc_id, {"filename": name, "mime": mime})
-    if old and old != name:
-        (folder / old).unlink(missing_ok=True)
+    if old and old != name and (path := _handout_path(folder, old)):
+        path.unlink(missing_ok=True)
     return saved
 
 
 @handouts.get("/{doc_id}/file")
 def handout_file(request: Request, repo: RepoDep, doc_id: str) -> FileResponse:
     doc = repo.get("handouts", doc_id)
-    path = _handout_dir(request) / doc["filename"] if doc["filename"] else None
+    path = _handout_path(_handout_dir(request), doc["filename"])
     if not path or not path.is_file():
         raise NotFound("this handout has no image yet")
     return FileResponse(path, media_type=doc["mime"] or None, headers={"Cache-Control": "no-cache"})
@@ -267,8 +274,8 @@ def handout_file(request: Request, repo: RepoDep, doc_id: str) -> FileResponse:
 def delete_handout(request: Request, repo: RepoDep, doc_id: str) -> dict:
     doc = repo.get("handouts", doc_id)
     repo.delete("handouts", doc_id)
-    if doc["filename"]:
-        (_handout_dir(request) / doc["filename"]).unlink(missing_ok=True)
+    if path := _handout_path(_handout_dir(request), doc["filename"]):
+        path.unlink(missing_ok=True)
     return {"deleted": doc_id}
 
 

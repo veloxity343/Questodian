@@ -87,7 +87,15 @@ impl<'a> Repo<'a> {
             query = query.bind(value);
         }
         let rows = query.fetch_all(&mut *self.tx).await?;
-        rows.iter().map(|row| to_doc(kind, columns, row)).collect()
+        // One unreadable record (e.g. edited by hand) shouldn't hide all the others.
+        let mut docs = Vec::with_capacity(rows.len());
+        for row in &rows {
+            match to_doc(kind, columns, row) {
+                Ok(doc) => docs.push(doc),
+                Err(e) => eprintln!("questodian: skipping a {} that can't be read: {e}", kind.singular()),
+            }
+        }
+        Ok(docs)
     }
 
     pub async fn get(&mut self, kind: Kind, id: &str) -> Result<Value> {
@@ -249,10 +257,52 @@ fn read_cell(row: &SqliteRow, column: &Column) -> Result<Value> {
         _ => {
             let text: String = row.try_get(name)?;
             match column.kind {
-                ColumnKind::Json => serde_json::from_str(&text).unwrap_or(Value::String(text)),
+                ColumnKind::Json => parse_stored_json(text),
                 _ => Value::String(text),
             }
         }
     };
     Ok(value)
+}
+
+/// Stored JSON. Python writes `NaN` and `Infinity` for such floats, which aren't JSON;
+/// they're read as 0. Anything else unparseable stays text (and fails validation).
+fn parse_stored_json(text: String) -> Value {
+    if let Ok(value) = serde_json::from_str(&text) {
+        return value;
+    }
+    let mut cleaned = String::with_capacity(text.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut rest = text.as_str();
+    while let Some(ch) = rest.chars().next() {
+        if !in_string {
+            let token = ["-Infinity", "Infinity", "NaN"].into_iter().find(|t| rest.starts_with(t));
+            if let Some(token) = token {
+                cleaned.push('0');
+                rest = &rest[token.len()..];
+                continue;
+            }
+        }
+        match ch {
+            '"' if !escaped => in_string = !in_string,
+            _ => {}
+        }
+        escaped = in_string && ch == '\\' && !escaped;
+        cleaned.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    serde_json::from_str(&cleaned).unwrap_or(Value::String(text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_nan_reads_as_zero() {
+        let value = parse_stored_json(r#"[{"name": "NaN bread", "weight": NaN}, -Infinity]"#.to_string());
+        assert_eq!(value, serde_json::json!([{"name": "NaN bread", "weight": 0}, 0]));
+        assert_eq!(parse_stored_json("{oops".into()), Value::String("{oops".into()));
+    }
 }

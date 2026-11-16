@@ -70,6 +70,8 @@ pub fn router(app: Shared) -> Router {
         .route("/sessions/{id}/award", post(award))
         .route("/sessions/{id}/log", post(add_log))
         .route("/characters/{id}/rest", post(rest))
+        .route("/handouts/{id}/file", get(handout_file).put(upload_handout))
+        .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
         .route("/{kind}", get(list_records).post(create_record))
         .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
@@ -428,6 +430,101 @@ async fn rest(
     let doc = game::rest(&mut repo, &id, body.r#type).await?;
     repo.commit().await?;
     Ok(Json(doc))
+}
+
+// --------------------------------------------------------------------------- handouts
+
+/// Image types a handout may hold, and the file extension each is stored with.
+const IMAGE_TYPES: [(&str, &str); 5] = [
+    ("image/png", ".png"),
+    ("image/jpeg", ".jpg"),
+    ("image/gif", ".gif"),
+    ("image/webp", ".webp"),
+    ("image/svg+xml", ".svg"),
+];
+const MAX_IMAGE: usize = 15 * 1024 * 1024;
+
+/// A stored handout file name is only ever a plain name inside the handouts folder.
+fn handout_path(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
+    let plain = !filename.is_empty()
+        && Path::new(filename).components().all(|c| matches!(c, Component::Normal(_)))
+        && !filename.contains(['/', '\\']);
+    plain.then(|| dir.join(filename))
+}
+
+/// Store the request body (an image) as this handout's picture.
+async fn upload_handout(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>> {
+    let mime = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let Some((_, extension)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
+        let types: Vec<&str> = IMAGE_TYPES.iter().map(|(m, _)| *m).collect();
+        return Err(invalid(format!("handouts must be images ({})", types.join(", "))));
+    };
+    if body.is_empty() || body.len() > MAX_IMAGE {
+        return Err(invalid("image is empty or larger than 15 MB"));
+    }
+    let dir = app.db.files_dir();
+    tokio::fs::create_dir_all(&dir).await?;
+    let mut repo = app.db.write().await?;
+    let doc = repo.get(Kind::Handouts, &id).await?;
+    let old = doc["filename"].as_str().unwrap_or("").to_string();
+    let name = format!("{id}-{}{extension}", &crate::repo::new_id()[..6]);
+    tokio::fs::write(dir.join(&name), &body).await?;
+    let saved = repo.update(Kind::Handouts, &id, json!({"filename": name, "mime": mime})).await?;
+    repo.commit().await?;
+    if old != name
+        && let Some(path) = handout_path(&dir, &old)
+    {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    Ok(Json(saved))
+}
+
+async fn handout_file(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Response> {
+    let doc = app.db.read().await?.get(Kind::Handouts, &id).await?;
+    let filename = doc["filename"].as_str().unwrap_or("");
+    let path = handout_path(&app.db.files_dir(), filename).ok_or_else(|| not_found("this handout has no image yet"))?;
+    let bytes = tokio::fs::read(&path).await.map_err(|_| not_found("this handout has no image yet"))?;
+    let mime = doc["mime"].as_str().filter(|m| !m.is_empty()).map(String::from);
+    let mime = mime.unwrap_or_else(|| mime_guess::from_path(&path).first_or_octet_stream().essence_str().to_string());
+    Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache".to_string())], Body::from(bytes))
+        .into_response())
+}
+
+/// Deleting a handout also removes its image file.
+async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = repo.get(Kind::Handouts, &id).await?;
+    repo.delete(Kind::Handouts, &id).await?;
+    repo.commit().await?;
+    if let Some(path) = handout_path(&app.db.files_dir(), doc["filename"].as_str().unwrap_or("")) {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    Ok(Json(json!({"deleted": id})))
+}
+
+async fn read_handout(state: State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {
+    read_record(state, UrlPath(("handouts".to_string(), id))).await
+}
+
+async fn update_handout(
+    state: State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    body: JsonBody,
+) -> Result<Json<Value>> {
+    update_record(state, UrlPath(("handouts".to_string(), id)), body).await
 }
 
 // --------------------------------------------------------------------------- write guard

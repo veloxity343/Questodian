@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Connection, Row, SqliteConnection, SqlitePool};
+use sqlx::{Connection, Row, SqliteConnection, SqlitePool, ValueRef};
 
 use crate::error::{Error, Result};
 use crate::kinds::{Column, ColumnKind, Kind};
@@ -124,76 +124,198 @@ async fn read_columns(pool: &SqlitePool) -> Result<HashMap<Kind, Vec<Column>>> {
 
 // --------------------------------------------------------------------------- migrations
 
-/// The schema version stored in the file: `None` for a new, empty database.
-async fn current_version(conn: &mut SqliteConnection) -> Result<Option<String>> {
+/// What the file holds, before any change.
+#[derive(Debug, PartialEq)]
+enum State {
+    /// No tables yet.
+    Empty,
+    /// At a known schema revision.
+    At(String),
+}
+
+/// Read the schema version. Anything unrecognised is refused with a plain message.
+async fn read_state(conn: &mut SqliteConnection, path: &Path) -> Result<State> {
     let tables: Vec<String> =
         sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'").fetch_all(&mut *conn).await?;
-    if tables.iter().any(|t| t == "alembic_version") {
-        let version: Option<String> =
-            sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_optional(&mut *conn).await?;
-        return Ok(version);
+    let has_app_tables = Kind::ALL.iter().any(|k| tables.iter().any(|t| t == k.table()));
+    if !tables.iter().any(|t| t == "alembic_version") {
+        // Tables but no version: made before migrations existed, so it has the baseline schema.
+        return Ok(if has_app_tables { State::At(BASELINE.into()) } else { State::Empty });
     }
-    // Tables but no version: made before migrations existed, so it has the baseline schema.
-    let known = Kind::ALL.iter().any(|k| tables.iter().any(|t| t == k.table()));
-    Ok(known.then(|| BASELINE.to_string()))
+    let versions: Vec<String> =
+        sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_all(&mut *conn).await?;
+    match versions.as_slice() {
+        [version] => Ok(State::At(version.clone())),
+        [] if !has_app_tables => {
+            // An empty database apart from an empty version table: start it afresh.
+            sqlx::query("DROP TABLE alembic_version").execute(&mut *conn).await?;
+            Ok(State::Empty)
+        }
+        _ => Err(refused(path, "its schema version record is missing or duplicated")),
+    }
+}
+
+fn refused(path: &Path, why: &str) -> Error {
+    Error::Internal(format!("Questodian can't open {}: {why}. Nothing was changed.", path.display()))
 }
 
 /// Bring the file at `path` up to [`HEAD`]. Returns the backup made first, if any.
 async fn upgrade(path: &Path) -> Result<Option<PathBuf>> {
     // Foreign keys stay off while tables change, so nothing cascades; the pragma only
     // takes effect outside a transaction.
-    let options = SqliteConnectOptions::new().filename(path).create_if_missing(true).foreign_keys(false);
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .foreign_keys(false)
+        .busy_timeout(Duration::from_secs(10));
     let mut conn = SqliteConnection::connect_with(&options).await?;
-    let version = current_version(&mut conn).await?;
-    let result = match version.as_deref() {
-        None => {
-            create_schema(&mut conn).await?;
-            Ok(None)
-        }
-        Some(HEAD) => Ok(None),
-        Some(BASELINE) => {
-            let backup = backup_database(&mut conn, path, BASELINE).await?;
-            upgrade_0001_to_0002(&mut conn).await?;
-            Ok(Some(backup))
-        }
-        Some(other) => Err(Error::Internal(format!(
-            "{} was made by a newer version of Questodian (schema {other}); this version can't open it. \
-             Nothing was changed.",
-            path.display()
-        ))),
-    };
+    let result = upgrade_with(&mut conn, path).await;
     conn.close().await?;
     result
 }
 
+async fn upgrade_with(conn: &mut SqliteConnection, path: &Path) -> Result<Option<PathBuf>> {
+    let state = read_state(conn, path).await?;
+    match &state {
+        State::Empty => {
+            run_locked(conn, path, &state, |tx| Box::pin(async move { create_schema(tx).await })).await?;
+            Ok(None)
+        }
+        State::At(version) if version == HEAD => Ok(None),
+        State::At(version) if version == BASELINE => {
+            // Check every session encounter can be moved before touching anything.
+            let moves = encounters_to_move(conn, path).await?;
+            let backup = backup_database(conn, path, BASELINE).await?;
+            let upgraded = run_locked(conn, path, &state, move |tx| Box::pin(upgrade_0001_to_0002(tx, moves))).await;
+            upgraded.map_err(|e| {
+                Error::Internal(format!(
+                    "Upgrading {} failed: {e}. Nothing was changed; a copy made before the upgrade is at {}.",
+                    path.display(),
+                    backup.display()
+                ))
+            })?;
+            Ok(Some(backup))
+        }
+        State::At(other) => Err(refused(
+            path,
+            &format!("it was made by a newer version of Questodian (schema {other}), or isn't a Questodian database"),
+        )),
+    }
+}
+
+type Step<'c> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'c>>;
+
+/// Run `step` in one write-locked transaction, if the version is still what was read
+/// (another copy of the app may have upgraded the file in the meantime).
+async fn run_locked<F>(conn: &mut SqliteConnection, path: &Path, expected: &State, step: F) -> Result<()>
+where
+    F: for<'c> FnOnce(&'c mut SqliteConnection) -> Step<'c>,
+{
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let result = async {
+        if read_state(conn, path).await? != *expected {
+            return Ok(()); // someone else got there first
+        }
+        step(conn).await
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(e)
+        }
+    }
+}
+
 async fn create_schema(conn: &mut SqliteConnection) -> Result<()> {
-    let mut tx = conn.begin().await?;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(SCHEMA_0002)).execute(&mut *tx).await?;
-    tx.commit().await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(SCHEMA_0002)).execute(conn).await?;
     Ok(())
 }
 
-/// Revision 0002 added the DM screen tables and the campaign edition. Each session used
-/// to hold one encounter; any with combatants become rows in the new encounters table
-/// (linked back to the session) before the column is dropped. Mirrors
-/// `src/questodian/migrations/versions/0002_dm_screen.py`.
-async fn upgrade_0001_to_0002(conn: &mut SqliteConnection) -> Result<()> {
-    let mut tx = conn.begin().await?;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(UPGRADE_0001_TO_0002)).execute(&mut *tx).await?;
+/// A session's encounter, checked and ready to become an encounters row.
+struct EncounterMove {
+    session_id: String,
+    campaign_id: Option<String>,
+    name: String,
+    round: i64,
+    turn: i64,
+    active: bool,
+    combatants: Value,
+    party_size: i64,
+}
 
-    let sessions =
-        sqlx::query("SELECT id, campaign_id, number, title, encounter FROM sessions").fetch_all(&mut *tx).await?;
-    let stamp = now();
-    for row in sessions {
-        let raw: Option<String> = row.get("encounter");
-        let encounter: Value = raw.as_deref().and_then(|text| serde_json::from_str(text).ok()).unwrap_or(Value::Null);
-        let combatants = encounter.get("combatants").and_then(Value::as_array).cloned().unwrap_or_default();
-        if combatants.is_empty() {
-            continue;
+/// Read every session's encounter (revision 0001 stored one per session). Empty ones are
+/// skipped; anything that can't be read refuses the upgrade, so no data is ever dropped.
+async fn encounters_to_move(conn: &mut SqliteConnection, path: &Path) -> Result<Vec<EncounterMove>> {
+    use crate::schemas::{Combatant, Lenient};
+
+    let rows =
+        sqlx::query("SELECT id, campaign_id, number, title, encounter FROM sessions").fetch_all(&mut *conn).await?;
+    let mut moves = Vec::new();
+    for row in rows {
+        let session_id: String = row.try_get("id")?;
+        let title: String = row.try_get("title").unwrap_or_default();
+        let unreadable = |why: &str| {
+            refused(path, &format!("the encounter saved with session '{title}' ({session_id}) can't be read ({why})"))
+        };
+        let encounter: Value = match row.try_get_raw("encounter")?.is_null() {
+            true => Value::Null,
+            false => match row.try_get::<String, _>("encounter") {
+                Ok(text) => serde_json::from_str(&text).map_err(|_| unreadable("it isn't valid JSON"))?,
+                Err(_) => return Err(unreadable("it isn't text")),
+            },
+        };
+        let encounter = match encounter {
+            Value::Null => continue,
+            Value::Object(map) => map,
+            _ => return Err(unreadable("it isn't an object")),
+        };
+        let combatants = match encounter.get("combatants") {
+            None | Some(Value::Null) => continue,
+            Some(Value::Array(list)) if list.is_empty() => continue,
+            Some(Value::Array(list)) => list.clone(),
+            Some(_) => return Err(unreadable("its combatants aren't a list")),
+        };
+        for c in &combatants {
+            Combatant::from_json(c.clone()).map_err(|e| unreadable(&format!("a combatant is invalid: {e}")))?;
         }
+        let number_field = |key: &str| match encounter.get(key) {
+            None | Some(Value::Null) => Ok(0),
+            Some(v) => i64::from_json(v.clone()).map_err(|_| unreadable(&format!("its {key} isn't a whole number"))),
+        };
+        let (round, turn) = (number_field("round")?, number_field("turn")?);
         let pcs = combatants.iter().filter(|c| c.get("kind").and_then(Value::as_str) == Some("pc")).count();
-        let number: i64 = row.get("number");
-        let title: String = row.get("title");
+        let number: i64 = row.try_get("number").unwrap_or(0);
+        moves.push(EncounterMove {
+            campaign_id: row.try_get("campaign_id")?,
+            name: format!("Session {number}: {title}"),
+            round,
+            turn,
+            active: encounter.get("active").is_some_and(truthy),
+            combatants: Value::Array(combatants),
+            party_size: pcs.max(1) as i64,
+            session_id,
+        });
+    }
+    Ok(moves)
+}
+
+/// Revision 0002 added the DM screen tables and the campaign edition, and moved each
+/// session's encounter into the new encounters table (linked back to the session).
+/// Mirrors `src/questodian/migrations/versions/0002_dm_screen.py`.
+async fn upgrade_0001_to_0002(conn: &mut SqliteConnection, moves: Vec<EncounterMove>) -> Result<()> {
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'").fetch_all(&mut *conn).await?;
+    if tables.iter().any(|t| t == "encounters") {
+        return Err(Error::Internal("an earlier upgrade stopped halfway (the encounters table already exists)".into()));
+    }
+    sqlx::raw_sql(sqlx::AssertSqlSafe(UPGRADE_0001_TO_0002)).execute(&mut *conn).await?;
+    let stamp = now();
+    for m in moves {
         sqlx::query(
             "INSERT INTO encounters (id, created, updated, campaign_id, session_id, scene_id, name, round, turn, \
              active, combatants, party_size, party_level, log, notes) \
@@ -202,26 +324,27 @@ async fn upgrade_0001_to_0002(conn: &mut SqliteConnection) -> Result<()> {
         .bind(new_id())
         .bind(&stamp)
         .bind(&stamp)
-        .bind(row.get::<Option<String>, _>("campaign_id"))
-        .bind(row.get::<String, _>("id"))
-        .bind(format!("Session {number}: {title}"))
-        .bind(encounter.get("round").and_then(Value::as_i64).unwrap_or(0))
-        .bind(encounter.get("turn").and_then(Value::as_i64).unwrap_or(0))
-        .bind(encounter.get("active").is_some_and(truthy))
-        .bind(Value::Array(combatants).to_string())
-        .bind(pcs.max(1) as i64)
-        .execute(&mut *tx)
+        .bind(m.campaign_id)
+        .bind(m.session_id)
+        .bind(m.name)
+        .bind(m.round)
+        .bind(m.turn)
+        .bind(m.active)
+        .bind(m.combatants.to_string())
+        .bind(m.party_size)
+        .execute(&mut *conn)
         .await?;
     }
-
-    sqlx::query("ALTER TABLE sessions DROP COLUMN encounter").execute(&mut *tx).await?;
+    sqlx::query("ALTER TABLE sessions DROP COLUMN encounter").execute(&mut *conn).await?;
     // A database from before migrations has no version table yet.
-    sqlx::query("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM alembic_version").execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO alembic_version (version_num) VALUES (?)").bind(HEAD).execute(&mut *tx).await?;
-    tx.commit().await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, \
+         CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))",
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query("DELETE FROM alembic_version").execute(&mut *conn).await?;
+    sqlx::query("INSERT INTO alembic_version (version_num) VALUES (?)").bind(HEAD).execute(&mut *conn).await?;
     Ok(())
 }
 
@@ -237,12 +360,28 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// Copy a live database safely (WAL included) to `<name>.backup-<label>-<time>`.
+/// Copy a live database safely (WAL included) to `<name>.backup-<label>-<time>`, and make
+/// sure the copy is on disk before anything changes. If a backup of this revision already
+/// exists (an earlier attempt that failed), that one is kept instead of making another.
 async fn backup_database(conn: &mut SqliteConnection, path: &Path, label: &str) -> Result<PathBuf> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let prefix = format!("{name}.backup-{label}-");
+    let folder = path.parent().unwrap_or(Path::new("."));
+    let existing = std::fs::read_dir(folder)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix)))
+        .max();
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let dest = path.with_file_name(format!("{name}.backup-{label}-{stamp}"));
+    let dest = folder.join(format!("{prefix}{stamp}"));
     sqlx::query("VACUUM INTO ?").bind(dest.to_string_lossy().into_owned()).execute(&mut *conn).await?;
+    std::fs::File::open(&dest)?.sync_all()?;
+    if let Ok(dir) = std::fs::File::open(folder) {
+        let _ = dir.sync_all(); // not possible on every OS; the file itself is synced
+    }
     Ok(dest)
 }
 

@@ -182,3 +182,82 @@ async fn a_failed_unit_of_work_saves_nothing() {
     assert_eq!(all_records(&db).await["handbook"], json!([]));
     db.close().await;
 }
+
+async fn v0001_with(dir: &Path, sql: &str) -> std::path::PathBuf {
+    let path = dir.join(DB_FILENAME);
+    let fixture = std::fs::read_to_string(format!("{FIXTURES}/v0001.sql")).unwrap();
+    db::load_sql(&path, &fixture).await.unwrap();
+    db::load_sql(&path, sql).await.unwrap();
+    path
+}
+
+#[tokio::test]
+async fn unreadable_session_encounter_refuses_the_upgrade() {
+    for bad in ["'{not json'", "'[1]'", "'{\"combatants\": {\"a\": 1}}'", "'{\"combatants\": [\"x\"]}'", "5"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = v0001_with(dir.path(), &format!("UPDATE sessions SET encounter = {bad} WHERE id = 'sess2';")).await;
+        let before = std::fs::read(&path).unwrap();
+        let error = Database::open(dir.path()).await.err().expect("refused").to_string();
+        assert!(error.contains("can't be read") && error.contains("Nothing was changed"), "{bad}: {error}");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "{bad}: file untouched");
+    }
+}
+
+#[tokio::test]
+async fn encounter_numbers_convert_like_python() {
+    let dir = tempfile::tempdir().unwrap();
+    let encounter = r#"{"round": "3", "turn": 1.0, "active": 1, "combatants": [{"name": "Rat"}]}"#;
+    v0001_with(dir.path(), &format!("UPDATE sessions SET encounter = '{encounter}' WHERE id = 'sess2';")).await;
+    let db = Database::open(dir.path()).await.unwrap();
+    let records = all_records(&db).await;
+    let moved = records["encounters"].as_array().unwrap().iter().find(|e| e["session_id"] == "sess2").unwrap().clone();
+    assert_eq!(
+        (moved["round"].clone(), moved["turn"].clone(), moved["active"].clone()),
+        (json!(3), json!(1), json!(true))
+    );
+    db.close().await;
+}
+
+#[tokio::test]
+async fn null_encounter_is_skipped_and_a_failed_attempt_reuses_its_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    v0001_with(dir.path(), "UPDATE sessions SET encounter = 'null' WHERE id = 'sess2';").await;
+    let db = Database::open(dir.path()).await.unwrap();
+    assert!(db.backup.is_some());
+    assert_eq!(all_records(&db).await["encounters"].as_array().unwrap().len(), 1);
+    db.close().await;
+}
+
+#[tokio::test]
+async fn odd_version_tables_are_refused_clearly() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(DB_FILENAME);
+    let sql = std::fs::read_to_string(format!("{FIXTURES}/v0002.sql")).unwrap();
+    db::load_sql(&path, &sql).await.unwrap();
+    db::load_sql(&path, "DELETE FROM alembic_version;").await.unwrap();
+    let error = Database::open(dir.path()).await.err().expect("refused").to_string();
+    assert!(error.contains("schema version record") && error.contains("Nothing was changed"), "{error}");
+
+    // An empty version table on its own is just a new database.
+    let fresh = tempfile::tempdir().unwrap();
+    db::load_sql(&fresh.path().join(DB_FILENAME), "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL);")
+        .await
+        .unwrap();
+    Database::open(fresh.path()).await.unwrap().close().await;
+}
+
+#[tokio::test]
+async fn nan_from_python_and_one_bad_record_dont_hide_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = open_fixture("v0002", dir.path()).await;
+    db.close().await;
+    let path = dir.path().join(DB_FILENAME);
+    db::load_sql(&path, r#"UPDATE characters SET inventory = '[{"name": "Rope", "weight": NaN}]';"#).await.unwrap();
+    db::load_sql(&path, "UPDATE trackers SET steps = '{broken';").await.unwrap();
+    let db = Database::open(dir.path()).await.unwrap();
+    let records = all_records(&db).await;
+    assert_eq!(records["characters"][0]["inventory"][0]["weight"], json!(0.0));
+    assert_eq!(records["trackers"], json!([]), "the unreadable tracker is left out");
+    assert_eq!(records["handbook"].as_array().unwrap().len(), 1);
+    db.close().await;
+}

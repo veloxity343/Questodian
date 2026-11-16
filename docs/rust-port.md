@@ -18,8 +18,8 @@ About 3,300 lines of Python, 69 tests.
 | `rules.py` | 233 | `rules` | 5e tables and derived stats (`derive`, slots, encounter budget) | Pure. Tables are data; check every number with `rules-lawyer` against the SRD, not against the Python. |
 | `srd.py` | 136 | `srd` | Loads `srd.json.gz` / `srd-2024.json.gz`, search with ranking and filters | Embed both files in the binary. Ranking is exact > prefix > contains > all words in name > all words in text, then by name. Filters compare lowercased strings and match inside lists. |
 | `schemas.py` | 417 | `schemas` | Pydantic models: defaults for every field, unknown keys ignored | The biggest parity risk; see section 4. |
-| `models.py` | 255 | `entity` | 11 tables | Generate SeaORM entities from a real database, then review. |
-| `repo.py` | 187 | `repo` | Generic list/get/save/update/delete for 11 kinds, link checks, ordering | One generic implementation driven by a per-kind table, as in Python. |
+| `models.py` | 255 | `kinds` | 11 tables | One description per kind; column types are read from the database (see section 10). |
+| `repo.py` | 187 | `repo` | Generic list/get/save/update/delete for 11 kinds, link checks, ordering | One generic implementation on sqlx, driven by `kinds`. |
 | `db.py`, `migrate.py`, `migrations/` | 300 | `db` | Data folder, pragmas, Alembic upgrade, backup before migrating | See section 3. |
 | `game.py` | 305 | `game` | Encounter actions (14), XP/loot awards, session log, short/long rests, HP sync to PCs | Port with its tests first. |
 | `transfer.py` | 334 | `transfer` | Export bundle v2 (with base64 images), v1 upgrade, import in overwrite/skip/copy mode in one transaction, id remapping, Markdown in and out | The Markdown output should match the Python output byte for byte. |
@@ -264,3 +264,27 @@ Other confirmed details:
 Still unverified: the custom protocol and bundled SQLite on Android/iOS (not built
 for those yet), and `sea-orm-cli generate entity` against our database (not run
 yet; M2 does this).
+
+## 10. Changes made during the port
+
+Decided while working through the milestones; each is easy to revisit.
+
+- **sqlx instead of SeaORM.** The typed layer is `schemas.rs`, and records travel as
+  JSON, so SeaORM entities would only have converted rows to JSON and back. One
+  generic `repo.rs` on sqlx reads each table's declared column types (`JSON`,
+  `BOOLEAN`, ...) and needs no per-table code. SQLite is still compiled in.
+- **Migrations:** new databases run `migrations/0002_schema.sql`, captured from a
+  database the Python app made. Revision 0001 (and pre-Alembic) databases are backed
+  up with `VACUUM INTO`, then upgraded by `migrations/0001_to_0002.sql` plus moving
+  session encounters in Rust; `sessions.encounter` is removed with `ALTER TABLE ...
+  DROP COLUMN` rather than a table rebuild (same columns, keys and indexes; tested).
+- **Dice maths uses `f64`.** Results are the same except for whole numbers of 10^15
+  and above, which Python prints exactly and Rust prints as `1e+15`.
+- **Bugs fixed in both apps** while comparing them: `0^-1` crashed Python (500);
+  a handout's stored file name could point outside the handouts folder.
+
+### Deliberate differences from the Python app
+
+- No `/docs` or `/openapi.json` (FastAPI's generated API docs).
+- Error *messages* for invalid input are worded differently; status codes match.
+- `min()`/`max()` with one argument return it (Python crashed).

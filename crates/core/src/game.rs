@@ -79,10 +79,11 @@ pub fn apply_hp_change(combatant: &mut Combatant, amount: i64) {
 
 /// Average HP, or a roll of the hit dice (at least 1) when asked and possible.
 fn roll_hp(average_hp: i64, hp_roll: &str, average: bool) -> i64 {
-    if !average && !hp_roll.is_empty() {
-        if let Ok(result) = dice::roll(hp_roll) {
-            return (result.total_f64().trunc() as i64).max(1);
-        }
+    if !average
+        && !hp_roll.is_empty()
+        && let Ok(result) = dice::roll(hp_roll)
+    {
+        return (result.total_f64().trunc() as i64).max(1);
     }
     average_hp
 }

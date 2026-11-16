@@ -269,6 +269,8 @@ def anonymize(value, ids: dict):
             return "TS"
         for raw, token in ids.items():
             value = value.replace(raw, token)
+        # Stored handout images get a random suffix: ID3-1a2b3c.png
+        value = re.sub(r"^(ID\d+)-[0-9a-f]{6}(\.\w+)$", r"\1-RANDOM\2", value)
     return value
 
 
@@ -350,10 +352,144 @@ def record_scenario(api: Session) -> None:
         api("GET", f"/api/{kind}")
 
 
+def game_scenario(api: Session) -> None:
+    keep = api.keep
+    keep("c24", api("POST", "/api/campaigns", {"name": "New rules", "edition": "2024"}))
+    keep("c14", api("POST", "/api/campaigns", {"name": "Old rules"}))
+    keep("pc", api("POST", "/api/characters", {"name": "Pip", "campaign_id": "{c24}", "abilities": {"dex": 16},
+                                              "classes": [{"name": "Bard", "level": 5}], "jack_of_all_trades": True,
+                                              "hp": {"max": 20, "current": 6, "temp": 3}, "conditions": ["prone"]}))
+    keep("pc2", api("POST", "/api/characters", {"name": "Ann", "campaign_id": "{c14}", "classes": [{"name": "Bard", "level": 5}],
+                                               "jack_of_all_trades": True, "hp": {"max": 12, "current": 12}}))
+    keep("mon", api("POST", "/api/monsters", {"campaign_id": "{c24}", "name": "Bell-Ringer", "ac": 13, "hp": 30, "xp": 450}))
+    keep("npc", api("POST", "/api/npcs", {"campaign_id": "{c24}", "name": "Mara", "role": "Spy", "stat_ref": "srd:monsters/spy"}))
+    keep("npc2", api("POST", "/api/npcs", {"campaign_id": "{c24}", "name": "Tob", "stats": "Commoner"}))
+    keep("npc3", api("POST", "/api/npcs", {"campaign_id": "{c24}", "name": "Bad", "stat_ref": "srd:monsters/nope"}))
+    keep("enc", api("POST", "/api/encounters", {"campaign_id": "{c24}", "name": "Gate"}))
+    act = lambda body, keep_body=True: api("POST", "/api/encounters/{enc}/action", body, keep_body)
+    act({"action": "add_monster", "srd_id": "monsters/zombie"})
+    act({"action": "add_monster", "srd_id": "monsters/zombie", "count": 2})
+    act({"action": "add_monster", "monster_id": "{mon}"})
+    act({"action": "add_monster", "srd_id": "monsters/goblin"})  # not in the 2024 SRD
+    act({"action": "add_monster", "srd_id": "monsters/zombie", "count": 51})
+    act({"action": "add_npc", "npc_id": "{npc}"})
+    act({"action": "add_npc", "npc_id": "{npc2}"})
+    act({"action": "add_npc", "npc_id": "{npc3}"})
+    act({"action": "add_character", "character_ids": ["{pc}", "{pc2}"]})
+    act({"action": "add_character", "character_id": "missing"})
+    act({"action": "add", "combatant": {"name": "Torch", "hp": "5", "kind": "npc", "initiative": 3}})
+    act({"action": "add", "combatant": {"kind": "dragon"}})
+    act({"action": "explode"})
+    doc = api("GET", "/api/encounters/{enc}")
+    ids = [x["id"] for x in doc["combatants"]]
+    for i, cid in enumerate(ids):
+        api.ids[f"x{i}"] = cid
+    for i in range(len(ids)):
+        act({"action": "update", "id": f"{{x{i}}}", "changes": {"initiative": (i * 7) % 5, "id": "nope", "junk": 1}})
+    act({"action": "update", "id": "{x0}", "changes": {"hp": "lots"}})
+    act({"action": "update", "id": "nobody", "changes": {}})
+    act({"action": "sort"})
+    for _ in range(3):
+        act({"action": "next"})
+    act({"action": "prev"})
+    for _ in range(len(ids) + 1):
+        act({"action": "next"})
+    pip = next(i for i, x in enumerate(doc["combatants"]) if x["name"] == "Pip")
+    for amount in (-2, -8, -1, 5, 0, -40):  # temp HP, drop to 0, damage at 0, heal, massive damage
+        act({"action": "hp", "id": f"{{x{pip}}}", "amount": amount})
+    api("GET", "/api/characters/{pc}")
+    act({"action": "remove", "id": "{x1}"})
+    act({"action": "end"})
+    api("GET", "/api/characters/{pc}")
+    act({"action": "clear"})
+    act({"action": "clear", "all": True})
+    act({"action": "add_monster", "srd_id": "monsters/wolf", "average_hp": False}, keep_body=False)
+    act({"action": "roll_hp"}, keep_body=False)
+    act({"action": "roll_initiative", "which": "monsters"}, keep_body=False)
+    act({"action": "roll_initiative", "which": "unset"}, keep_body=False)
+
+    keep("sess", api("POST", "/api/sessions", {"campaign_id": "{c14}", "loot": [{"name": "Gem", "qty": 0, "value": "50 gp"}]}))
+    api("POST", "/api/sessions/{sess}/award", {"xp": 300, "character_ids": ["{pc}", "{pc2}"]})
+    api("POST", "/api/sessions/{sess}/award", {"xp": -1000, "character_ids": ["{pc2}"]})
+    api("POST", "/api/sessions/{sess}/award", {"xp": 5})
+    api("POST", "/api/sessions/{sess}/award", {"loot_index": 0, "character_id": "{pc2}"})
+    api("POST", "/api/sessions/{sess}/award", {"loot_index": 3, "character_id": "{pc2}"})
+    api("POST", "/api/sessions/{sess}/award", {})
+    api("POST", "/api/sessions/{sess}/log", {"text": "  The bell tolls  ", "kind": ""})
+    api("POST", "/api/sessions/{sess}/log", {"text": "   "})
+    api("POST", "/api/sessions/{sess}/log", {})
+    api("GET", "/api/characters/{pc2}")
+    for who in ("{pc}", "{pc2}"):
+        api("PUT", f"/api/characters/{who}", {"hp": {"max": 20, "current": 0}, "exhaustion": 3,
+                                             "hit_dice": {"total": "5d8", "remaining": 0},
+                                             "spellcasting": {"slots": {"1": {"max": 4, "used": 3}}},
+                                             "resources": [{"name": "A", "max": 2, "reset": "short"}, {"name": "B", "max": 1}]})
+        for kind in ("short", "long"):
+            api("POST", f"/api/characters/{who}/rest", {"type": kind})
+        api("PUT", f"/api/characters/{who}", {"hp": {"max": 20, "current": 1}})
+        for kind in ("short", "long"):
+            api("POST", f"/api/characters/{who}/rest", {"type": kind})
+    api("POST", "/api/characters/{pc}/rest", {"type": "nap"})
+    api("POST", "/api/characters/missing/rest", {"type": "long"})
+
+
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                    "1f15c4890000000d49444154789c63f8ffff3f0005fe02fea7d6a5d00000000049454e44ae426082")
+
+
+def upload(api: Session, path: str, data: bytes, mime: str):
+    for name, real in api.ids.items():
+        path = path.replace("{" + name + "}", real)
+    req = urllib.request.Request(f"http://127.0.0.1:{api.port}{path}", data=data, method="PUT")
+    req.add_header("Content-Type", mime)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            status, out = res.status, json.loads(res.read())
+    except urllib.error.HTTPError as e:
+        status, out = e.code, None
+    api.log.append((f"PUT {path} [{mime}]", status, out))
+    return out
+
+
+def raw_get(api: Session, path: str):
+    for name, real in api.ids.items():
+        path = path.replace("{" + name + "}", real)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{api.port}{path}", timeout=30) as res:
+            out = {"type": res.headers["Content-Type"], "cache": res.headers["Cache-Control"], "bytes": len(res.read())}
+            status = res.status
+    except urllib.error.HTTPError as e:
+        status, out = e.code, None
+    api.log.append((f"GET {path} (file)", status, out))
+
+
+def handout_scenario(api: Session) -> None:
+    api.keep("h", api("POST", "/api/handouts", {"title": "Map", "folder": "Maps"}))
+    raw_get(api, "/api/handouts/{h}/file")
+    upload(api, "/api/handouts/{h}/file", PNG, "image/png")
+    raw_get(api, "/api/handouts/{h}/file")
+    upload(api, "/api/handouts/{h}/file", b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml; charset=utf-8")
+    raw_get(api, "/api/handouts/{h}/file")
+    upload(api, "/api/handouts/{h}/file", b"not an image", "text/plain")
+    upload(api, "/api/handouts/{h}/file", b"", "image/png")
+    upload(api, "/api/handouts/missing/file", PNG, "image/png")
+    api("GET", "/api/handouts/{h}")
+    api("GET", "/api/handouts")
+    api("PUT", "/api/handouts/{h}", {"filename": "../questodian.db"})
+    raw_get(api, "/api/handouts/{h}/file")
+    api("DELETE", "/api/handouts/{h}")
+    api("DELETE", "/api/handouts/{h}")
+    api("PUT", "/api/projection", {"id": "{h}", "zoom": "1.5"})
+
+
 def check_records(c: Checker) -> None:
     py, rust = Session(PY_PORT), Session(RUST_PORT)
     record_scenario(py)
     record_scenario(rust)
+    game_scenario(py)
+    game_scenario(rust)
+    handout_scenario(py)
+    handout_scenario(rust)
     py_ids: dict = {}
     rust_ids: dict = {}
     for (label, ps, pb), (_, rs, rb) in zip(py.log, rust.log):

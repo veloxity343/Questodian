@@ -275,3 +275,10 @@ def test_failed_import_writes_nothing(api):
     status, _ = api("POST", "/api/import", {"collections": {"handbook": [{"title": "ok"}], "characters": [{"classes": "bad"}]}})
     assert status == 400
     assert api("GET", "/api/handbook")[1]["handbook"] == []
+
+
+def test_handout_file_name_cannot_leave_the_folder(client):
+    h = client.post("/api/handouts", json={"title": "Map"}).json()
+    client.put(f"/api/handouts/{h['id']}", json={"filename": "../questodian.db"})
+    assert client.get(f"/api/handouts/{h['id']}/file").status_code == 404
+    assert client.delete(f"/api/handouts/{h['id']}").status_code == 200
