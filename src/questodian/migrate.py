@@ -15,13 +15,13 @@ from sqlalchemy import Engine, inspect
 
 from .models import Base
 
-# The revision that matches the schema Pocket DM created before migrations existed.
+# The revision that matches the schema Questodian created before migrations existed.
 BASELINE = "0001"
 
 
 def alembic_config(engine: Engine | None = None) -> Config:
     cfg = Config()
-    cfg.set_main_option("script_location", str(resources.files("pocket_dm").joinpath("migrations")))
+    cfg.set_main_option("script_location", str(resources.files("questodian").joinpath("migrations")))
     if engine is not None:
         cfg.attributes["engine"] = engine
     return cfg

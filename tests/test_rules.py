@@ -1,5 +1,5 @@
-from pocket_dm import rules
-from pocket_dm.repo import normalize
+from questodian import rules
+from questodian.repo import normalize
 
 
 def test_modifiers_and_proficiency():

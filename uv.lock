@@ -307,48 +307,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pocket-dm"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "fastapi" },
-    { name = "sqlalchemy" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-desktop = [
-    { name = "pywebview" },
-]
-
-[package.dev-dependencies]
-build = [
-    { name = "pyinstaller" },
-]
-dev = [
-    { name = "httpx2" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.20.0" },
-    { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=6.1" },
-    { name = "sqlalchemy", specifier = ">=2.1.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
-]
-provides-extras = ["desktop"]
-
-[package.metadata.requires-dev]
-build = [{ name = "pyinstaller", specifier = ">=6.16" }]
-dev = [
-    { name = "httpx2", specifier = ">=2.13.1" },
-    { name = "pytest", specifier = ">=9.1.1" },
-]
-
-[[package]]
 name = "proxy-tools"
 version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -660,6 +618,48 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/70/01/392eba83c8e47b946b929d7c46e0f04b35e9671f8bb6fc36b6f7945b4de8/qtpy-2.4.3.tar.gz", hash = "sha256:db744f7832e6d3da90568ba6ccbca3ee2b3b4a890c3d6fbbc63142f6e4cdf5bb", size = 66982, upload-time = "2025-02-11T15:09:25.759Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/69/76/37c0ccd5ab968a6a438f9c623aeecc84c202ab2fabc6a8fd927580c15b5a/QtPy-2.4.3-py3-none-any.whl", hash = "sha256:72095afe13673e017946cc258b8d5da43314197b741ed2890e563cf384b51aa1", size = 95045, upload-time = "2025-02-11T15:09:24.162Z" },
+]
+
+[[package]]
+name = "questodian"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "fastapi" },
+    { name = "sqlalchemy" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+desktop = [
+    { name = "pywebview" },
+]
+
+[package.dev-dependencies]
+build = [
+    { name = "pyinstaller" },
+]
+dev = [
+    { name = "httpx2" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.20.0" },
+    { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=6.1" },
+    { name = "sqlalchemy", specifier = ">=2.1.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+]
+provides-extras = ["desktop"]
+
+[package.metadata.requires-dev]
+build = [{ name = "pyinstaller", specifier = ">=6.16" }]
+dev = [
+    { name = "httpx2", specifier = ">=2.13.1" },
+    { name = "pytest", specifier = ">=9.1.1" },
 ]
 
 [[package]]

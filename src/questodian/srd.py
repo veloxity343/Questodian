@@ -48,7 +48,7 @@ def check_edition(edition: str | None) -> str:
 
 @cache
 def _load(edition: str = DEFAULT_EDITION) -> dict:
-    raw = resources.files("pocket_dm").joinpath(EDITIONS[check_edition(edition)]).read_bytes()
+    raw = resources.files("questodian").joinpath(EDITIONS[check_edition(edition)]).read_bytes()
     data = json.loads(gzip.decompress(raw))
     data["by_id"] = {e["id"]: e for e in data["entries"]}
     for e in data["entries"]:

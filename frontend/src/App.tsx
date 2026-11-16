@@ -58,7 +58,7 @@ function TopBar() {
   return (
     <header className="topbar">
       <button type="button" className="icon-btn menu-btn" aria-label="Toggle navigator" disabled={!onDm} onClick={() => setNav(!nav)}>☰</button>
-      <NavLink className="brand" to="/"><span aria-hidden="true">✦</span> Pocket DM</NavLink>
+      <NavLink className="brand" to="/"><span aria-hidden="true">✦</span> Questodian</NavLink>
       <nav className="modes" aria-label="Main">
         {MODES.map((m) => <NavLink key={m.to} to={m.to} end={m.end} className={({ isActive }) => (isActive ? "on" : "")}>{m.label}</NavLink>)}
       </nav>

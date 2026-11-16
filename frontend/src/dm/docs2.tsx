@@ -286,7 +286,7 @@ export function CampaignDoc() {
 
 // ------------------------------------------------------------------ handout
 
-const PROJECT_CHANNEL = "pocketdm-project";
+const PROJECT_CHANNEL = "questodian-project";
 interface ViewState { id: string; zoom: number; x: number; y: number }
 
 /** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
@@ -294,7 +294,7 @@ export function projectHandout() {
   const url = "/project";
   const native = (window as unknown as { pywebview?: { api?: { project?: (u: string) => void } } }).pywebview?.api?.project;
   if (native) return native(url);
-  window.open(url, "pocketdm-players", "popup,width=1280,height=800");
+  window.open(url, "questodian-players", "popup,width=1280,height=800");
 }
 
 export function HandoutDoc({ initial }: { initial: Handout }) {

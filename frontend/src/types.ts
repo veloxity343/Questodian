@@ -1,4 +1,4 @@
-// Mirrors src/pocket_dm/schemas.py.
+// Mirrors src/questodian/schemas.py.
 
 export type Kind =
   | "campaigns" | "sessions" | "characters" | "handbook"

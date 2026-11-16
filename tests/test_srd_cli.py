@@ -1,6 +1,6 @@
-from pocket_dm import cli, srd
-from pocket_dm.db import Database
-from pocket_dm.repo import Repo
+from questodian import cli, srd
+from questodian.db import Database
+from questodian.repo import Repo
 
 
 def test_srd_bundle_is_complete():

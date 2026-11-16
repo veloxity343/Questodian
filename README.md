@@ -1,4 +1,4 @@
-# Pocket DM
+# Questodian
 
 An all-in-one Dungeons & Dragons table manager that runs on your own computer:
 a DM screen for running sessions, campaign prep, encounters, character sheets,
@@ -13,11 +13,11 @@ roller. Fully offline: one local database file, no account, nothing to connect.
 ## Install
 
 **Desktop app (Windows, macOS):** download the zip for your system from the
-[Releases](https://github.com/veloxity343/pocket-dm/releases) page, unzip it and run
-*Pocket DM*. The builds aren't code-signed yet, so the first launch needs one extra step:
+[Releases](https://github.com/veloxity343/questodian/releases) page, unzip it and run
+*Questodian*. The builds aren't code-signed yet, so the first launch needs one extra step:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
-- **macOS:** after moving *Pocket DM.app* to Applications, run `xattr -cr "/Applications/Pocket DM.app"` once in Terminal.
+- **macOS:** after moving *Questodian.app* to Applications, run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
 
 **From source (any OS):**
 
@@ -30,16 +30,16 @@ make app         # or: open it in its own window (Windows, macOS; Linux needs GT
 Other options:
 
 ```sh
-uv run pocket-dm serve --port 9000 --no-browser
-uv run pocket-dm serve --host 0.0.0.0     # let devices on your network connect (e.g. a TV for handouts)
-uv run pocket-dm --data-dir ./my-table    # store the database somewhere specific
+uv run questodian serve --port 9000 --no-browser
+uv run questodian serve --host 0.0.0.0     # let devices on your network connect (e.g. a TV for handouts)
+uv run questodian --data-dir ./my-table    # store the database somewhere specific
 ```
 
-Your data is one SQLite file, `pocket-dm.db`, in the usual place for your OS
-(`%APPDATA%\Pocket DM` on Windows, `~/Library/Application Support/Pocket DM` on macOS,
-`~/.local/share/pocket-dm` on Linux), or `$POCKET_DM_DATA` / `--data-dir`. Handout
+Your data is one SQLite file, `questodian.db`, in the usual place for your OS
+(`%APPDATA%\Questodian` on Windows, `~/Library/Application Support/Questodian` on macOS,
+`~/.local/share/questodian` on Linux), or `$QUESTODIAN_DATA` / `--data-dir`. Handout
 images sit next to it in `handouts/`. Before a new version changes the database, a
-copy is saved next to it (`pocket-dm.db.backup-…`).
+copy is saved next to it (`questodian.db.backup-…`).
 
 ## The DM screen
 
@@ -85,12 +85,12 @@ d%  4dF  (1d8+3)*2  floor(8d6/2)  mod(16)  prof(5)
 ## Command line
 
 ```sh
-uv run pocket-dm roll 2d20kh1+5 8d6 -v
-uv run pocket-dm calc "mod(18) + prof(9)"
-uv run pocket-dm srd fireball
-uv run pocket-dm srd -c monsters dragon
-uv run pocket-dm export backup.json [--campaign ID]
-uv run pocket-dm import backup.json house-rules.md --mode skip
+uv run questodian roll 2d20kh1+5 8d6 -v
+uv run questodian calc "mod(18) + prof(9)"
+uv run questodian srd fireball
+uv run questodian srd -c monsters dragon
+uv run questodian export backup.json [--campaign ID]
+uv run questodian import backup.json house-rules.md --mode skip
 ```
 
 ## Development
@@ -116,8 +116,8 @@ wheel. `make package` does both and fails if the UI didn't make it into the
 wheel. By hand:
 
 ```sh
-cd frontend && npm run build && cd ..   # writes src/pocket_dm/web/
-uv build                                # dist/pocket_dm-*.whl and .tar.gz
+cd frontend && npm run build && cd ..   # writes src/questodian/web/
+uv build                                # dist/questodian-*.whl and .tar.gz
 ```
 
 ### Desktop builds
@@ -136,16 +136,16 @@ as a `dist` artifact.
 
 ### Layout
 
-- `src/pocket_dm/app.py`: FastAPI app, routes and static UI serving
-- `src/pocket_dm/desktop.py`: the desktop window (pywebview); `packaging/` has the PyInstaller recipe
-- `src/pocket_dm/models.py`: SQLAlchemy tables (campaigns, sessions, characters, handbook)
-- `src/pocket_dm/schemas.py`: Pydantic schemas for API payloads and exports
-- `src/pocket_dm/db.py`, `repo.py`: engine/session setup and record access
-- `src/pocket_dm/migrations/`, `migrate.py`: Alembic migrations, applied on startup
-- `src/pocket_dm/game.py`: initiative tracker, rewards and rests
-- `src/pocket_dm/dice.py`: dice and arithmetic parser/evaluator (no `eval`)
-- `src/pocket_dm/rules.py`: 5e numbers and derived character stats
-- `src/pocket_dm/transfer.py`: import and export (JSON bundles, Markdown)
+- `src/questodian/app.py`: FastAPI app, routes and static UI serving
+- `src/questodian/desktop.py`: the desktop window (pywebview); `packaging/` has the PyInstaller recipe
+- `src/questodian/models.py`: SQLAlchemy tables (campaigns, sessions, characters, handbook)
+- `src/questodian/schemas.py`: Pydantic schemas for API payloads and exports
+- `src/questodian/db.py`, `repo.py`: engine/session setup and record access
+- `src/questodian/migrations/`, `migrate.py`: Alembic migrations, applied on startup
+- `src/questodian/game.py`: initiative tracker, rewards and rests
+- `src/questodian/dice.py`: dice and arithmetic parser/evaluator (no `eval`)
+- `src/questodian/rules.py`: 5e numbers and derived character stats
+- `src/questodian/transfer.py`: import and export (JSON bundles, Markdown)
 - `frontend/src/`: the React UI (`dm/` is the DM screen, `views/` the other pages, `context/` app-wide state)
 - `scripts/build_srd.py`, `scripts/build_srd_2024.py`: regenerate the bundled SRD 5.1 and 5.2.1 data
   from [5e-bits/5e-database](https://github.com/5e-bits/5e-database) (the 2024 rules prose comes from
@@ -163,12 +163,12 @@ never run anything by hand. After changing `models.py`:
 
 ```sh
 uv run alembic revision --autogenerate -m "add character portrait"
-# review the new file in src/pocket_dm/migrations/versions/, then:
+# review the new file in src/questodian/migrations/versions/, then:
 uv run pytest                  # fails if models and migrations disagree
 ```
 
-The `alembic` command targets your normal database (`$POCKET_DM_DATA` or
-`~/.local/share/pocket-dm/pocket-dm.db`); add `-x db=path/to/file.db` to use
+The `alembic` command targets your normal database (`$QUESTODIAN_DATA` or
+`~/.local/share/questodian/questodian.db`); add `-x db=path/to/file.db` to use
 another. Other useful commands: `alembic current`, `alembic history`,
 `alembic check`, `alembic downgrade -1`.
 
@@ -178,7 +178,7 @@ SQLite can't alter columns in place, so migrations run in Alembic's batch mode
 
 ## License and attribution
 
-Pocket DM is released under the [MIT License](LICENSE).
+Questodian is released under the [MIT License](LICENSE).
 
 This work includes material from the System Reference Document 5.2.1 ("SRD 5.2.1") by
 Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is

@@ -13,20 +13,20 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from . import migrate
 
-DB_FILENAME = "pocket-dm.db"
+DB_FILENAME = "questodian.db"
 
 
 def default_data_dir() -> Path:
-    """$POCKET_DM_DATA, else the usual per-user data folder for this OS."""
-    env = os.environ.get("POCKET_DM_DATA")
+    """$QUESTODIAN_DATA, else the usual per-user data folder for this OS."""
+    env = os.environ.get("QUESTODIAN_DATA")
     if env:
         return Path(env).expanduser()
     if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Pocket DM"
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Questodian"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Pocket DM"
+        return Path.home() / "Library" / "Application Support" / "Questodian"
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
-    return Path(base) / "pocket-dm"
+    return Path(base) / "questodian"
 
 
 class Database:

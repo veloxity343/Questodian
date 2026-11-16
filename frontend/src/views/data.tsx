@@ -51,7 +51,7 @@ export function DataPage() {
   const exportCampaign = async () => {
     const id = exportId || campaigns[0].id;
     const name = campaigns.find((c) => c.id === id)?.name || "campaign";
-    downloadJson(`${slug(name)}.pocketdm.json`, await api.exportAll(id));
+    downloadJson(`${slug(name)}.questodian.json`, await api.exportAll(id));
   };
 
   return (
@@ -62,7 +62,7 @@ export function DataPage() {
           <h2>Export</h2>
           <p>Everything is plain JSON you can back up, version, or hand to another DM.</p>
           <div className="stack">
-            <button type="button" className="btn primary" onClick={async () => downloadJson(`pocket-dm-backup-${today()}.pocketdm.json`, await api.exportAll())}>
+            <button type="button" className="btn primary" onClick={async () => downloadJson(`questodian-backup-${today()}.questodian.json`, await api.exportAll())}>
               ⬇ Full backup (all data)
             </button>
             {campaigns.length > 0 && (
@@ -79,7 +79,7 @@ export function DataPage() {
         </section>
         <section className="panel">
           <h2>Import</h2>
-          <p>Accepts Pocket DM backups, campaign exports, single-record exports (.json), and Markdown files (.md) which become handbook entries.</p>
+          <p>Accepts Questodian backups, campaign exports, single-record exports (.json), and Markdown files (.md) which become handbook entries.</p>
           <div className="stack">
             {MODES.map(([v, label]) => (
               <label className="check" key={v}>
@@ -99,7 +99,7 @@ export function DataPage() {
         <h2>About the rules content</h2>
         <p className="small">{meta?.srd?.attribution}</p>
         <p className="muted small">{meta?.srd?.source}</p>
-        <p className="muted small">Pocket DM {meta?.version}</p>
+        <p className="muted small">Questodian {meta?.version}</p>
       </section>
     </>
   );

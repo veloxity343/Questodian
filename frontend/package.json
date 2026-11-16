@@ -1,12 +1,12 @@
 {
-  "name": "pocket-dm-frontend",
+  "name": "questodian-frontend",
   "private": true,
   "license": "MIT",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "uv run --project .. pocket-dm serve --no-browser",
+    "dev:api": "uv run --project .. questodian serve --no-browser",
     "dev:all": "concurrently --kill-others --names api,web --prefix-colors blue,magenta \"npm:dev:api\" \"npm:dev\"",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",

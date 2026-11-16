@@ -9,7 +9,7 @@ from pathlib import Path
 from . import models, rules
 from .repo import KINDS, LINKS, SINGULAR, Repo, normalize, valid_id
 
-FORMAT = "pocket-dm"
+FORMAT = "questodian"
 VERSION = 2  # 2: DM screen records; sessions no longer hold an encounter
 IMPORT_MODES = ("overwrite", "skip", "copy")
 
@@ -64,9 +64,9 @@ def _collections_from(payload) -> dict[str, list[dict]]:
     if not isinstance(payload, dict):
         raise TransferError("expected a JSON object")
     if payload.get("format") not in (None, FORMAT):
-        raise TransferError(f"not a Pocket DM file (format={payload.get('format')!r})")
+        raise TransferError(f"not a Questodian file (format={payload.get('format')!r})")
     if int(payload.get("version") or VERSION) > VERSION:
-        raise TransferError("this file was made by a newer version of Pocket DM")
+        raise TransferError("this file was made by a newer version of Questodian")
     if "collections" in payload:
         cols = payload["collections"]
         if not isinstance(cols, dict):

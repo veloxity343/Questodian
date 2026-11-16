@@ -1,4 +1,4 @@
-// Mirrors pocket_dm.rules.derive so the sheet can update as you type.
+// Mirrors questodian.rules.derive so the sheet can update as you type.
 
 import type { Ability, Character, Meta } from "../types";
 import { ABILITIES, modOf, profBonus } from "./util";

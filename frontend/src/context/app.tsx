@@ -45,7 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [setCampaignId]);
 
   useEffect(() => {
-    api.meta().then(setMeta, (e: Error) => toast(`Can't reach the Pocket DM server: ${e.message}`, "error", 10000));
+    api.meta().then(setMeta, (e: Error) => toast(`Can't reach the Questodian server: ${e.message}`, "error", 10000));
     void refreshCampaigns();
   }, [refreshCampaigns, toast]);
 

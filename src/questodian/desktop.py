@@ -1,4 +1,4 @@
-"""Run Pocket DM as a desktop app: the server on a private port, shown in a native window.
+"""Run Questodian as a desktop app: the server on a private port, shown in a native window.
 
 Needs the optional ``desktop`` extra (pywebview). Without it, or without a usable
 web view on this system, the app opens in the default browser instead.
@@ -33,7 +33,7 @@ def _wait_until_up(url: str, timeout: float = 20.0) -> None:
                 return
         except OSError:
             time.sleep(0.1)
-    raise RuntimeError("the Pocket DM server didn't start")
+    raise RuntimeError("the Questodian server didn't start")
 
 
 class _Server(uvicorn.Server):
@@ -60,7 +60,7 @@ class _Bridge:
                 return
             except Exception:  # the window was closed
                 self.players = None
-        self.players = webview.create_window("Pocket DM: players", url, width=1280, height=800, background_color="#000000")
+        self.players = webview.create_window("Questodian: players", url, width=1280, height=800, background_color="#000000")
         self.players.events.closed += lambda: setattr(self, "players", None)
 
 
@@ -76,10 +76,10 @@ def run(data_dir: str | None = None) -> int:
     try:
         import webview
     except ImportError:
-        return _in_browser(base, thread, "install pocket-dm[desktop] for a native window")
+        return _in_browser(base, thread, "install questodian[desktop] for a native window")
 
     window = webview.create_window(
-        f"Pocket DM {__version__}", base, js_api=_Bridge(base), width=1600, height=960, min_size=(900, 600),
+        f"Questodian {__version__}", base, js_api=_Bridge(base), width=1600, height=960, min_size=(900, 600),
         background_color="#0e131b",
     )
     window.events.closed += lambda: setattr(server, "should_exit", True)
@@ -94,7 +94,7 @@ def run(data_dir: str | None = None) -> int:
 
 
 def _in_browser(base: str, thread: threading.Thread, why: str) -> int:
-    print(f"Pocket DM {__version__} running at {base} ({why}). Press Ctrl+C to stop.")
+    print(f"Questodian {__version__} running at {base} ({why}). Press Ctrl+C to stop.")
     webbrowser.open(base)
     try:
         thread.join()

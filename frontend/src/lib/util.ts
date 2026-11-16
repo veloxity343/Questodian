@@ -65,7 +65,7 @@ export function pickFiles({ accept = "", multiple = false } = {}): Promise<Picke
 
 // ------------------------------------------------------------------ browser-local preferences
 
-const KEY = (k: string) => `pocketdm.${k}`;
+const KEY = (k: string) => `questodian.${k}`;
 
 export function readPref<T>(key: string, fallback: T): T {
   try {

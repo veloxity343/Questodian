@@ -2,7 +2,7 @@
 
 The app passes its engine in via ``config.attributes["engine"]``. When run from
 the ``alembic`` command line, the database is taken from ``-x db=PATH``, else
-``$POCKET_DM_DATA`` / the default data folder (the same one the app uses).
+``$QUESTODIAN_DATA`` / the default data folder (the same one the app uses).
 """
 
 from logging.config import fileConfig
@@ -10,8 +10,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine
 
-from pocket_dm.db import DB_FILENAME, default_data_dir
-from pocket_dm.models import Base
+from questodian.db import DB_FILENAME, default_data_dir
+from questodian.models import Base
 
 config = context.config
 if config.config_file_name:  # command-line use: log per alembic.ini

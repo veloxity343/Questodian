@@ -7,10 +7,10 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
-from pocket_dm import migrate
-from pocket_dm.db import DB_FILENAME, Database
-from pocket_dm.models import Base
-from pocket_dm.repo import Repo
+from questodian import migrate
+from questodian.db import DB_FILENAME, Database
+from questodian.models import Base
+from questodian.repo import Repo
 
 
 def _head() -> str:
@@ -51,7 +51,7 @@ def test_database_from_before_migrations_is_adopted(tmp_path):
 def test_table_rebuild_does_not_cascade_deletes(tmp_path, monkeypatch):
     """Batch-mode rebuilds drop and recreate tables; that must not trigger ON DELETE CASCADE."""
     scripts = tmp_path / "migrations"
-    shutil.copytree(str(resources.files("pocket_dm").joinpath("migrations")), scripts)
+    shutil.copytree(str(resources.files("questodian").joinpath("migrations")), scripts)
     (scripts / "versions" / "9999_rebuild_campaigns.py").write_text(
         f'''
 from alembic import op
@@ -111,7 +111,7 @@ def test_0002_moves_session_encounters_and_backs_up(tmp_path):
     engine.dispose()
 
     db = Database(tmp_path)
-    assert db.backup is not None and db.backup.name.startswith("pocket-dm.db.backup-0001-")
+    assert db.backup is not None and db.backup.name.startswith("questodian.db.backup-0001-")
     with db.session() as s:
         repo = Repo(s)
         (enc,) = repo.list("encounters")

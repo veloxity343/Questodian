@@ -11,7 +11,7 @@ export default defineConfig({
     proxy: { "/api": { target: "http://127.0.0.1:8765", changeOrigin: false } },
   },
   build: {
-    outDir: "../src/pocket_dm/web",
+    outDir: "../src/questodian/web",
     emptyOutDir: true,
   },
 });

@@ -18,7 +18,7 @@ from .db import Database
 from .repo import KINDS, SCHEMAS, SINGULAR, NotFound, Repo, title_of
 
 MAX_BODY = 20 * 1024 * 1024
-WEB_DIR = Path(str(resources.files("pocket_dm").joinpath("web")))
+WEB_DIR = Path(str(resources.files("questodian").joinpath("web")))
 
 
 def _slug(text: str) -> str:
@@ -138,8 +138,8 @@ transfers = APIRouter(tags=["import/export"])
 @transfers.get("/export")
 def export_bundle(request: Request, repo: RepoDep, campaign_id: str = "") -> JSONResponse:
     bundle = transfer.export_bundle(repo, campaign_id or None, request.app.state.db.files_dir)
-    name = repo.get("campaigns", campaign_id)["name"] if campaign_id else "pocket-dm-backup"
-    return JSONResponse(bundle, headers=_attachment(f"{_slug(name)}.pocketdm.json"))
+    name = repo.get("campaigns", campaign_id)["name"] if campaign_id else "questodian-backup"
+    return JSONResponse(bundle, headers=_attachment(f"{_slug(name)}.questodian.json"))
 
 
 @transfers.get("/export/{kind}/{doc_id}")
@@ -318,7 +318,7 @@ def rest(repo: RepoDep, doc_id: str, body: schemas.RestIn) -> schemas.Character:
 
 
 def create_app(db: Database, web_dir: Path | None = WEB_DIR) -> FastAPI:
-    app = FastAPI(title="Pocket DM", version=__version__)
+    app = FastAPI(title="Questodian", version=__version__)
     app.state.db = db
     app.state.projection = schemas.Projection()
 
@@ -356,7 +356,7 @@ def _mount_ui(app: FastAPI, web_dir: Path | None) -> None:
         @app.get("/", include_in_schema=False)
         def not_built() -> HTMLResponse:
             return HTMLResponse(
-                "<h1>Pocket DM</h1><p>The UI hasn't been built yet. Run <code>npm run build</code> "
+                "<h1>Questodian</h1><p>The UI hasn't been built yet. Run <code>npm run build</code> "
                 "in <code>frontend/</code>, or use the Vite dev server (<code>npm run dev</code>).</p>"
                 '<p>The API is up: see <a href="/docs">/docs</a>.</p>'
             )

@@ -9,7 +9,7 @@ Structured data (monsters, spells, classes, species, equipment...) comes from
 Glossary and the Gameplay Toolbox) isn't in that dataset, so it is split out of
 a Markdown conversion of the SRD 5.2.1 PDF.
 
-Writes src/pocket_dm/data/srd-2024.json.gz in the same format as build_srd.py.
+Writes src/questodian/data/srd-2024.json.gz in the same format as build_srd.py.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_srd import ABILITIES, entry, fmt_cr, mod, names, ordinal  # noqa: E402
 
-OUT = Path(__file__).resolve().parent.parent / "src" / "pocket_dm" / "data" / "srd-2024.json.gz"
+OUT = Path(__file__).resolve().parent.parent / "src" / "questodian" / "data" / "srd-2024.json.gz"
 
 ATTRIBUTION = (
     "This work includes material from the System Reference Document 5.2.1 "

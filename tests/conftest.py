@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from pocket_dm.app import create_app
-from pocket_dm.db import Database
-from pocket_dm.repo import Repo
+from questodian.app import create_app
+from questodian.db import Database
+from questodian.repo import Repo
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def repo(db):
 def web_dir(tmp_path):
     web = tmp_path / "web"
     (web / "assets").mkdir(parents=True)
-    (web / "index.html").write_text("<!doctype html><title>Pocket DM</title>")
+    (web / "index.html").write_text("<!doctype html><title>Questodian</title>")
     (web / "assets" / "app.js").write_text("console.log('hi')")
     return web
 

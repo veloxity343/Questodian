@@ -12,11 +12,11 @@ def api(client):
 
 def test_ui_and_spa_fallback(api):
     status, html = api("GET", "/", raw=True)
-    assert status == 200 and "Pocket DM" in html
+    assert status == 200 and "Questodian" in html
     assert api("GET", "/assets/app.js", raw=True)[0] == 200
-    assert "Pocket DM" in api("GET", "/characters/abc", raw=True)[1]  # client-side route
+    assert "Questodian" in api("GET", "/characters/abc", raw=True)[1]  # client-side route
     assert api("GET", "/api/nope")[0] == 404
-    assert "Pocket DM" in api("GET", "/../pyproject.toml", raw=True)[1]
+    assert "Questodian" in api("GET", "/../pyproject.toml", raw=True)[1]
 
 
 def test_openapi_docs(api):

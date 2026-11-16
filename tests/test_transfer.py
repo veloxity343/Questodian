@@ -1,8 +1,8 @@
 import pytest
 
-from pocket_dm import transfer
-from pocket_dm.db import Database
-from pocket_dm.repo import Repo
+from questodian import transfer
+from questodian.db import Database
+from questodian.repo import Repo
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def populated(new_repo):
 def test_full_roundtrip(populated, new_repo):
     s, camp, ch = populated
     bundle = transfer.export_bundle(s)
-    assert bundle["format"] == "pocket-dm"
+    assert bundle["format"] == "questodian"
     assert len(bundle["collections"]["characters"]) == 2
     other = new_repo("b")
     summary = transfer.import_data(other, bundle)
@@ -129,7 +129,7 @@ def test_import_drops_links_to_missing_campaigns(repo):
 
 
 def test_version_1_bundles_keep_their_encounters(repo):
-    bundle = {"format": "pocket-dm", "version": 1, "collections": {
+    bundle = {"format": "questodian", "version": 1, "collections": {
         "campaigns": [{"id": "c1", "name": "Old"}],
         "sessions": [{"id": "s1", "campaign_id": "c1", "number": 3, "title": "Ambush",
                       "encounter": {"round": 2, "active": True, "combatants": [{"id": "g", "name": "Goblin"}]}}],
@@ -137,3 +137,4 @@ def test_version_1_bundles_keep_their_encounters(repo):
     transfer.import_data(repo, bundle)
     (enc,) = repo.list("encounters")
     assert enc["session_id"] == "s1" and enc["round"] == 2 and enc["combatants"][0]["name"] == "Goblin"
+

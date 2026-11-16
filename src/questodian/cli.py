@@ -1,11 +1,11 @@
 """Command-line interface.
 
-    pocket-dm                      start the app in your browser (same as ``serve``)
-    pocket-dm roll 4d6dl1 adv+5    roll dice
-    pocket-dm calc "mod(16) + prof(5)"
-    pocket-dm srd fireball         look something up in the SRD
-    pocket-dm export backup.json   export everything (or --campaign ID)
-    pocket-dm import backup.json   import a bundle / single record / .md files
+    questodian                      start the app in your browser (same as ``serve``)
+    questodian roll 4d6dl1 adv+5    roll dice
+    questodian calc "mod(16) + prof(5)"
+    questodian srd fireball         look something up in the SRD
+    questodian export backup.json   export everything (or --campaign ID)
+    questodian import backup.json   import a bundle / single record / .md files
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def cmd_serve(args) -> int:
 
     db = _db(args)
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0', '') else args.host}:{args.port}/"
-    print(f"Pocket DM {__version__} running at {url}")
+    print(f"Questodian {__version__} running at {url}")
     print(f"Database: {db.path}")
     print("Press Ctrl+C to stop.")
     if not args.no_browser:
@@ -128,9 +128,9 @@ def cmd_import(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="pocket-dm", description="All-in-one D&D table manager.")
+    p = argparse.ArgumentParser(prog="questodian", description="All-in-one D&D table manager.")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("--data-dir", help="folder for the SQLite database (env: POCKET_DM_DATA)")
+    p.add_argument("--data-dir", help="folder for the SQLite database (env: QUESTODIAN_DATA)")
     sub = p.add_subparsers(dest="command")
 
     s = sub.add_parser("serve", help="start the web app (default)")
@@ -140,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-v", "--verbose", action="store_true", help="log every request")
     s.set_defaults(func=cmd_serve)
 
-    a = sub.add_parser("app", help="open Pocket DM in its own window (needs pocket-dm[desktop])")
+    a = sub.add_parser("app", help="open Questodian in its own window (needs questodian[desktop])")
     a.set_defaults(func=cmd_app)
 
     r = sub.add_parser("roll", help="roll dice, e.g. 2d20kh1+5, 8d6, 4d6dl1")

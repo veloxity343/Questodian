@@ -1,5 +1,5 @@
 [project]
-name = "pocket-dm"
+name = "questodian"
 version = "0.1.0"
 description = "All-in-one D&D table manager: sessions, initiative, character sheets, SRD reference, handbook, dice and calculator."
 readme = "README.md"
@@ -20,7 +20,7 @@ dependencies = [
 desktop = ["pywebview>=6.1"]
 
 [project.scripts]
-pocket-dm = "pocket_dm:main"
+questodian = "questodian:main"
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

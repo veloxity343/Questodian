@@ -17,29 +17,29 @@ dev: ## Run API + UI dev servers with hot reload (one Ctrl+C stops both)
 	$(NPM) run dev:all
 
 api: ## Run only the API dev server (:8765)
-	uv run pocket-dm serve --no-browser
+	uv run questodian serve --no-browser
 
 web: ## Run only the Vite dev server (:5173)
 	$(NPM) run dev
 
 run: ui ## Build the UI and start the app as users run it
-	uv run pocket-dm
+	uv run questodian
 
-app: ui ## Build the UI and open Pocket DM in its own window
-	uv run --extra desktop pocket-dm app
+app: ui ## Build the UI and open Questodian in its own window
+	uv run --extra desktop questodian app
 
-ui: ## Build the frontend into src/pocket_dm/web
+ui: ## Build the frontend into src/questodian/web
 	$(NPM) run build
 
 package: ui ## Build the release wheel and sdist into dist/
 	uv build
-	@unzip -l dist/*.whl | grep -q 'pocket_dm/web/index.html' || { echo "error: wheel is missing the UI"; exit 1; }
+	@unzip -l dist/*.whl | grep -q 'questodian/web/index.html' || { echo "error: wheel is missing the UI"; exit 1; }
 
 build: package ## Alias for package
 
 desktop: ui ## Build the desktop app for this OS into dist-desktop/ (PyInstaller)
 	uv sync --group build --extra desktop
-	cd packaging && uv run pyinstaller --noconfirm --distpath ../dist-desktop --workpath ../build-desktop pocket-dm.spec
+	cd packaging && uv run pyinstaller --noconfirm --distpath ../dist-desktop --workpath ../build-desktop questodian.spec
 
 test: ## Run backend tests
 	uv run pytest
@@ -54,4 +54,4 @@ migration: ## Create a migration from model changes: make migration m="add portr
 	uv run alembic revision --autogenerate -m "$(m)"
 
 clean: ## Remove build output (keeps your database)
-	rm -rf dist dist-desktop build-desktop src/pocket_dm/web $(FRONTEND)/*.tsbuildinfo
+	rm -rf dist dist-desktop build-desktop src/questodian/web $(FRONTEND)/*.tsbuildinfo

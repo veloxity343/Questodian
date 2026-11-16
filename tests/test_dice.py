@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from pocket_dm import dice
+from questodian import dice
 
 
 def rng(seed=1):

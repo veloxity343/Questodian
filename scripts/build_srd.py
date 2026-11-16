@@ -4,7 +4,7 @@ Usage:
     git clone --depth 1 https://github.com/5e-bits/5e-database.git
     uv run python scripts/build_srd.py path/to/5e-database
 
-Writes src/pocket_dm/data/srd.json.gz: a flat list of searchable entries, each
+Writes src/questodian/data/srd.json.gz: a flat list of searchable entries, each
 with a Markdown body plus a small structured ``data`` dict for the features
 that need numbers (initiative tracker, spell filters, inventory).
 """
@@ -17,7 +17,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "src" / "pocket_dm" / "data" / "srd.json.gz"
+OUT = Path(__file__).resolve().parent.parent / "src" / "questodian" / "data" / "srd.json.gz"
 
 ATTRIBUTION = (
     "This work includes material taken from the System Reference Document 5.1 "

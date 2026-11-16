@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from pocket_dm import game
-from pocket_dm.repo import NotFound, normalize
+from questodian import game
+from questodian.repo import NotFound, normalize
 
 
 def test_normalize_fills_defaults():
@@ -135,17 +135,17 @@ def test_links_are_checked_and_filterable(repo):
 @pytest.mark.parametrize(
     ("platform", "env", "expected"),
     [
-        ("win32", {"APPDATA": "C:/Users/me/AppData/Roaming"}, "C:/Users/me/AppData/Roaming/Pocket DM"),
-        ("darwin", {}, "~/Library/Application Support/Pocket DM"),
-        ("linux", {"XDG_DATA_HOME": "/xdg"}, "/xdg/pocket-dm"),
+        ("win32", {"APPDATA": "C:/Users/me/AppData/Roaming"}, "C:/Users/me/AppData/Roaming/Questodian"),
+        ("darwin", {}, "~/Library/Application Support/Questodian"),
+        ("linux", {"XDG_DATA_HOME": "/xdg"}, "/xdg/questodian"),
     ],
 )
 def test_default_data_dir_per_os(monkeypatch, platform, env, expected):
     from pathlib import Path
 
-    from pocket_dm import db
+    from questodian import db
 
-    monkeypatch.delenv("POCKET_DM_DATA", raising=False)
+    monkeypatch.delenv("QUESTODIAN_DATA", raising=False)
     for k in ("APPDATA", "XDG_DATA_HOME"):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
@@ -155,7 +155,8 @@ def test_default_data_dir_per_os(monkeypatch, platform, env, expected):
 
 
 def test_data_dir_env_wins(monkeypatch, tmp_path):
-    from pocket_dm import db
+    from questodian import db
 
-    monkeypatch.setenv("POCKET_DM_DATA", str(tmp_path))
+    monkeypatch.setenv("QUESTODIAN_DATA", str(tmp_path))
     assert db.default_data_dir() == tmp_path
+

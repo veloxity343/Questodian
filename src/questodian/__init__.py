@@ -1,4 +1,4 @@
-"""Pocket DM: an all-in-one Dungeons & Dragons table manager."""
+"""Questodian: an all-in-one Dungeons & Dragons table manager."""
 
 __version__ = "0.1.0"
 
