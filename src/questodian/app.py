@@ -34,7 +34,10 @@ def get_repo(request: Request) -> Iterator[Repo]:
         yield Repo(s)
 
 
-RepoDep = Annotated[Repo, Depends(get_repo)]
+# scope="function": commit (or roll back) before the response is sent. With FastAPI's default
+# the commit ran after the response, so a quick next request could read stale data, and a
+# failed commit was reported as a success.
+RepoDep = Annotated[Repo, Depends(get_repo, scope="function")]
 
 
 # --------------------------------------------------------------------------- tools and reference

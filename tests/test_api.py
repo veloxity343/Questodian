@@ -327,3 +327,48 @@ def test_surprise_by_edition(api, monkeypatch):
         assert any("is surprised" in e["text"] for e in enc["log"]) == (edition == "2014")
         _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "end"})
         assert enc["combatants"][0]["surprised"] is False
+
+
+def test_saves_are_committed_before_the_response(db, monkeypatch):
+    """A client that reads right after a write sees it (the commit used to run after the response)."""
+    import socket
+    import threading
+    import time
+
+    import json
+    import urllib.request
+
+    import uvicorn
+    from sqlalchemy.orm import Session
+
+    from questodian.app import create_app
+
+    real_commit = Session.commit
+
+    def slow_commit(self):
+        time.sleep(0.5)
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", slow_commit)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(create_app(db, None), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{port}/api"
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(base + "/meta")
+                break
+            except OSError:
+                time.sleep(0.05)
+        request = urllib.request.Request(base + "/handbook", data=b'{"title": "Written"}', method="POST",
+                                         headers={"Content-Type": "application/json"})
+        created = json.load(urllib.request.urlopen(request))
+        assert urllib.request.urlopen(f"{base}/handbook/{created['id']}").status == 200
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
