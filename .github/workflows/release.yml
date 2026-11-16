@@ -1,5 +1,6 @@
-# Builds the desktop app for each OS on that OS and attaches the installers to a
-# draft GitHub release. Run it by pushing a version tag (v0.2.0) or by hand.
+# Runs every CI check, then builds the desktop app for each OS on that OS and attaches
+# the installers to a draft GitHub release. Nothing is built if a check fails.
+# Run it by pushing a version tag (v0.2.0) or by hand.
 # Based on https://v2.tauri.app/distribute/pipelines/github/
 name: Release
 
@@ -9,8 +10,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  checks:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+
   desktop:
     name: Desktop app (${{ matrix.name }})
+    needs: checks
     permissions:
       contents: write
     strategy:
@@ -53,3 +59,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+      # The draft release already has the installers at this point; if this fails, don't publish it.
+      - name: Start the Linux app and check the UI reaches the API
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get install -y xvfb
+          mkdir -p "$RUNNER_TEMP/smoke-data"
+          QUESTODIAN_DATA="$RUNNER_TEMP/smoke-data" QUESTODIAN_LOG=1 \
+            timeout 30 xvfb-run -a target/release/questodian-app > smoke.log 2>&1 || true
+          cat smoke.log
+          grep -q "GET /api/meta -> 200" smoke.log
