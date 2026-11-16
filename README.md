@@ -13,7 +13,7 @@ roller. Fully offline: one local database file, no account, nothing to connect.
 ## Install
 
 **Desktop app (Windows, macOS):** download the zip for your system from the
-[Releases](https://github.com/veloxity343/questodian/releases) page, unzip it and run
+[Releases](https://github.com/veloxity343/Questodian/releases) page, unzip it and run
 *Questodian*. The builds aren't code-signed yet, so the first launch needs one extra step:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
