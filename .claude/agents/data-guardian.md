@@ -16,7 +16,7 @@ You make sure no Questodian user ever loses or silently corrupts campaign data. 
    - Foreign keys can't cascade-delete during table rebuilds.
    - A backup is taken before migrating.
    - Downgrade is defined or deliberately refused.
-2. **Models versus database:** the ORM models and the migrated schema agree. In Python, `uv run alembic check` / `tests/test_migrations.py`; in Rust, the equivalent check.
+2. **Schemas versus database:** the record schemas (`crates/core/src/schemas.rs`) and the migrated schema agree, and an upgraded database matches a new one (`crates/core/tests/database.rs`, `upgraded_schema_matches_a_new_database`).
 3. **Import/export**
    - Bundles exported by the previous version still import.
    - Round trips (export, then import) preserve every field, every link between records, and handout images.

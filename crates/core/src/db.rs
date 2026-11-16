@@ -1,8 +1,11 @@
 //! The SQLite database: where it lives, opening it, and bringing its schema up to date.
 //!
-//! The schema version is kept in Alembic's `alembic_version` table, so the Python app
-//! and this one agree on what a file contains. A database newer than this app knows
-//! is refused untouched. An older one is copied to a backup file before upgrading.
+//! The schema version is kept in an `alembic_version` table: the first (Python) version of
+//! Questodian managed its schema with Alembic, and databases it made open unchanged.
+//! Schema changes are now written here: add the upgrade below and bump [`HEAD`], keep
+//! writing `alembic_version`, and add a fixture database at the old version to the
+//! tests. A database newer than this app knows is refused untouched; an older one is
+//! copied to a backup file before upgrading.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -373,7 +376,7 @@ async fn encounters_to_move(conn: &mut SqliteConnection, path: &Path) -> Result<
 
 /// Revision 0002 added the DM screen tables and the campaign edition, and moved each
 /// session's encounter into the new encounters table (linked back to the session).
-/// Mirrors `src/questodian/migrations/versions/0002_dm_screen.py`.
+/// Mirrors the Python app's Alembic migration 0002 (`0002_dm_screen.py`).
 async fn upgrade_0001_to_0002(conn: &mut SqliteConnection, moves: Vec<EncounterMove>) -> Result<()> {
     let tables: Vec<String> =
         sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'").fetch_all(&mut *conn).await?;

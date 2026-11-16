@@ -4,20 +4,24 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 
 ## Stack
 
-- **Python (current release):** React + TypeScript UI (`frontend/`, Vite), Python backend (`src/questodian/`: FastAPI, SQLAlchemy on SQLite, Alembic migrations), desktop build with pywebview + PyInstaller (`packaging/`).
-- **Rust (port, at parity on the API):** a Cargo workspace with `crates/core` (dice, rules, SRD, schemas, sqlx repo, migrations, game logic, import/export and the axum router), `crates/cli` (the `questodian` command) and `src-tauri` (Tauri 2 desktop app serving the router through its `questodian://` scheme). Same schema and `alembic_version`, so existing databases open unchanged. Plan, decisions and status: `docs/rust-port.md`. `scripts/parity.py` must report no differences before Rust changes are committed. Next: mobile (iOS/Android) via Tauri, then retire the Python version.
+React + TypeScript UI (`frontend/`, Vite) on a Rust backend, in a Cargo workspace:
+
+- `crates/core`: dice, rules, the SRD, schemas, the sqlx repo, migrations, game logic, import/export and the axum router.
+- `crates/cli`: the `questodian` command (`serve`, `roll`, `calc`, `srd`, `export`, `import`).
+- `src-tauri`: the Tauri 2 desktop app, serving the router to its window through its `questodian://` scheme.
+
+The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it was retired after the Rust port reached parity. Its databases, backups and exports must keep working: the schema version stays in `alembic_version`, and the lenient input rules in `schemas.rs` match what it accepted. Background and decisions: `docs/rust-port.md`. Next: mobile (iOS/Android) via Tauri.
 
 ## Commands
 
 `make` lists everything. The main ones:
 
-- `make install`: Python and frontend dependencies.
+- `make install`: frontend and Tauri CLI dependencies (Rust crates download on the first build).
 - `make dev`: API and UI dev servers with hot reload.
-- `make check`: Python tests, frontend typecheck and Rust tests. Run this before committing.
-- `make parity`: compare the Rust and Python servers. `make tauri-dev` opens the Rust desktop app.
-- `make run` builds the UI and serves the app; `make app` opens it in a window.
-- `make migration m="..."` after changing models.
-- `make package` builds the wheel; `make desktop` builds the desktop app.
+- `make check`: Rust format check, lint and tests, and the frontend typecheck. Run this before committing.
+- `make run` builds the UI and serves the app in the browser; `make app` opens the desktop app.
+- `make desktop` builds the desktop app and its installers for this OS.
+- Releases: push a `v*` tag matching the version in `src-tauri/tauri.conf.json` (see the README).
 
 ## Rules
 
@@ -32,12 +36,12 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 - Don't state anything as fact that you haven't verified in this session: read the code, run the command, check the data, or fetch the official docs. If you can't verify something, say "unverified" and what you'd need. "I don't know" is a fine answer; a confident guess is not.
 - Never invent APIs, config options, crate/package versions, file paths or command flags. Check them (use `docs-checker` for external libraries).
 - Never say something works, passes or builds unless you ran it and saw the result. Quote the real output. Report failures as failures.
-- D&D rules come only from the bundled SRD data (`src/questodian/data/srd*.json.gz`), for the right edition, never from memory. Use `rules-lawyer` for any rule, number or stat block. If the SRD doesn't cover it, say so. The app ships only SRD content (CC BY 4.0) plus the user's own homebrew. No Wizards of the Coast product identity.
+- D&D rules come only from the bundled SRD data (`data/srd*.json.gz`), for the right edition, never from memory. Use `rules-lawyer` for any rule, number or stat block. If the SRD doesn't cover it, say so. The app ships only SRD content (CC BY 4.0) plus the user's own homebrew. No Wizards of the Coast product identity.
 
 ### Project conventions
 
 - The app is called Questodian, and has always been. Don't add notes or compatibility code for any earlier name.
-- Schema changes always come with a migration and a test that upgrades a database containing real data. While both backends exist, write the migration in Alembic first, then add the same upgrade to `crates/core/src/db.rs` (bump `HEAD`) and regenerate the fixtures with `scripts/make_fixtures.py`.
+- Schema changes always come with a migration and a test that upgrades a database containing real data: add the upgrade to `crates/core/src/db.rs` (bump `HEAD`, keep writing `alembic_version`), and add a fixture database at the old version to `crates/core/tests/fixtures/` (see the README's "Database migrations").
 - Match the surrounding code's style and comment density. Keep user-facing text plain and specific.
 
 ## Agents (`.claude/agents/`)

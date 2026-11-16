@@ -1,5 +1,10 @@
 # Rust + Tauri port: parity plan
 
+> **Done.** The port reached parity and the Python app was retired after the first Rust
+> release (v0.1.1). This document is kept as the record of how and why; paths under
+> `src/questodian/`, `tests/` and `scripts/parity.py` refer to the Python code, which is in
+> the git history.
+
 The plan for moving Questodian's backend from Python (FastAPI, SQLAlchemy, Alembic,
 pywebview) to Rust (axum, SeaORM on SQLite, Tauri 2). The React UI stays. The Python
 app keeps working, and stays the reference, until the Rust one passes everything
@@ -325,16 +330,4 @@ through the real UI on the Rust server: all working.
   effects on Initiative rolls aren't automated.
 - Python's 0002 migration isn't atomic: if it fails halfway, both apps refuse the
   file until it's repaired by hand. Moot once Python is retired.
-- Retire the Python app after the first Rust release has been tried on Windows and
-  macOS:
-  1. Move the SRD data (`src/questodian/data/`) to `data/` and Vite's output from
-     `src/questodian/web` to `frontend/dist`; update `srd.rs`, `src-tauri`, the CLI's
-     default `--web-dir`, `tauri.conf.json` and `vite.config.ts`.
-  2. From then on, schema changes are written only in `crates/core/src/db.rs`, still
-     recording the version in `alembic_version`.
-  3. Keep `scripts/build_srd*.py` (run with `uv` when regenerating the SRD) or port
-     them; keep the fixture databases as Rust tests; drop `parity.py` and
-     `make_fixtures.py`.
-  4. Delete `src/questodian`, `tests/`, `packaging/`, `pyproject.toml`, `uv.lock` and
-     `alembic.ini`; remove the Python jobs and parity step from CI; update the
-     Makefile, README and `CLAUDE.md`.
+- ~~Retire the Python app~~: done, after the v0.1.1 release.

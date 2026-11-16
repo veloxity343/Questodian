@@ -1,4 +1,4 @@
-// Typed wrappers around the FastAPI JSON API.
+// Typed wrappers around the JSON API (crates/core/src/server.rs).
 
 import type {
   Character, ClassLevel, Edition, Encounter, EncounterAction, Handout, ImportSummary, Kind, KindMap, Meta, RollResult,
@@ -11,7 +11,7 @@ function errorMessage(data: unknown, res: Response): string {
   const detail = (data as { detail?: unknown })?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
-    // FastAPI request validation errors
+    // Validation errors: a list of { loc, msg }
     return detail.map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc || []).slice(1).join(".")}: ${d.msg}`).join("; ");
   }
   return `${res.status} ${res.statusText}`;

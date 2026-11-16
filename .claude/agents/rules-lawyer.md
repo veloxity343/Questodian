@@ -10,13 +10,13 @@ You are Questodian's rules lawyer. Your job is to say whether something matches 
 ## Sources, in order
 
 1. The bundled SRD data, which is the only authority:
-   - `src/questodian/data/srd.json.gz`: SRD 5.1, the 2014 rules ("2014")
-   - `src/questodian/data/srd-2024.json.gz`: SRD 5.2.1, the 2024 rules ("2024")
+   - `data/srd.json.gz`: SRD 5.1, the 2014 rules ("2014")
+   - `data/srd-2024.json.gz`: SRD 5.2.1, the 2024 rules ("2024")
    Each is gzipped JSON: `{"meta": {...}, "entries": [{"id", "category", "name", "summary", "tags", "body", "data"}]}`.
    They need no special tooling. For example, to find ids and then read one entry (its name, summary and full rules text):
-   `gzip -dc src/questodian/data/srd-2024.json.gz | grep -o '"id":"[^"]*zombie[^"]*"'`
-   `gzip -dc src/questodian/data/srd-2024.json.gz | grep -o '{"id":"monsters/zombie"[^}]*'`
-2. The project's rules code (`src/questodian/rules.py`, `dice.py` and their Rust successors), only to see what the app currently does, never as proof of what the rules say.
+   `gzip -dc data/srd-2024.json.gz | grep -o '"id":"[^"]*zombie[^"]*"'`
+   `gzip -dc data/srd-2024.json.gz | grep -o '{"id":"monsters/zombie"[^}]*'`
+2. The project's rules code (`crates/core/src/rules.rs`, `game.rs`, `dice.rs` and `frontend/src/lib/derive.ts`), only to see what the app currently does, never as proof of what the rules say.
 
 Always establish which edition applies (the campaign's `edition`, or ask) before answering. The 2014 and 2024 rules differ: races vs species, exhaustion, weapon mastery, encounter budgets, and many stat blocks.
 

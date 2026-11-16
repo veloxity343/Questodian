@@ -32,7 +32,7 @@ pub const MAX_BODY: usize = 20 * 1024 * 1024;
 pub enum Ui {
     /// Not built: `/` explains how to build it.
     Missing,
-    /// A folder on disk, e.g. `src/questodian/web`.
+    /// A folder on disk, e.g. `frontend/dist`.
     Folder(PathBuf),
     /// Files compiled into the binary, looked up by path (`index.html`, `assets/app.js`).
     Embedded(fn(&str) -> Option<Cow<'static, [u8]>>),

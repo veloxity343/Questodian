@@ -1,7 +1,7 @@
 //! Import and export: JSON bundles, single records, and Markdown.
 //!
-//! Files are interchangeable with the Python app's: a bundle exported by either
-//! imports into the other.
+//! The format is the one the first (Python) version wrote, so its backups and exports
+//! import unchanged.
 
 use std::collections::HashMap;
 use std::path::Path;
