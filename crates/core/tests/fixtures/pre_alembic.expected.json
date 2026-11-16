@@ -260,9 +260,9 @@
  "notes": [],
  "encounters": [
   {
-   "id": "2aca82c762fd",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "id": "2c471c9a8e3d",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "session_id": "sess1",
    "scene_id": "",
@@ -288,6 +288,8 @@
      "monster_id": "",
      "npc_id": "",
      "xp": 0,
+     "xp_in_lair": 0,
+     "in_lair": false,
      "hidden": false
     },
     {
@@ -307,6 +309,8 @@
      "monster_id": "",
      "npc_id": "",
      "xp": 0,
+     "xp_in_lair": 0,
+     "in_lair": false,
      "hidden": false
     }
    ],

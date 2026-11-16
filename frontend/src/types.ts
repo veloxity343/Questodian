@@ -48,6 +48,9 @@ export interface Combatant {
   monster_id: string;
   npc_id: string;
   xp: number;
+  /** Legendary monsters are worth more fought in their lair (0: no lair value). */
+  xp_in_lair: number;
+  in_lair: boolean;
   hidden: boolean;
 }
 

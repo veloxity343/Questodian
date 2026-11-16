@@ -2,8 +2,8 @@
  "campaigns": [
   {
    "id": "camp1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "name": "Seven Bells",
    "system": "5e (SRD 5.1)",
    "edition": "2024",
@@ -16,8 +16,8 @@
  "sessions": [
   {
    "id": "sess1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "number": 1,
    "title": "New Session",
@@ -41,8 +41,8 @@
  "characters": [
   {
    "id": "char1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "name": "Pip",
    "player": "",
    "campaign_id": "camp1",
@@ -128,8 +128,8 @@
  "handbook": [
   {
    "id": "hb1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "title": "Lore",
    "category": "House Rules",
    "tags": [
@@ -143,8 +143,8 @@
  "scenes": [
   {
    "id": "scene1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "session_id": "sess1",
    "position": 0,
@@ -159,8 +159,8 @@
  "npcs": [
   {
    "id": "npc1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "name": "Mara",
    "role": "",
@@ -181,8 +181,8 @@
  "monsters": [
   {
    "id": "mon1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "",
    "name": "Bell-Ringer",
    "kind": "Medium humanoid, neutral",
@@ -203,8 +203,8 @@
  "notes": [
   {
    "id": "note1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "session_id": "sess1",
    "kind": "quest",
@@ -217,8 +217,8 @@
  "encounters": [
   {
    "id": "enc1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "session_id": "sess1",
    "scene_id": "scene1",
@@ -244,6 +244,8 @@
      "monster_id": "",
      "npc_id": "",
      "xp": 0,
+     "xp_in_lair": 0,
+     "in_lair": false,
      "hidden": false
     }
    ],
@@ -256,8 +258,8 @@
  "trackers": [
   {
    "id": "trk1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "session_id": "",
    "name": "Tolls",
@@ -270,8 +272,8 @@
  "handouts": [
   {
    "id": "ho1",
-   "created": "2026-11-16T02:17:31+00:00",
-   "updated": "2026-11-16T02:17:31+00:00",
+   "created": "2026-11-16T06:44:04+00:00",
+   "updated": "2026-11-16T06:44:04+00:00",
    "campaign_id": "camp1",
    "folder": "Maps",
    "title": "Map",

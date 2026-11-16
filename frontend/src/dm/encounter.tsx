@@ -63,7 +63,9 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
   };
   const saveName = useDebounced((name: string) => void patch({ name }), 500);
 
-  const monsterXp = enc.combatants.filter((c) => c.kind === "monster").reduce((a, c) => a + (c.xp || 0), 0);
+  const monsterXp = enc.combatants
+    .filter((c) => c.kind === "monster")
+    .reduce((a, c) => a + ((c.in_lair && c.xp_in_lair) || c.xp || 0), 0);
   const { budget, rating } = difficulty(monsterXp, enc.party_size, enc.party_level, meta?.xp_budget);
   const current = enc.active ? enc.combatants[enc.turn] : null;
 
@@ -158,6 +160,11 @@ function CombatantRow({ c, isTurn, act }: { c: Combatant; isTurn: boolean; act: 
       <div className="who">
         <button type="button" className="name" onClick={showSheet}>{c.name}</button> <KindBadge c={c} />
         {c.init_bonus !== 0 && <span className="muted small"> {signed(c.init_bonus)}</span>}
+        {c.xp_in_lair > 0 && (
+          <label className="check small lair" title={`${c.xp.toLocaleString()} XP, or ${c.xp_in_lair.toLocaleString()} XP fought in its lair`}>
+            <Checkbox checked={c.in_lair} onChange={(v) => update({ in_lair: v })} /> in lair
+          </label>
+        )}
         <div className="chips">
           {c.conditions.map((k) => (
             <span className="chip" key={k}>{titleCase(k)}<button type="button" className="chip-x" aria-label={`Remove ${k}`}
@@ -196,7 +203,7 @@ function HpBox({ c, act, onClose }: { c: Combatant; act: (a: EncounterAction) =>
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   const apply = async (sign: number) => {
-    const n = parseInt(amount, 10);
+    const n = Math.abs(parseInt(amount, 10)); // a typed minus sign mustn't turn damage into healing
     if (!n) return;
     await act({ action: "hp", id: c.id, amount: sign * n });
     onClose();

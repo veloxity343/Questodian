@@ -282,3 +282,13 @@ def test_handout_file_name_cannot_leave_the_folder(client):
     client.put(f"/api/handouts/{h['id']}", json={"filename": "../questodian.db"})
     assert client.get(f"/api/handouts/{h['id']}/file").status_code == 404
     assert client.delete(f"/api/handouts/{h['id']}").status_code == 200
+
+
+def test_lair_xp_comes_from_the_srd(api):
+    _, camp = api("POST", "/api/campaigns", {"edition": "2024"})
+    _, enc = api("POST", "/api/encounters", {"campaign_id": camp["id"]})
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_monster", "srd_id": "monsters/aboleth"})
+    aboleth = enc["combatants"][0]
+    assert (aboleth["xp"], aboleth["xp_in_lair"], aboleth["in_lair"]) == (5900, 7200, False)
+    _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_monster", "srd_id": "monsters/zombie"})
+    assert enc["combatants"][1]["xp_in_lair"] == 0

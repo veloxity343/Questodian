@@ -276,6 +276,9 @@ schema! {
         monster_id: String = String::new(),
         npc_id: String = String::new(),
         xp: i64 = 0,
+        /// Legendary monsters are worth more fought in their lair (0: no lair value).
+        xp_in_lair: i64 = 0,
+        in_lair: bool = false,
         hidden: bool = false,
     }
 }

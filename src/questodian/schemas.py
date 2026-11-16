@@ -81,6 +81,8 @@ class Combatant(Doc):
     monster_id: Str = ""  # homebrew stat block
     npc_id: Str = ""
     xp: int = 0
+    xp_in_lair: int = 0  # legendary monsters are worth more fought in their lair (0: no lair value)
+    in_lair: bool = False
     hidden: bool = False
 
 

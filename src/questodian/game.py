@@ -71,14 +71,14 @@ def _stat_source(repo: Repo, body: schemas.EncounterAction, edition: str) -> dic
     if body.monster_id:
         m = repo.get("monsters", body.monster_id)
         return {"name": m["name"], "ac": m["ac"], "hp": m["hp"], "hp_roll": m["hp_roll"], "init_bonus": m["init_bonus"],
-                "xp": m["xp"], "notes": m["kind"], "srd_id": "", "monster_id": m["id"]}
+                "xp": m["xp"], "xp_in_lair": 0, "notes": m["kind"], "srd_id": "", "monster_id": m["id"]}
     entry = srd.get(body.srd_id, edition)
     if not entry or entry["category"] != "monsters":
         raise NotFound("monster not found")
     d = entry["data"]
     return {"name": entry["name"], "ac": d["ac"], "hp": d.get("hp", 1), "hp_roll": d.get("hp_roll", ""),
-            "init_bonus": d["init_bonus"], "xp": d.get("xp", 0), "notes": entry["summary"], "srd_id": entry["id"],
-            "monster_id": ""}
+            "init_bonus": d["init_bonus"], "xp": d.get("xp", 0), "xp_in_lair": d.get("xp_in_lair", 0),
+            "notes": entry["summary"], "srd_id": entry["id"], "monster_id": ""}
 
 
 def _edition(repo: Repo, doc: dict) -> str:
@@ -144,7 +144,7 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             combatants.append(
                 _combatant(
                     {
-                        **{k: src[k] for k in ("ac", "init_bonus", "xp", "notes", "srd_id", "monster_id")},
+                        **{k: src[k] for k in ("ac", "init_bonus", "xp", "xp_in_lair", "notes", "srd_id", "monster_id")},
                         "id": models.new_id(),
                         "name": src["name"] if body.count == 1 and not same else f"{src['name']} {n}",
                         "kind": "monster",
@@ -155,7 +155,7 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             )
     elif action == "add_npc":
         npc = repo.get("npcs", body.npc_id)
-        base = {"ac": 10, "hp": 4, "hp_roll": "", "init_bonus": 0, "xp": 0, "srd_id": "", "monster_id": ""}
+        base = {"ac": 10, "hp": 4, "hp_roll": "", "init_bonus": 0, "xp": 0, "xp_in_lair": 0, "srd_id": "", "monster_id": ""}
         ref = npc["stat_ref"]
         if ref.startswith(("srd:", "monster:")):
             kind, _, ref_id = ref.partition(":")
@@ -165,7 +165,7 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
         combatants.append(
             _combatant(
                 {
-                    **{k: base[k] for k in ("ac", "init_bonus", "xp", "srd_id", "monster_id")},
+                    **{k: base[k] for k in ("ac", "init_bonus", "xp", "xp_in_lair", "srd_id", "monster_id")},
                     "id": models.new_id(), "name": npc["name"], "kind": "npc", "hp": base["hp"], "max_hp": base["hp"],
                     "notes": npc["role"] or npc["stats"], "npc_id": npc["id"],
                 }

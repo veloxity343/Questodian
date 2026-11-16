@@ -34,6 +34,15 @@ ATTRIBUTION = (
 )
 
 
+def size_choices(options) -> list[str]:
+    """Sizes from a 5e-bits choice object: {"choose": 1, "from": {"options": [{"size": "Small"}, ...]}}."""
+    if isinstance(options, list):
+        return [str(o) for o in options]
+    if isinstance(options, dict):
+        return [o["size"] for o in (options.get("from") or {}).get("options", []) if isinstance(o, dict) and o.get("size")]
+    return []
+
+
 def text(desc) -> str:
     """5e-bits 2024 uses `description` strings with "\\n  " paragraph breaks."""
     if desc is None:
@@ -193,7 +202,10 @@ def build_monsters(src):
                 f"CR {cr} {m['size'].lower()} {m['type']}",
                 [m["type"], m["size"], f"CR {cr}"],
                 {
-                    "cr": m["challenge_rating"], "cr_label": cr, "xp": m.get("xp", 0), "type": m["type"],
+                    "cr": m["challenge_rating"], "cr_label": cr, "xp": m.get("xp", 0),
+                    # Legendary creatures are worth more XP fought in their lair ("XP 5,900, or 7,200 in lair").
+                    **({"xp_in_lair": m["xp_in_lair"]} if m.get("xp_in_lair") else {}),
+                    "type": m["type"],
                     "size": m["size"], "ac": ac, "hp": m["hit_points"],
                     "hp_roll": m.get("hit_points_roll") or m.get("hit_dice"), "init_bonus": dex_mod,
                     "abilities": {a[:3]: m[a] for a in ABILITIES},
@@ -289,7 +301,7 @@ def build_species(src):
         subs[s["species"]["index"]].append(s)
     out = []
     for sp in load(src, "Species"):
-        size = sp.get("size") or " or ".join(sp.get("size_options") or [])
+        size = sp.get("size") or " or ".join(size_choices(sp.get("size_options")))
         lines = [f"**Creature Type:** {sp.get('type', 'Humanoid')}  ", f"**Size:** {size}  ", f"**Speed:** {sp['speed']} ft.", ""]
         for ref in sp.get("traits", []):
             t = traits.get(ref["index"])
