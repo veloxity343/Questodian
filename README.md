@@ -22,6 +22,8 @@ yet, so the first launch needs one extra step:
   **System Settings → Privacy & Security** and click **Open Anyway**. If it says the app is
   "damaged", run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
 
+**iPad:** build it on a Mac and install it over a cable; see [docs/ipad.md](docs/ipad.md).
+
 **From source (any OS):** you need [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/);
 on Linux, also the WebKitGTK packages [Tauri lists](https://v2.tauri.app/start/prerequisites/)
 for the desktop app.

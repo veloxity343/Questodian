@@ -65,7 +65,7 @@ function TopBar() {
       <span className="grow" />
       {onDm && (
         <button type="button" className="search-btn" onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}>
-          Search <kbd>Ctrl K</kbd>
+          Search <kbd className="key-hint">Ctrl K</kbd>
         </button>
       )}
       <CampaignChip />

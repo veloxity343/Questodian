@@ -289,15 +289,19 @@ export function CampaignDoc() {
 const PROJECT_CHANNEL = "questodian-project";
 interface ViewState { id: string; zoom: number; x: number; y: number }
 
-/** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
-export function projectHandout() {
+/**
+ * Open (or retarget) the players' window. The app (desktop or iPad) routes this through its
+ * shell; the iPad app has no second windows yet and says so. Resolves to false if it couldn't.
+ */
+export async function projectHandout(): Promise<boolean> {
   const url = "/project";
-  // The desktop app answers this address itself; in a browser it doesn't exist.
+  // The app answers this address itself; in a browser it doesn't exist.
   if (location.protocol === "questodian:" || location.hostname === "questodian.localhost") {
-    void fetch("/desktop/players", { method: "POST", body: url });
-    return;
+    const res = await fetch("/desktop/players", { method: "POST", body: url }).catch(() => null);
+    return !!res?.ok;
   }
   window.open(url, "questodian-players", "popup,width=1280,height=800");
+  return true;
 }
 
 export function HandoutDoc({ initial }: { initial: Handout }) {
@@ -345,7 +349,14 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
         extra={doc.filename ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
-              onClick={() => { setCasting(true); void api.project(view).then(() => projectHandout()); }}>
+              onClick={async () => {
+                setCasting(true);
+                await api.project(view);
+                if (!(await projectHandout())) {
+                  setCasting(false);
+                  toast("Showing to players isn't available in the iPad app yet", "error");
+                }
+              }}>
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>

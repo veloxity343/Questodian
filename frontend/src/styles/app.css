@@ -59,6 +59,8 @@ h3 { font-size: 1.05rem; }
 code, p { overflow-wrap: anywhere; }
 code, kbd { font-family: var(--mono); font-size: 0.9em; background: var(--surface-2); padding: 0.05em 0.35em; border-radius: 4px; }
 kbd { border: 1px solid var(--border); }
+/* Keyboard shortcut hints mean nothing on a touch screen without a keyboard (iPad). */
+@media (hover: none) and (pointer: coarse) { .key-hint { display: none; } }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
 

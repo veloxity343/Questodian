@@ -1,10 +1,15 @@
 [package]
 name = "questodian-app"
-description = "Questodian as a desktop app."
+description = "Questodian as a desktop and iPad app."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+# Mobile builds link the app as a library; desktop runs it from main.rs.
+[lib]
+name = "questodian_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "questodian-app"

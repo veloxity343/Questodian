@@ -268,7 +268,7 @@ function Workspace({ campaign }: { campaign: Campaign }) {
         {dm.active ? <DocView key={`${dm.active.kind}:${dm.active.id}`} doc={dm.active} /> : (
           <div className="welcome">
             <h1>{campaign.name}</h1>
-            <p className="muted">Pick something from the left, press <kbd>Ctrl</kbd> <kbd>K</kbd> to search everything, or start with:</p>
+            <p className="muted">Pick something from the left<span className="key-hint">, press <kbd>Ctrl</kbd> <kbd>K</kbd> to search everything,</span> or start with:</p>
             <div className="row gap wrap">
               <button type="button" className="btn" onClick={() => dm.open({ kind: "campaigns", id: campaign.id })}>Campaign overview</button>
               <button type="button" className="btn" onClick={() => dm.create("scenes", { title: "New Scene" })}>+ Scene</button>
