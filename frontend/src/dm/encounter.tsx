@@ -81,7 +81,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
         </div>
         <div className="doc-actions">
           <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_initiative", which: enc.active ? "unset" : "all", group: groupRolls })}
-            title="Roll for everyone without an initiative (all, before combat starts). Ties start in order of initiative bonus; rearrange them as you like.">Roll initiative</button>
+            title="Roll for everyone without an initiative (all, before combat starts). Ties start in order of initiative bonus; edit an initiative to change the order.">Roll initiative</button>
           <label className="check small" title="One roll for each group of identical monsters, who then act together (the SRD's way)">
             <Checkbox checked={groupRolls} onChange={setGroupRolls} /> group
           </label>
