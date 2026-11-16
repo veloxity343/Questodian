@@ -37,6 +37,10 @@ function srdLists(edition: Edition) {
   const races = edition === "2024" ? "species" : "races";
   srdCache[edition] ??= Promise.all(["classes", races, "backgrounds"].map((category) => api.srdSearch({ category, limit: 50, edition }))).then(
     ([c, r, b]) => ({ classes: c.results, races: r.results, backgrounds: b.results }),
+    (e: Error) => {
+      delete srdCache[edition]; // try again next time instead of keeping the failure
+      throw e;
+    },
   );
   return srdCache[edition]!;
 }

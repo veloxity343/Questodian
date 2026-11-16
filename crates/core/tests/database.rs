@@ -291,3 +291,27 @@ async fn no_upgrade_while_another_copy_has_the_database_open() {
     db.close().await;
     second.close().await;
 }
+
+#[tokio::test]
+async fn a_copy_waiting_for_the_lock_rechecks_the_version() {
+    // Another (newer) copy holds the folder exclusively while it changes the schema.
+    let dir = tempfile::tempdir().unwrap();
+    open_fixture("v0002", dir.path()).await.close().await;
+    let other = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.path().join("questodian.lock"))
+        .unwrap();
+    other.lock().unwrap();
+    let path = dir.path().join(DB_FILENAME);
+    let opening = tokio::spawn({
+        let dir = dir.path().to_path_buf();
+        async move { Database::open(&dir).await.map(|_| ()).map_err(|e| e.to_string()) }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    db::load_sql(&path, "UPDATE alembic_version SET version_num = '0099';").await.unwrap();
+    drop(other);
+    let error = opening.await.unwrap().expect_err("refused");
+    assert!(error.contains("newer version"), "{error}");
+}

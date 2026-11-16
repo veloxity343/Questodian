@@ -414,7 +414,8 @@ def game_scenario(api: Session) -> None:
     for x in rolled.get("combatants", []):
         if x["kind"] == "monster":
             by_kind.setdefault(x["srd_id"], set()).add(x["initiative"])
-    api.log.append(("grouped initiative: one roll per kind of monster", 200, all(len(v) == 1 for v in by_kind.values())))
+    grouped = bool(by_kind) and all(len(v) == 1 for v in by_kind.values())
+    api.log.append(("grouped initiative: one roll per kind of monster", 200, grouped))
     act({"action": "clear", "all": True}, keep_body=False)  # drop the randomly rolled monsters
 
     keep("enc14", api("POST", "/api/encounters", {"campaign_id": "{c14}", "combatants": [{"name": "Guard", "surprised": True}, {"name": "Scout"}]}))

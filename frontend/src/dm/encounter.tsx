@@ -174,7 +174,7 @@ function CombatantRow({ c, isTurn, started, act }: { c: Combatant; isTurn: boole
             <Checkbox checked={c.surprised} onChange={(v) => update({ surprised: v })} /> surprised
           </label>
         ) : c.surprised && <span className="muted small" title={SURPRISE_HELP[dm.edition]}> surprised</span>}
-        {c.xp_in_lair > 0 && (
+        {c.kind === "monster" && c.xp_in_lair > 0 && (
           <label className="check small lair" title={`${c.xp.toLocaleString()} XP, or ${c.xp_in_lair.toLocaleString()} XP fought in its lair`}>
             <Checkbox checked={c.in_lair} onChange={(v) => update({ in_lair: v })} /> in lair
           </label>

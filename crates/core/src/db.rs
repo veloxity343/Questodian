@@ -62,8 +62,9 @@ pub struct Database {
     /// The copy saved before an upgrade, if this open upgraded the schema.
     pub backup: Option<PathBuf>,
     columns: HashMap<Kind, Vec<Column>>,
-    /// Held (shared) while the database is open; see [`Database::open`].
-    _lock: std::fs::File,
+    /// Held (shared) while the database is open; see [`Database::open`]. `None` where the
+    /// folder doesn't support file locks.
+    _lock: Option<std::fs::File>,
 }
 
 impl Database {
@@ -76,16 +77,7 @@ impl Database {
         let data_dir = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir)?;
         let path = data_dir.join(DB_FILENAME);
-        let lock =
-            std::fs::File::options().create(true).truncate(false).write(true).open(data_dir.join(LOCK_FILENAME))?;
-        let alone = lock.try_lock().is_ok();
-        let backup = upgrade(&path, alone).await;
-        if alone {
-            // Done changing things: share the folder with other copies from now on.
-            lock.unlock()?;
-        }
-        lock.lock_shared()?;
-        let backup = backup?;
+        let (backup, lock) = open_guarded(&data_dir, &path).await?;
 
         let options = SqliteConnectOptions::new()
             .filename(&path)
@@ -136,6 +128,55 @@ async fn read_columns(pool: &SqlitePool) -> Result<HashMap<Kind, Vec<Column>>> {
         columns.insert(kind, list);
     }
     Ok(columns)
+}
+
+// --------------------------------------------------------------------------- the folder lock
+
+/// Bring the schema up to date under the folder lock, and return the lock held shared.
+///
+/// - No other copy open: upgrade if needed while holding the lock exclusively, then share it.
+/// - Another copy open: wait for a shared lock (an upgrade in progress finishes first), then
+///   check the version, refusing anything but the current one.
+/// - No file locks on this filesystem (some network drives): carry on unguarded, as before
+///   the lock existed. The upgrade still re-reads the version inside its own transaction.
+///
+/// Whenever the version was read before the shared lock was taken, it's read again after,
+/// so a copy never runs on a schema another (newer) copy changed in between.
+async fn open_guarded(data_dir: &Path, path: &Path) -> Result<(Option<PathBuf>, Option<std::fs::File>)> {
+    use std::fs::TryLockError;
+
+    let lock = std::fs::File::options().create(true).truncate(false).write(true).open(data_dir.join(LOCK_FILENAME));
+    let lock = match lock {
+        Ok(file) => file,
+        Err(e) => return unguarded(path, &e).await,
+    };
+    match lock.try_lock() {
+        Ok(()) => {
+            let backup = upgrade(path, true).await;
+            let shared = lock.unlock().and_then(|()| lock.lock_shared());
+            let backup = backup?;
+            if let Err(e) = shared {
+                return Err(Error::Internal(format!("couldn't lock {}: {e}", data_dir.display())));
+            }
+            // Between unlock and lock_shared another copy could have changed the schema.
+            upgrade(path, false).await?;
+            Ok((backup, Some(lock)))
+        }
+        Err(TryLockError::WouldBlock) => {
+            // Waits while another copy upgrades; on a blocking thread so the runtime keeps going.
+            let lock = tokio::task::spawn_blocking(move || lock.lock_shared().map(|()| lock))
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?
+                .map_err(|e| Error::Internal(format!("couldn't lock {}: {e}", data_dir.display())))?;
+            Ok((upgrade(path, false).await?, Some(lock)))
+        }
+        Err(TryLockError::Error(e)) => unguarded(path, &e).await,
+    }
+}
+
+async fn unguarded(path: &Path, why: &std::io::Error) -> Result<(Option<PathBuf>, Option<std::fs::File>)> {
+    eprintln!("questodian: file locks aren't available here ({why}); open only one copy of Questodian at a time");
+    Ok((upgrade(path, true).await?, None))
 }
 
 // --------------------------------------------------------------------------- migrations
@@ -193,8 +234,9 @@ async fn upgrade(path: &Path, alone: bool) -> Result<Option<PathBuf>> {
 
 async fn upgrade_with(conn: &mut SqliteConnection, path: &Path, alone: bool) -> Result<Option<PathBuf>> {
     let state = read_state(conn, path).await?;
-    let current = matches!(&state, State::At(version) if version == HEAD);
-    if !alone && !current && state != State::Empty {
+    // Only an older version this app would upgrade needs the folder to itself.
+    let upgradeable = matches!(&state, State::At(version) if version == BASELINE);
+    if !alone && upgradeable {
         return Err(refused(
             path,
             "it needs upgrading to this version of Questodian, but another copy of Questodian has it open. \
