@@ -1,5 +1,5 @@
-# Runs every CI check, then builds the desktop app for each OS on that OS and attaches
-# the installers to a draft GitHub release. Nothing is built if a check fails.
+# Runs every CI check, creates one draft GitHub release, then builds the desktop app for each
+# OS on that OS and attaches the installers to it. Nothing is built if a check fails.
 # Run it by pushing a version tag (v0.2.0) or by hand.
 # Based on https://v2.tauri.app/distribute/pipelines/github/
 name: Release
@@ -14,9 +14,36 @@ jobs:
     name: Tests
     uses: ./.github/workflows/ci.yml
 
+  # One draft release for every build to upload into. (When each build job created its own,
+  # v0.1.0 ended up split across two drafts.)
+  create-release:
+    name: Create the draft release
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create it
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the app version $version in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" -X POST \
+            -f tag_name="v$version" -f target_commitish="$GITHUB_SHA" -f name="Questodian v$version" \
+            -f body="Download the installer for your system below." -F draft=true --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   desktop:
     name: Desktop app (${{ matrix.name }})
-    needs: checks
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -53,11 +80,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: Questodian v__VERSION__
-          releaseBody: Download the installer for your system below.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.id }}
           args: ${{ matrix.args }}
       # The draft release already has the installers at this point; if this fails, don't publish it.
       - name: Start the Linux app and check the UI reaches the API
