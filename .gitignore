@@ -24,3 +24,7 @@ src/questodian/web/
 *.db
 *.db-shm
 *.db-wal
+
+# Claude Code: per-person settings and worktrees (shared settings, agents and hooks are committed)
+.claude/settings.local.json
+.claude/worktrees/

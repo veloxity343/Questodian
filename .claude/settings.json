@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(sudo *)",
+      "Bash(git push *)",
+      "Bash(git push)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh release *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\"",
+            "timeout": 10,
+            "onFailure": "block",
+            "statusMessage": "Checking command against project guardrails"
+          }
+        ]
+      }
+    ]
+  }
+}
