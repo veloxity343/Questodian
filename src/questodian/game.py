@@ -92,8 +92,10 @@ def character_edition(repo: Repo, character: dict) -> str:
 
 
 def _sync_pc(repo: Repo, combatant: dict, death_save_failures: int = 0, healed_from_zero: bool = False) -> None:
-    # death_save_failures of 3 or more marks the character dead (massive damage).
-    """Keep a linked character sheet's HP (and death saves) in step with the tracker."""
+    """Keep a linked character sheet's HP (and death saves) in step with the tracker.
+
+    ``death_save_failures`` of 3 marks the character dead (massive damage).
+    """
     if combatant["kind"] != "pc" or not combatant["character_id"]:
         return
     try:

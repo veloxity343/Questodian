@@ -229,9 +229,12 @@ pub fn hit_die(class: &str) -> Option<i64> {
     HIT_DICE.iter().find(|(c, _)| *c == class).map(|(_, die)| *die)
 }
 
-/// Total of all class levels (at least 1).
+/// Total of all class levels; a total of 0 counts as level 1.
 pub fn total_level(classes: &[ClassLevel]) -> i64 {
-    classes.iter().map(|c| c.level).sum::<i64>().max(1)
+    match classes.iter().map(|c| c.level).sum::<i64>() {
+        0 => 1,
+        total => total,
+    }
 }
 
 /// Combined caster level for the slot table.

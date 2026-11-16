@@ -20,8 +20,10 @@ use serde_json::{Value, json};
 use crate::db::Database;
 use crate::error::{Error, Result, invalid, not_found};
 use crate::kinds::Kind;
-use crate::schemas::{self, Character, Check, ClassesIn, Expression, Lenient, Projection};
-use crate::{dice, rules, srd};
+use crate::schemas::{
+    self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
+};
+use crate::{dice, game, rules, srd};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -64,6 +66,10 @@ pub fn router(app: Shared) -> Router {
         .route("/srd/search", get(srd_search))
         .route("/srd/entry", get(srd_entry))
         .route("/projection", get(get_projection).put(set_projection))
+        .route("/encounters/{id}/action", post(encounter_action))
+        .route("/sessions/{id}/award", post(award))
+        .route("/sessions/{id}/log", post(add_log))
+        .route("/characters/{id}/rest", post(rest))
         .route("/{kind}", get(list_records).post(create_record))
         .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
@@ -376,6 +382,52 @@ async fn delete_record(
     repo.delete(kind, &id).await?;
     repo.commit().await?;
     Ok(Json(json!({"deleted": id})))
+}
+
+// --------------------------------------------------------------------------- game
+
+async fn encounter_action(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    Valid(body): Valid<EncounterAction>,
+) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = game::encounter_action(&mut repo, &id, body).await?;
+    repo.commit().await?;
+    Ok(Json(doc))
+}
+
+async fn award(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    Valid(body): Valid<Award>,
+) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = game::award(&mut repo, &id, body).await?;
+    repo.commit().await?;
+    Ok(Json(doc))
+}
+
+async fn add_log(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    Valid(body): Valid<LogIn>,
+) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = game::add_log(&mut repo, &id, body).await?;
+    repo.commit().await?;
+    Ok(Json(doc))
+}
+
+async fn rest(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    Valid(body): Valid<RestIn>,
+) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = game::rest(&mut repo, &id, body.r#type).await?;
+    repo.commit().await?;
+    Ok(Json(doc))
 }
 
 // --------------------------------------------------------------------------- write guard
