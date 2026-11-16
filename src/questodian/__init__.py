@@ -1,4 +1,4 @@
-"""Questodian: an all-in-one Dungeons & Dragons table manager."""
+"""Questodian: a campaign manager and DM screen for 5e tabletop games."""
 
 __version__ = "0.1.0"
 

@@ -65,7 +65,8 @@ export const api = {
   remove: (kind: Kind, id: string) => request<{ deleted: string }>("DELETE", `${kind}/${id}`),
   roll: (expression: string) => request<RollResult>("POST", "roll", { expression }),
   stats: () => request<{ results: RollResult[] }>("POST", "stats"),
-  slots: (classes: ClassLevel[]) => request<{ slots: number[] }>("POST", "slots", { classes }).then((r) => r.slots),
+  slots: (classes: ClassLevel[], edition: Edition = "2014") =>
+    request<{ slots: number[] }>("POST", "slots", { classes, edition }).then((r) => r.slots),
   encounter: (encounterId: string, action: EncounterAction) =>
     request<Encounter>("POST", `encounters/${encounterId}/action`, action),
   uploadHandout: async (id: string, file: File) => {

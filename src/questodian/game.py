@@ -86,8 +86,14 @@ def _edition(repo: Repo, doc: dict) -> str:
     return repo.get("campaigns", cid)["edition"] if cid else srd.DEFAULT_EDITION
 
 
-def _sync_pc(repo: Repo, combatant: dict) -> None:
-    """Keep a linked character sheet's HP in step with the tracker."""
+def character_edition(repo: Repo, character: dict) -> str:
+    """The rules edition of a character's campaign (2014 without one)."""
+    return _edition(repo, character)
+
+
+def _sync_pc(repo: Repo, combatant: dict, death_save_failures: int = 0, healed_from_zero: bool = False) -> None:
+    # death_save_failures of 3 or more marks the character dead (massive damage).
+    """Keep a linked character sheet's HP (and death saves) in step with the tracker."""
     if combatant["kind"] != "pc" or not combatant["character_id"]:
         return
     try:
@@ -96,6 +102,10 @@ def _sync_pc(repo: Repo, combatant: dict) -> None:
         return
     ch["hp"]["current"] = combatant["hp"]
     ch["hp"]["temp"] = combatant["temp_hp"]
+    saves = ch["death_saves"]
+    if healed_from_zero:
+        saves.update(successes=0, failures=0)
+    saves["failures"] = min(3, saves["failures"] + death_save_failures)
     repo.save("characters", ch)
 
 
@@ -170,7 +180,7 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
                         "hp": ch["hp"]["current"],
                         "max_hp": ch["hp"]["max"],
                         "temp_hp": ch["hp"]["temp"],
-                        "init_bonus": rules.derive(ch)["initiative"],
+                        "init_bonus": rules.derive(ch, character_edition(repo, ch))["initiative"],
                         "character_id": ch["id"],
                         "conditions": list(ch["conditions"]),
                     }
@@ -190,13 +200,24 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             enc["turn"] = 0
     elif action == "hp":
         c = find(body.id)
-        before = c["hp"]
+        before, temp_before = c["hp"], c["temp_hp"]
         apply_hp_change(c, body.amount)
         verb = "takes" if body.amount < 0 else "heals"
         _log(enc, f"{c['name']} {verb} {abs(body.amount)} ({before} → {c['hp']} HP)", "combat")
+        failures = 0
+        if body.amount < 0 and c["kind"] == "pc":
+            # Damage left over after reaching 0 HP; at least the hit point maximum kills outright
+            # (rules/damage-and-healing). Damage while already at 0 is a death save failure.
+            overflow = -body.amount - temp_before - before
+            if c["hp"] == 0 and c["max_hp"] and overflow >= c["max_hp"]:
+                failures = 3
+                _log(enc, f"{c['name']} dies from massive damage", "combat")
+            elif before == 0 and overflow > 0:
+                failures = 1
+                _log(enc, f"{c['name']} takes damage at 0 HP: a death save failure (two if it was a critical hit)", "combat")
         if c["hp"] == 0 and before > 0:
             _log(enc, f"{c['name']} drops to 0 HP", "combat")
-        _sync_pc(repo, c)
+        _sync_pc(repo, c, failures, healed_from_zero=before == 0 and c["hp"] > 0)
     elif action == "roll_initiative":
         for c in combatants:
             if body.which == "monsters" and c["kind"] == "pc":
@@ -285,20 +306,28 @@ def add_log(repo: Repo, session_id: str, body: schemas.LogIn) -> dict:
 def rest(repo: Repo, character_id: str, kind: str) -> dict:
     """Apply a short or long rest to a character sheet."""
     ch = repo.get("characters", character_id)
+    if kind not in ("short", "long"):
+        raise ValueError("rest type must be short or long")
+    edition = character_edition(repo, ch)
+    # 2014: a long rest needs 1 HP at the start (rules/resting). 2024: both rests do.
+    if ch["hp"]["current"] < 1 and (kind == "long" or edition == "2024"):
+        raise ValueError(f"a character needs at least 1 hit point to take a {kind} rest")
     if kind == "long":
         ch["hp"]["current"] = ch["hp"]["max"]
         ch["hp"]["temp"] = 0
         level = rules.total_level(ch)
-        ch["hit_dice"]["remaining"] = min(level, ch["hit_dice"]["remaining"] + max(1, level // 2))
-        for slot in ch["spellcasting"]["slots"].values():
-            slot["used"] = 0
+        # 2014: regain up to half your Hit Dice (minimum one). 2024: regain all of them.
+        regained = level if edition == "2024" else max(1, level // 2)
+        ch["hit_dice"]["remaining"] = min(level, ch["hit_dice"]["remaining"] + regained)
         ch["death_saves"] = {"successes": 0, "failures": 0}
         ch["exhaustion"] = max(0, ch["exhaustion"] - 1)
         resets = ("long", "short")
-    elif kind == "short":
-        resets = ("short",)
     else:
-        raise ValueError("rest type must be short or long")
+        resets = ("short",)
+    # Every caster's slots return on a long rest; a warlock's Pact Magic slots on a short one too.
+    if kind == "long" or rules.is_warlock_only(ch["classes"]):
+        for slot in ch["spellcasting"]["slots"].values():
+            slot["used"] = 0
     for r in ch["resources"]:
         if r["reset"] in resets:
             r["current"] = r["max"]

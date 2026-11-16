@@ -1,6 +1,6 @@
 # Questodian
 
-An all-in-one Dungeons & Dragons table manager that runs on your own computer:
+An all-in-one table manager for 5e tabletop games that runs on your own computer:
 a DM screen for running sessions, campaign prep, encounters, character sheets,
 the System Reference Document for both rule sets, your own handbook, and a dice
 roller. Fully offline: one local database file, no account, nothing to connect.

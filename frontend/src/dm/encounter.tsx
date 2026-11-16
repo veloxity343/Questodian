@@ -12,10 +12,14 @@ import { useDeleteRecord } from "./parts";
 import { useDM, useParty } from "./store";
 
 const DIFFICULTY_LABEL: Record<string, string> = {
-  trivial: "Trivial", low: "Low", moderate: "Moderate", high: "High", deadly: "Beyond high",
+  trivial: "Under half of Low", low: "Low", moderate: "Moderate", high: "High", deadly: "Above High",
 };
 
-/** 2024 XP budget (also used for 2014 campaigns): spend up to the budget for the chosen difficulty. */
+/**
+ * The 2024 XP budget (rules/gameplay-toolbox-combat-encounters), the only encounter table in
+ * either SRD, so 2014 campaigns use it too. The SRD has Low, Moderate and High; "under half of
+ * Low" and "above High" are the app's own bands around them.
+ */
 export function difficulty(xp: number, size: number, level: number, table: [number, number, number][] | undefined) {
   const row = table?.[Math.max(1, Math.min(level, 20)) - 1] ?? [50, 75, 100];
   const budget = { low: row[0] * size, moderate: row[1] * size, high: row[2] * size };
@@ -95,7 +99,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
         <label>Party <NumInput className="num-input tiny" min={1} max={12} value={enc.party_size} onChange={(v) => patch({ party_size: Math.max(1, v) })} /></label>
         <span className="muted">×</span>
         <label>Lv <NumInput className="num-input tiny" min={1} max={20} value={enc.party_level} onChange={(v) => patch({ party_level: Math.max(1, Math.min(20, v)) })} /></label>
-        <span className={`difficulty d-${rating}`}>{DIFFICULTY_LABEL[rating]}</span>
+        <span className={`difficulty d-${rating}`} title="XP budget from the 2024 rules (SRD 5.2.1). SRD 5.1 has no encounter-building table, so 2014 campaigns use this one too.">{DIFFICULTY_LABEL[rating]}</span>
         <span className="grow" />
         <span className="muted small">Monsters {monsterXp.toLocaleString()} XP · Low {budget.low.toLocaleString()} · Moderate {budget.moderate.toLocaleString()} · High {budget.high.toLocaleString()}</span>
       </div>

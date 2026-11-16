@@ -53,7 +53,7 @@ Edition = Literal["2014", "2024"]
 
 class Campaign(Record):
     name: Str = "New Campaign"
-    system: Str = "D&D 5e (SRD 5.1)"
+    system: Str = "5e (SRD 5.1)"
     edition: Edition = "2014"
     description: Str = ""
     setting: Str = ""
@@ -415,3 +415,4 @@ class MarkdownImport(Doc):
 
 class ClassesIn(Doc):
     classes: list[ClassLevel] = []
+    edition: Edition = "2014"

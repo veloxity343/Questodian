@@ -87,17 +87,17 @@ def stats() -> dict:
     return {"results": [r.to_dict() for r in dice.roll_stats()]}
 
 
+Edition = Annotated[str, Query(description="Rules edition: 2014 (SRD 5.1) or 2024 (SRD 5.2.1)")]
+
+
 @tools.post("/derive")
-def derive(body: schemas.Character) -> dict:
-    return rules.derive(body.model_dump())
+def derive(body: schemas.Character, edition: Edition = srd.DEFAULT_EDITION) -> dict:
+    return rules.derive(body.model_dump(), srd.check_edition(edition))
 
 
 @tools.post("/slots")
 def slots(body: schemas.ClassesIn) -> dict:
-    return {"slots": rules.spell_slots_for([c.model_dump() for c in body.classes])}
-
-
-Edition = Annotated[str, Query(description="Rules edition: 2014 (SRD 5.1) or 2024 (SRD 5.2.1)")]
+    return {"slots": rules.spell_slots_for([c.model_dump() for c in body.classes], body.edition)}
 
 
 @tools.get("/srd/categories")

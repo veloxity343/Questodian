@@ -16,7 +16,6 @@ import { targetEncounter } from "../lib/encounters";
 import type { Ability, Campaign, Character, Edition, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
 
 const ALIGNMENTS = ["", "Lawful Good", "Neutral Good", "Chaotic Good", "Lawful Neutral", "True Neutral", "Chaotic Neutral", "Lawful Evil", "Neutral Evil", "Chaotic Evil", "Unaligned"];
-const BACKGROUNDS = ["Acolyte", "Charlatan", "Criminal", "Entertainer", "Folk Hero", "Guild Artisan", "Hermit", "Noble", "Outlander", "Sage", "Sailor", "Soldier", "Urchin"];
 const PROF_CYCLE: SkillProficiency[] = ["none", "proficient", "expertise", "half"];
 const PROF_ICON: Record<SkillProficiency, string> = { none: "○", half: "◐", proficient: "●", expertise: "◉" };
 const PROF_LABEL: Record<SkillProficiency, string> = { none: "Not proficient", half: "Half proficiency", proficient: "Proficient", expertise: "Expertise" };
@@ -84,8 +83,8 @@ export function CharacterList() {
       {list.length ? (
         <div className="cards">
           {list.map((ch) => {
-            const d = derive(ch, meta);
             const camp = campaigns.find((c) => c.id === ch.campaign_id);
+            const d = derive(ch, meta, camp?.edition);
             return (
               <Link key={ch.id} className="card char-card" to={`/characters/${ch.id}`}>
                 <h3>{ch.name}</h3>
@@ -137,7 +136,8 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
     onError: (e) => toast(e.message, "error"),
   });
   if (!ch) return null;
-  const d = derive(ch, meta);
+  // Rules follow the character's own campaign, which may not be the one open in the app.
+  const d = derive(ch, meta, campaigns.find((c) => c.id === ch.campaign_id)?.edition);
   const roll: Roll = (expr, label) => void dice.roll(expr, `${ch.name}: ${label}`);
 
   const addToEncounter = async () => {
@@ -167,7 +167,8 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
     try {
       await flush();
       setDoc(await api.rest(id, type));
-      toast(type === "long" ? "Long rest: HP, slots and resources restored" : "Short rest: short-rest resources restored");
+      const pact = ch.classes.length > 0 && ch.classes.every((c) => c.name.toLowerCase() === "warlock") ? " and Pact Magic slots" : "";
+      toast(type === "long" ? "Long rest: HP, slots and resources restored" : `Short rest: short-rest resources${pact} restored`);
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -292,7 +293,7 @@ function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Deri
     <section className="panel sheet-header">
       <datalist id="dl-classes">{lists.classes.map((c) => <option key={c.id} value={c.name} />)}</datalist>
       <datalist id="dl-races">{lists.races.flatMap((r) => [r.name, ...(r.data.subraces || [])]).map((n) => <option key={n} value={n} />)}</datalist>
-      <datalist id="dl-backgrounds">{BACKGROUNDS.map((b) => <option key={b} value={b} />)}</datalist>
+      <datalist id="dl-backgrounds">{lists.backgrounds.map((b) => <option key={b.id} value={b.name} />)}</datalist>
       <div className="row gap wrap">
         <TextInput className="title-input grow" value={ch.name} onChange={(v) => edit((x) => void (x.name = v))} aria-label="Character name" />
         <label className="check"><Checkbox checked={ch.inspiration} onChange={(v) => edit((x) => void (x.inspiration = v))} /> Inspiration</label>
@@ -338,7 +339,7 @@ function AbilitiesPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit
   const scores = ABILITIES.map((a) => Number(ch.abilities[a]));
   const pointBuy = scores.every((s) => s in cost)
     ? `Point buy: ${scores.reduce((t, s) => t + cost[s], 0)}/27`
-    : "Point buy: n/a (scores must be 8–15 before racial bonuses)";
+    : `Point buy: n/a (scores must be 8–15 before ${d.edition === "2024" ? "background" : "racial"} increases)`;
   const toggleSave = (a: Ability, on: boolean) =>
     edit((x) => void (x.save_proficiencies = on ? [...new Set([...x.save_proficiencies, a])] : x.save_proficiencies.filter((s) => s !== a)));
 
@@ -349,7 +350,7 @@ function AbilitiesPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit
         {ABILITIES.map((a) => (
           <div className="ability" key={a}>
             <div className="ability-name">{ABILITY_NAMES[a]}</div>
-            <button type="button" className="ability-mod" title={`Roll ${ABILITY_NAMES[a]} check`} onClick={() => roll(d20(d.mods[a]), `${ABILITY_NAMES[a]} check`)}>{signed(d.mods[a])}</button>
+            <button type="button" className="ability-mod" title={`Roll ${ABILITY_NAMES[a]} check (${signed(d.checks[a])})`} onClick={() => roll(d20(d.checks[a]), `${ABILITY_NAMES[a]} check`)}>{signed(d.mods[a])}</button>
             <NumInput className="ability-score" min={1} max={30} aria-label={`${ABILITY_NAMES[a]} score`} value={ch.abilities[a]} onChange={(v) => edit((x) => void (x.abilities[a] = v))} />
             <div className="ability-save">
               <label className="check small" title="Proficient in this saving throw">
@@ -425,23 +426,36 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
   const changeHp = (sign: number) => {
     const n = parseInt(amount, 10);
     if (!n) return;
+    const before = ch.hp.current;
+    // Damage left after temp HP and reaching 0 (rules/damage-and-healing in both SRDs).
+    const overflow = n - ch.hp.temp - before;
     edit((x) => {
       if (sign < 0) {
         const absorbed = Math.min(x.hp.temp, n);
         x.hp.temp -= absorbed;
         x.hp.current = Math.max(0, x.hp.current - (n - absorbed));
+        if (before === 0 && overflow > 0) x.death_saves.failures = Math.min(3, x.death_saves.failures + 1);
       } else {
         x.hp.current = Math.min(x.hp.max || Infinity, x.hp.current + n);
+        if (before === 0) x.death_saves = { successes: 0, failures: 0 };
       }
     });
+    if (sign < 0 && ch.hp.max && overflow >= ch.hp.max) {
+      edit((x) => void (x.death_saves.failures = 3));
+      toast("Massive damage: the remaining damage equals or exceeds max HP, so the character dies", "error");
+    }
+    else if (sign < 0 && before === 0 && overflow > 0) toast("Damage at 0 HP: one death save failure (two if it was a critical hit)");
     setAmount("");
   };
   const spendHitDie = () => {
     const m = String(ch.hit_dice.total).match(/d(\d+)/);
     if (!m) return toast("Set your hit dice first (e.g. 3d10)", "error");
     if (ch.hit_dice.remaining < 1) return toast("No hit dice left", "error");
+    // Hit dice are spent during a short rest, which needs 1 HP in 2024 (rules-glossary-short-rest).
+    if (d.edition === "2024" && ch.hp.current < 1) return toast("A short rest needs at least 1 HP", "error");
     edit((x) => void (x.hit_dice.remaining -= 1));
-    roll(`d${m[1]}${signed(d.mods.con)}`, "Hit die");
+    // 2024 rules: regain at least 1 HP (rules-glossary-short-rest). 2014 has no minimum.
+    roll(d.edition === "2024" ? `max(1, d${m[1]}${signed(d.mods.con)})` : `d${m[1]}${signed(d.mods.con)}`, "Hit die");
   };
   const deathBoxes = (key: "successes" | "failures") => (
     <span className="row gap-sm">
@@ -466,7 +480,10 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
           <button type="button" className="big-num link" onClick={() => roll(d20(d.initiative), "Initiative")}>{signed(d.initiative)}</button>
           <label className="small muted">misc <NumInput className="num-input tiny" aria-label="Initiative misc bonus" value={ch.initiative_misc} onChange={(v) => edit((x) => void (x.initiative_misc = v))} /></label>
         </StatBox>
-        <StatBox label="Speed"><NumInput className="num-input big-num" aria-label="Speed" value={ch.speed} onChange={(v) => edit((x) => void (x.speed = v))} /></StatBox>
+        <StatBox label="Speed">
+          <NumInput className="num-input big-num" aria-label="Speed" value={ch.speed} onChange={(v) => edit((x) => void (x.speed = v))} />
+          {d.speed !== Number(ch.speed) && <span className="small muted">{d.speed} ft. while exhausted</span>}
+        </StatBox>
         <StatBox label="Passive Perception"><strong className="big-num">{d.passive.perception}</strong></StatBox>
       </div>
       <div className="hp-block">
@@ -490,6 +507,7 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
           <label className="field">
             <span>Exhaustion</span>
             <Select value={String(ch.exhaustion)} options={["0", "1", "2", "3", "4", "5", "6"]} onChange={(v) => edit((x) => void (x.exhaustion = Number(v)))} />
+            {d.exhaustion.length > 0 && <span className="small muted">{d.exhaustion.join("; ")}</span>}
           </label>
         </div>
       </div>
@@ -548,14 +566,14 @@ function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: E
   const setSlot = (lvl: number, next: { max: number; used: number }) => edit((x) => void (x.spellcasting.slots[lvl] = next));
   const autoFill = async () => {
     try {
-      const slots = await api.slots(ch.classes);
+      const slots = await api.slots(ch.classes, d.edition);
       edit((x) => {
         for (let lvl = 1; lvl <= 9; lvl++) {
           const max = slots[lvl - 1] || 0;
           x.spellcasting.slots[lvl] = { max, used: Math.min(x.spellcasting.slots[lvl]?.used || 0, max) };
         }
       });
-      toast(slots.length ? "Spell slots set from your class levels" : "No spell slots for these classes (warlock pact slots are set by hand)");
+      toast(slots.length ? "Spell slots set from your class levels" : "No spell slots for these classes (set warlock Pact Magic slots by hand; a single-class warlock gets them back on a short rest)");
     } catch (e) {
       toast((e as Error).message, "error");
     }
