@@ -615,11 +615,17 @@ def check_records(c: Checker) -> None:
         if c.verbose:
             print(f"  {ps} {rs}  {label}")
         pb, rb = anonymize(pb, py_ids), anonymize(rb, rust_ids)
-        if label == "GET /api/sessions" and ps == 200:
-            # Sorted by campaign id first, and ids are random: compare as a set.
-            key = lambda d: json.dumps(d, sort_keys=True)
-            pb["sessions"].sort(key=key)
-            rb["sessions"].sort(key=key)
+        # Sessions are sorted by campaign id first, and ids are random: compare them as a set,
+        # in the list and inside backups.
+        key = lambda d: json.dumps(d, sort_keys=True)
+        for body in (pb, rb):
+            if ps != 200 or not isinstance(body, dict):
+                continue
+            if label == "GET /api/sessions":
+                body["sessions"].sort(key=key)
+            collections = body.get("body", {}).get("collections") if isinstance(body.get("body"), dict) else None
+            if collections and "sessions" in collections:
+                collections["sessions"].sort(key=key)
         if ps != rs:
             c.failures.append(f"{label}\n    status: python {ps}, rust {rs}\n    python: {str(pb)[:300]}\n    rust:   {str(rb)[:300]}")
             continue
