@@ -18,7 +18,9 @@ macOS `.dmg`, Linux `.deb`, `.rpm` or `.AppImage`) and install it. The builds ar
 yet, so the first launch needs one extra step:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
-- **macOS:** after moving *Questodian.app* to Applications, run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
+- **macOS:** move *Questodian.app* to Applications and open it. If macOS won't open it, go to
+  **System Settings → Privacy & Security** and click **Open Anyway**. If it says the app is
+  "damaged", run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
 
 **From source (any OS):** you need [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/);
 on Linux, also the WebKitGTK packages [Tauri lists](https://v2.tauri.app/start/prerequisites/)
