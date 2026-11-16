@@ -2,14 +2,14 @@
 
 Usage:
     git clone --depth 1 https://github.com/5e-bits/5e-database.git
-    uv run python scripts/build_srd_2024.py path/to/5e-database path/to/SRD-5.2.1.md
+    python3 scripts/build_srd_2024.py path/to/5e-database path/to/SRD-5.2.1.md
 
 Structured data (monsters, spells, classes, species, equipment...) comes from
 5e-bits/5e-database (src/2024/en). The rules prose (Playing the Game, the Rules
 Glossary and the Gameplay Toolbox) isn't in that dataset, so it is split out of
 a Markdown conversion of the SRD 5.2.1 PDF.
 
-Writes src/questodian/data/srd-2024.json.gz in the same format as build_srd.py.
+Writes data/srd-2024.json.gz in the same format as build_srd.py.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_srd import ABILITIES, entry, fmt_cr, mod, names, ordinal  # noqa: E402
 
-OUT = Path(__file__).resolve().parent.parent / "src" / "questodian" / "data" / "srd-2024.json.gz"
+OUT = Path(__file__).resolve().parent.parent / "data" / "srd-2024.json.gz"
 
 ATTRIBUTION = (
     "This work includes material from the System Reference Document 5.2.1 "

@@ -6,8 +6,8 @@ the System Reference Document for both rule sets, your own handbook, and a dice
 roller. Fully offline: one local database file, no account, nothing to connect.
 
 - **Rules:** each campaign uses either the 2014 rules (SRD 5.1) or the 2024 rules (SRD 5.2.1)
-- **Desktop app:** Windows and macOS builds open in their own window; anywhere else it runs in the browser
-- **Backend:** Python, [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/) on SQLite, [Alembic](https://alembic.sqlalchemy.org/) migrations
+- **Desktop app:** Windows, macOS and Linux, built with [Tauri 2](https://v2.tauri.app/); it can also run as a local web server for any browser
+- **Backend:** Rust: [axum](https://github.com/tokio-rs/axum) for the API, [sqlx](https://github.com/launchbadge/sqlx) on SQLite
 - **Frontend:** [React](https://react.dev/) + TypeScript, built with [Vite](https://vite.dev/)
 
 ## Install
@@ -18,29 +18,35 @@ macOS `.dmg`, Linux `.deb`, `.rpm` or `.AppImage`) and install it. The builds ar
 yet, so the first launch needs one extra step:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Click **More info**, then **Run anyway**.
-- **macOS:** after moving *Questodian.app* to Applications, run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
+- **macOS:** move *Questodian.app* to Applications and open it. If macOS won't open it, go to
+  **System Settings → Privacy & Security** and click **Open Anyway**. If it says the app is
+  "damaged", run `xattr -cr "/Applications/Questodian.app"` once in Terminal.
 
-**From source (any OS):**
+**From source (any OS):** you need [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/);
+on Linux, also the WebKitGTK packages [Tauri lists](https://v2.tauri.app/start/prerequisites/)
+for the desktop app.
 
 ```sh
-make install     # uv sync + npm install
+make install     # npm install (Rust crates download on the first build)
 make run         # build the UI and open it in your browser at http://localhost:8765
-make app         # or: open it in its own window (Windows, macOS; Linux needs GTK or Qt)
+make app         # or: open it in its own window
 ```
 
-Other options:
+`make run` is `questodian serve`, the command-line app. Other options:
 
 ```sh
-uv run questodian serve --port 9000 --no-browser
-uv run questodian serve --host 0.0.0.0     # let devices on your network connect (e.g. a TV for handouts)
-uv run questodian --data-dir ./my-table    # store the database somewhere specific
+cargo run -p questodian-cli -- serve --port 9000 --no-browser
+cargo run -p questodian-cli -- serve --host 0.0.0.0   # let devices on your network connect (e.g. a TV for handouts)
+cargo run -p questodian-cli -- --data-dir ./my-table  # store the database somewhere specific
+cargo install --path crates/cli                       # install `questodian` on your PATH
 ```
 
 Your data is one SQLite file, `questodian.db`, in the usual place for your OS
 (`%APPDATA%\Questodian` on Windows, `~/Library/Application Support/Questodian` on macOS,
 `~/.local/share/questodian` on Linux), or `$QUESTODIAN_DATA` / `--data-dir`. Handout
 images sit next to it in `handouts/`. Before a new version changes the database, a
-copy is saved next to it (`questodian.db.backup-…`).
+copy is saved next to it (`questodian.db.backup-…`). Databases and backups from the
+first, Python version of Questodian open unchanged.
 
 ## The DM screen
 
@@ -53,7 +59,7 @@ Three columns, built for running a session:
   - **NPCs:** looks, voice, wants, secret, what they know, and a linked stat block.
   - **Encounters:** party size × level with the 2024 difficulty (low / moderate / high), initiative,
     a "now" banner, HP pills (damage, heal, temp), conditions, hidden combatants, Roll HP.
-  - **Sessions:** their scenes in order, trackers (clocks like "tolls of the bell"), encounters, prep,
+  - **Sessions:** their scenes in order, trackers (clocks like "hours until the ritual"), encounters, prep,
     recap, a timestamped log, loot that goes straight into inventories, and XP.
   - **Handouts:** images with zoom and pan; **Show to players** opens a second window (or any browser on
     your network at `/project`) that follows what you show.
@@ -62,7 +68,7 @@ Three columns, built for running a session:
   and more, plus your homebrew), a **View** tab for whatever you clicked, quick notes, and a dice tray
   with history. Attacks and damage in any stat block or note roll when clicked: `+6`, `2d8+3`.
 
-Type `[[Ada Brae]]` in any notes to link to a record (or `[[spell:Fireball]]`, `[[monster:Zombie]]` for
+Type `[[Captain Vane]]` in any notes to link to a record (or `[[spell:Fireball]]`, `[[monster:Zombie]]` for
 the rules); typing `[[` suggests names. **Ctrl K** searches everything: records, the rules, and quick actions.
 
 ## Everything else
@@ -86,91 +92,65 @@ d%  4dF  (1d8+3)*2  floor(8d6/2)  mod(16)  prof(5)
 ## Command line
 
 ```sh
-uv run questodian roll 2d20kh1+5 8d6 -v
-uv run questodian calc "mod(18) + prof(9)"
-uv run questodian srd fireball
-uv run questodian srd -c monsters dragon
-uv run questodian export backup.json [--campaign ID]
-uv run questodian import backup.json house-rules.md --mode skip
+questodian roll 2d20kh1+5 8d6 -v
+questodian calc "mod(18) + prof(9)"
+questodian srd fireball
+questodian srd -c monsters dragon
+questodian export backup.json [--campaign ID]
+questodian import backup.json house-rules.md --mode skip
 ```
+
+(From a checkout without installing it: `cargo run -p questodian-cli -- roll d20`.)
 
 ## Development
 
 Common tasks are in the `Makefile` (run `make` to list them):
 
 ```sh
-make install     # uv sync + npm install (first time)
+make install     # npm install (first time)
 make dev         # API on :8765 + UI on http://localhost:5173, hot reload
-make check       # backend tests + frontend typecheck
-make migration m="describe the change"   # after editing models.py
-make package     # build the UI, then the wheel and sdist into dist/
+make check       # Rust format check, lint and tests, and the frontend typecheck
+make app         # the desktop app (debug build)
+make desktop     # the desktop app and its installers for this OS, into target/release/bundle/
 ```
 
 `make dev` runs both servers with `concurrently`: one Ctrl+C stops both, and if
-either exits the other is stopped too. `make api` / `make web` run them on their
-own. Interactive API docs are at http://localhost:8765/docs.
+either exits the other is stopped too. `make api` / `make web` run them on their own.
 
-### Building a release
+### Releases
 
-The Python package ships the compiled UI, so the frontend is built before the
-wheel. `make package` does both and fails if the UI didn't make it into the
-wheel. By hand:
-
-```sh
-cd frontend && npm run build && cd ..   # writes src/questodian/web/
-uv build                                # dist/questodian-*.whl and .tar.gz
-```
-
-### Desktop builds
-
-`make tauri-build` builds the desktop app and its installers for the OS you're on into
-`target/release/bundle/`. Releases come from the **Release** workflow: push a version tag
-(`git tag v0.2.0 && git push origin v0.2.0`) or run it from the Actions tab. It runs every CI
-check, builds Windows, macOS (Apple Silicon and Intel) and Linux on GitHub, and attaches the
-installers to a draft Release for you to publish. (`make desktop` still builds the older Python
-version with PyInstaller.)
-
-### The Rust backend and desktop app
-
-The backend is being ported to Rust, with a Tauri 2 desktop app; see
-[docs/rust-port.md](docs/rust-port.md). It opens the same databases and serves the
-same API, and `scripts/parity.py` checks the two servers give the same answers.
-
-```sh
-make rust-test     # format check, lint and tests
-make rust-serve    # the app on the Rust backend (http://localhost:8765)
-make parity        # compare the Rust and Python servers request by request
-make tauri-dev     # the desktop app (Linux needs the WebKitGTK packages Tauri lists)
-make tauri-build   # installers for this OS into target/release/bundle/
-```
-
-Release builds for Windows, macOS and Linux come from the `Release` workflow, which
-runs when a `v*` tag is pushed and attaches the installers to a draft GitHub release.
+Releases come from the **Release** workflow: push a version tag that matches the version in
+`src-tauri/tauri.conf.json` (`git tag v0.2.0 && git push origin v0.2.0`), or run it from the
+Actions tab. It runs every CI check, creates a draft Release, builds Windows, macOS (Apple
+Silicon and Intel) and Linux on GitHub, and attaches the installers to the draft for you to
+publish.
 
 ### Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on
-pull requests: backend tests, frontend typecheck, then `make package`, which
-installs the wheel into a clean environment, starts it, and checks the UI, SRD
-search and saving all work. The built wheel and sdist are attached to each run
-as a `dist` artifact.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
+the Rust format check, lint and tests; the frontend typecheck; then a release build of the
+`questodian` command, which is started to check the UI, SRD search and saving work. The binary
+is attached to each run.
 
 ### Layout
 
-- `src/questodian/app.py`: FastAPI app, routes and static UI serving
-- `src/questodian/desktop.py`: the desktop window (pywebview); `packaging/` has the PyInstaller recipe
-- `src/questodian/models.py`: SQLAlchemy tables (campaigns, sessions, characters, handbook)
-- `src/questodian/schemas.py`: Pydantic schemas for API payloads and exports
-- `src/questodian/db.py`, `repo.py`: engine/session setup and record access
-- `src/questodian/migrations/`, `migrate.py`: Alembic migrations, applied on startup
-- `src/questodian/game.py`: initiative tracker, rewards and rests
-- `src/questodian/dice.py`: dice and arithmetic parser/evaluator (no `eval`)
-- `src/questodian/rules.py`: 5e numbers and derived character stats
-- `src/questodian/transfer.py`: import and export (JSON bundles, Markdown)
+- `crates/core/`: everything but the windows, shared by the desktop app and the command line
+  - `server.rs`: the HTTP API (axum) and serving the built UI
+  - `db.rs`, `migrations/`: opening the database, backups and schema upgrades
+  - `repo.rs`, `kinds.rs`: reading and writing records, the same way for every kind
+  - `schemas.rs`: every record and request body, with defaults and lenient input
+  - `game.rs`: initiative tracker, rewards and rests
+  - `rules.rs`: 5e numbers and derived character stats, per edition
+  - `dice.rs`: dice and arithmetic parser/evaluator
+  - `srd.rs`: the bundled SRD, loading and search
+  - `transfer.rs`: import and export (JSON bundles, Markdown)
+- `crates/cli/`: the `questodian` command (`serve`, `roll`, `calc`, `srd`, `export`, `import`)
+- `src-tauri/`: the desktop app; it serves the UI and API to its window through its own
+  `questodian://` address, with nothing listening on the network
 - `frontend/src/`: the React UI (`dm/` is the DM screen, `views/` the other pages, `context/` app-wide state)
-- `scripts/build_srd.py`, `scripts/build_srd_2024.py`: regenerate the bundled SRD 5.1 and 5.2.1 data
-  from [5e-bits/5e-database](https://github.com/5e-bits/5e-database) (the 2024 rules prose comes from
-  a Markdown copy of the SRD 5.2.1)
+- `data/`: the bundled SRD 5.1 and 5.2.1, regenerated by `scripts/build_srd.py` and
+  `scripts/build_srd_2024.py` from [5e-bits/5e-database](https://github.com/5e-bits/5e-database)
+  (the 2024 rules prose comes from a Markdown copy of the SRD 5.2.1)
 
 Nested sheet data (inventory, spells, the encounter, etc.) is stored in JSON
 columns; links between records are real foreign keys (deleting a campaign deletes
@@ -178,24 +158,15 @@ its sessions and unlinks characters and handbook entries).
 
 ### Database migrations
 
-The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app
-upgrades the database to the latest migration every time it starts, so users
-never run anything by hand. After changing `models.py`:
+The app upgrades the database when it opens it, so users never run anything by hand. The
+schema version is kept in an `alembic_version` table (the first, Python version managed its
+schema with Alembic), so every database ever made still opens. To change the schema:
 
-```sh
-uv run alembic revision --autogenerate -m "add character portrait"
-# review the new file in src/questodian/migrations/versions/, then:
-uv run pytest                  # fails if models and migrations disagree
-```
-
-The `alembic` command targets your normal database (`$QUESTODIAN_DATA` or
-`~/.local/share/questodian/questodian.db`); add `-x db=path/to/file.db` to use
-another. Other useful commands: `alembic current`, `alembic history`,
-`alembic check`, `alembic downgrade -1`.
-
-SQLite can't alter columns in place, so migrations run in Alembic's batch mode
-(tables are rebuilt), with foreign keys switched off meanwhile so rebuilding
-`campaigns` doesn't cascade-delete sessions.
+1. Add the upgrade to `crates/core/src/db.rs` and bump `HEAD`. It runs in one transaction,
+   after a backup, with foreign keys off so rebuilding a table doesn't cascade-delete.
+2. Add a fixture database at the old version to `crates/core/tests/fixtures/` (a SQL dump made
+   by the current release) and check in `crates/core/tests/database.rs` that it upgrades with
+   every record intact.
 
 ## License and attribution
 

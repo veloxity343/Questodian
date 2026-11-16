@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "uv run --project .. questodian serve --no-browser",
+    "dev:api": "cargo run -p questodian-cli -- serve --no-browser",
     "dev:all": "concurrently --kill-others --names api,web --prefix-colors blue,magenta \"npm:dev:api\" \"npm:dev\"",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",

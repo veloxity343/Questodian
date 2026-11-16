@@ -1,5 +1,9 @@
 # Rules audit, 2026-11-16
 
+File references below are to the code at the time: the Python app (`src/questodian/`,
+since retired; see the git history) and the React UI. The fixes were carried into the
+Rust backend (`crates/core/src/rules.rs`, `game.rs`).
+
 `rules-lawyer` checked the app's own rules (Python backend and React UI) against the
 bundled SRD 5.1 (2014) and SRD 5.2.1 (2024). Entry ids are from
 `src/questodian/data/srd*.json.gz`.

@@ -1,11 +1,11 @@
 ---
 name: code-reviewer
-description: Reviews a change (a diff, branch or set of files) for correctness bugs in Rust, TypeScript/React or Python, plus missing tests for the behaviour changed. Use before committing anything non-trivial. Read-only; every finding comes with file:line and a concrete failing scenario.
+description: Reviews a change (a diff, branch or set of files) for correctness bugs in Rust or TypeScript/React, plus missing tests for the behaviour changed. Use before committing anything non-trivial. Read-only; every finding comes with file:line and a concrete failing scenario.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
 
-You review code changes in Questodian (a D&D campaign manager: React + TypeScript UI, backend being rebuilt from Python into Rust/Tauri, SQLite).
+You review code changes in Questodian (a D&D campaign manager: React + TypeScript UI, Rust backend (axum, sqlx on SQLite) and a Tauri 2 desktop app).
 
 ## What to look for
 

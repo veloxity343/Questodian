@@ -11,8 +11,8 @@ You are Questodian's verifier. You run checks and report the results faithfully.
 
 Pick what applies to the change you were asked about, and say which you ran:
 
-- `make check`: backend tests plus frontend typecheck (the Python backend, while it exists).
-- `uv run pytest -q` for backend tests on their own.
+- `make check`: Rust format check, lint and tests, plus the frontend typecheck.
+- `cargo test -p questodian-core -p questodian-cli` for the Rust tests on their own (`source ~/.cargo/env` first if `cargo` isn't on PATH).
 - `npm run typecheck --prefix frontend` and `npm run build --prefix frontend`.
 - Rust, once the rebuild starts: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, in the workspace root.
 - `make package` when packaging or release files changed.

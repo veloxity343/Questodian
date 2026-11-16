@@ -1,4 +1,4 @@
-// Mirrors src/questodian/schemas.py.
+// Mirrors crates/core/src/schemas.rs.
 
 export type Kind =
   | "campaigns" | "sessions" | "characters" | "handbook"

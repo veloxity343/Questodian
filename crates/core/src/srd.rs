@@ -13,8 +13,8 @@ use serde_json::{Map, Value, json};
 
 use crate::schemas::Edition;
 
-const SRD_2014: &[u8] = include_bytes!("../../../src/questodian/data/srd.json.gz");
-const SRD_2024: &[u8] = include_bytes!("../../../src/questodian/data/srd-2024.json.gz");
+const SRD_2014: &[u8] = include_bytes!("../../../data/srd.json.gz");
+const SRD_2024: &[u8] = include_bytes!("../../../data/srd-2024.json.gz");
 
 /// Categories in display order, with their labels.
 const CATEGORY_LABELS: [(&str, &str); 20] = [

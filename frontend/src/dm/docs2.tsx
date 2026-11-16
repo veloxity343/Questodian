@@ -105,7 +105,7 @@ export function SessionDoc({ initial }: { initial: Session }) {
               <button type="button" className="link small" onClick={() => dm.open({ kind: "trackers", id: t.id })}>Edit steps</button>
             </div>
           ))}
-          {!trackers.length && <p className="muted small">Clocks and counters for this session, e.g. tolls of a bell or rounds until the ritual finishes.</p>}
+          {!trackers.length && <p className="muted small">Clocks and counters for this session, e.g. hours until dawn or rounds until the ritual finishes.</p>}
         </div>
       </section>
 
@@ -292,8 +292,6 @@ interface ViewState { id: string; zoom: number; x: number; y: number }
 /** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
 export function projectHandout() {
   const url = "/project";
-  const native = (window as unknown as { pywebview?: { api?: { project?: (u: string) => void } } }).pywebview?.api?.project;
-  if (native) return native(url);
   // The desktop app answers this address itself; in a browser it doesn't exist.
   if (location.protocol === "questodian:" || location.hostname === "questodian.localhost") {
     void fetch("/desktop/players", { method: "POST", body: url });

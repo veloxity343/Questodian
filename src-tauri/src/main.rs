@@ -24,7 +24,7 @@ const SCHEME: &str = "questodian";
 
 /// The built UI, compiled in (`npm run build` in `frontend/` first).
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../src/questodian/web"]
+#[folder = "../frontend/dist"]
 struct Web;
 
 fn ui_file(path: &str) -> Option<Cow<'static, [u8]>> {

@@ -86,7 +86,7 @@ struct ServeArgs {
     /// Don't open a browser window.
     #[arg(long)]
     no_browser: bool,
-    /// The built UI to serve (default: the one next to the Python package, if built).
+    /// The built UI to serve (default: frontend/dist, if built).
     #[arg(long)]
     web_dir: Option<PathBuf>,
 }
@@ -109,7 +109,7 @@ fn main() -> ExitCode {
 
 fn serve(data_dir: Option<PathBuf>, args: ServeArgs) -> ExitCode {
     let data_dir = data_dir.unwrap_or_else(db::default_data_dir);
-    let web_dir = args.web_dir.unwrap_or_else(|| PathBuf::from("src/questodian/web"));
+    let web_dir = args.web_dir.unwrap_or_else(|| PathBuf::from("frontend/dist"));
     let ui = if web_dir.join("index.html").is_file() { Ui::Folder(web_dir) } else { Ui::Missing };
 
     let shown_host = if matches!(args.host.as_str(), "127.0.0.1" | "0.0.0.0" | "") { "localhost" } else { &args.host };

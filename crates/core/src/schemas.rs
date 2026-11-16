@@ -2,9 +2,9 @@
 //!
 //! Every field has a default, so partial input (a new record with just a name, or an
 //! older export missing newer fields) becomes a complete record. Unknown keys are
-//! ignored. Input is converted the way the Python app (Pydantic) converts it, so the
-//! same JSON is accepted by both: `"300"` is a valid whole number, `"yes"` a valid
-//! true, and `null` a valid empty string. See [`Lenient`] for the exact rules.
+//! ignored. Input is converted the way the first (Python) version converted it with
+//! Pydantic, so its exports and stored records still load: `"300"` is a valid whole
+//! number, `"yes"` a valid true, and `null` a valid empty string. See [`Lenient`].
 
 use indexmap::IndexMap;
 use serde::de::Error as _;
@@ -630,7 +630,7 @@ schema! {
 }
 
 schema! {
-    /// A clock or counter, e.g. "Tolls 3 of 7" with a label for each step.
+    /// A clock or counter, e.g. "Alarm 3 of 7" with a label for each step.
     pub struct Tracker {
         id: String = String::new(),
         created: String = String::new(),

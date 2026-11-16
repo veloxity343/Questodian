@@ -16,7 +16,7 @@ CREATE TABLE campaigns (
 	updated VARCHAR NOT NULL, edition VARCHAR DEFAULT '2014' NOT NULL, 
 	CONSTRAINT pk_campaigns PRIMARY KEY (id)
 );
-INSERT INTO "campaigns" VALUES('Seven Bells','5e (SRD 5.1)','','','[]','','camp1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00','2024');
+INSERT INTO "campaigns" VALUES('Test Campaign','5e (SRD 5.1)','','','[]','','camp1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00','2024');
 CREATE TABLE characters (
 	campaign_id VARCHAR(64), 
 	name VARCHAR NOT NULL, 
@@ -91,7 +91,7 @@ CREATE TABLE handbook (
 	CONSTRAINT pk_handbook PRIMARY KEY (id), 
 	CONSTRAINT fk_handbook_campaign_id_campaigns FOREIGN KEY(campaign_id) REFERENCES campaigns (id) ON DELETE SET NULL
 );
-INSERT INTO "handbook" VALUES(NULL,'Lore','House Rules','["bells", "town"]','','hb1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
+INSERT INTO "handbook" VALUES(NULL,'Lore','House Rules','["lore", "town"]','','hb1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
 CREATE TABLE handouts (
 	campaign_id VARCHAR(64), 
 	folder VARCHAR NOT NULL, 
@@ -126,7 +126,7 @@ CREATE TABLE monsters (
 	CONSTRAINT pk_monsters PRIMARY KEY (id), 
 	CONSTRAINT fk_monsters_campaign_id_campaigns FOREIGN KEY(campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE
 );
-INSERT INTO "monsters" VALUES(NULL,'Bell-Ringer','Medium humanoid, neutral','2',450,10,1,'',0,'30 ft.','{"str": 16}','','','mon1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
+INSERT INTO "monsters" VALUES(NULL,'Gate Guard','Medium humanoid, neutral','2',450,10,1,'',0,'30 ft.','{"str": 16}','','','mon1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
 CREATE TABLE notes (
 	campaign_id VARCHAR(64), 
 	session_id VARCHAR(64), 
@@ -200,7 +200,7 @@ CREATE TABLE "sessions" (
 	CONSTRAINT pk_sessions PRIMARY KEY (id), 
 	CONSTRAINT fk_sessions_campaign_id_campaigns FOREIGN KEY(campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE
 );
-INSERT INTO "sessions" VALUES('camp1',1,'New Session','','planned','[]','','','[]','[{"name": "Bell", "qty": 2, "value": "", "assigned_to": ""}]',0,'sess1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
+INSERT INTO "sessions" VALUES('camp1',1,'New Session','','planned','[]','','','[]','[{"name": "Gem", "qty": 2, "value": "", "assigned_to": ""}]',0,'sess1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
 CREATE TABLE trackers (
 	campaign_id VARCHAR(64), 
 	session_id VARCHAR(64), 
@@ -216,7 +216,7 @@ CREATE TABLE trackers (
 	CONSTRAINT fk_trackers_campaign_id_campaigns FOREIGN KEY(campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE, 
 	CONSTRAINT fk_trackers_session_id_sessions FOREIGN KEY(session_id) REFERENCES sessions (id) ON DELETE SET NULL
 );
-INSERT INTO "trackers" VALUES('camp1',NULL,'Tolls',3,7,'[]','','trk1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
+INSERT INTO "trackers" VALUES('camp1',NULL,'Alarm',3,7,'[]','','trk1','2026-11-16T06:51:06+00:00','2026-11-16T06:51:06+00:00');
 CREATE INDEX ix_characters_campaign_id ON characters (campaign_id);
 CREATE INDEX ix_handbook_campaign_id ON handbook (campaign_id);
 CREATE INDEX ix_handouts_campaign_id ON handouts (campaign_id);

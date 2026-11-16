@@ -1,5 +1,5 @@
 -- The schema at Alembic revision 0002, exactly as the Python app creates it.
--- Captured from a new database made by src/questodian/migrate.py; don't edit by hand.
+-- Captured from a new database made by the Python app (since retired); don't edit by hand.
 
 CREATE TABLE alembic_version (
 	version_num VARCHAR(32) NOT NULL, 

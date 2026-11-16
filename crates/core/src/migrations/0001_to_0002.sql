@@ -1,5 +1,5 @@
 -- Upgrade from Alembic revision 0001 to 0002, part 1: the DM screen tables and the
--- campaign edition. Statements captured from src/questodian/migrations/versions/0002_dm_screen.py's
+-- campaign edition. Statements captured from the result of the Python app's Alembic migration 0002's
 -- result; don't edit by hand. Part 2 (moving session encounters, then dropping
 -- sessions.encounter) is in db.rs.
 

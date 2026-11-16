@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// `npm run dev` serves the UI on :5173 and forwards /api to the Python server on :8765.
-// `npm run build` writes the production bundle into the Python package so FastAPI can serve it.
+// `npm run dev` serves the UI on :5173 and forwards /api to the Rust server on :8765
+// (`questodian serve`). `npm run build` writes the production bundle to dist/, which the
+// desktop app compiles in and `questodian serve` serves.
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -11,7 +12,7 @@ export default defineConfig({
     proxy: { "/api": { target: "http://127.0.0.1:8765", changeOrigin: false } },
   },
   build: {
-    outDir: "../src/questodian/web",
+    outDir: "dist",
     emptyOutDir: true,
   },
 });
