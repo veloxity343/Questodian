@@ -324,5 +324,16 @@ through the real UI on the Rust server: all working.
   the official SRD (#16; needs the SRD PDF to check); 2024 Surprise.
 - Python's 0002 migration isn't atomic: if it fails halfway, both apps refuse the
   file until it's repaired by hand. Moot once Python is retired.
-- Retire the Python app after the first Rust release (see the plan in the chat log:
-  move the SRD data and UI build output out of `src/questodian`, then delete it).
+- Retire the Python app after the first Rust release has been tried on Windows and
+  macOS:
+  1. Move the SRD data (`src/questodian/data/`) to `data/` and Vite's output from
+     `src/questodian/web` to `frontend/dist`; update `srd.rs`, `src-tauri`, the CLI's
+     default `--web-dir`, `tauri.conf.json` and `vite.config.ts`.
+  2. From then on, schema changes are written only in `crates/core/src/db.rs`, still
+     recording the version in `alembic_version`.
+  3. Keep `scripts/build_srd*.py` (run with `uv` when regenerating the SRD) or port
+     them; keep the fixture databases as Rust tests; drop `parity.py` and
+     `make_fixtures.py`.
+  4. Delete `src/questodian`, `tests/`, `packaging/`, `pyproject.toml`, `uv.lock` and
+     `alembic.ini`; remove the Python jobs and parity step from CI; update the
+     Makefile, README and `CLAUDE.md`.
