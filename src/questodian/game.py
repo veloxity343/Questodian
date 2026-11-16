@@ -226,8 +226,9 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             _log(enc, f"{c['name']} drops to 0 HP", "combat")
         _sync_pc(repo, c, failures, healed_from_zero=before == 0 and c["hp"] > 0)
     elif action == "roll_initiative":
-        # With `group`, identical monsters (same SRD entry or stat block) share one roll and act
-        # together: "The GM makes one roll for an entire group of identical creatures" (SRD).
+        # With `group`, identical monsters (same SRD entry or stat block) share one roll. SRD 5.1:
+        # "The GM makes one roll for an entire group of identical creatures"; SRD 5.2.1: "For a
+        # group of identical creatures, the GM makes a single roll".
         group_rolls: dict[tuple, int] = {}
         for c in combatants:
             if body.which == "monsters" and c["kind"] == "pc":

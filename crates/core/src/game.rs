@@ -256,8 +256,9 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
         }
         ActionKind::Hp => change_hp(repo, &mut enc, &body.id, body.amount).await?,
         ActionKind::RollInitiative => {
-            // With `group`, identical monsters (same SRD entry or stat block) share one roll and act
-            // together: "The GM makes one roll for an entire group of identical creatures" (SRD).
+            // With `group`, identical monsters (same SRD entry or stat block) share one roll. SRD 5.1:
+            // "The GM makes one roll for an entire group of identical creatures"; SRD 5.2.1: "For a
+            // group of identical creatures, the GM makes a single roll".
             let mut group_rolls: std::collections::HashMap<(String, String, i64), i64> = Default::default();
             for c in &mut enc.combatants {
                 let skip = match body.which {
