@@ -235,6 +235,9 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 .cond-add:hover { color: var(--accent); border-color: var(--accent); }
 .combatant .ac { display: flex; align-items: center; gap: 2px; }
 .combatant .ac input { width: 44px; font-family: var(--serif); font-weight: 700; text-align: center; background: transparent; border-color: transparent; }
+/* Room for three digits: compact padding and no spinner (arrow keys still work). */
+.combatant .ac input, .combatant .init { padding: 4px 2px; appearance: textfield; -moz-appearance: textfield; }
+.combatant .ac input::-webkit-inner-spin-button, .combatant .init::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .combatant .ac small { color: var(--muted); font-size: 0.7rem; }
 .combatant .hp { position: relative; }
 .hp-pill { width: 100%; border: 0; border-radius: 4px; padding: 3px 6px; font-weight: 700; font-family: var(--mono); font-size: 0.85rem; cursor: pointer; background: var(--ok); color: #05210f; }

@@ -114,22 +114,17 @@ export function CharacterList() {
 
 export function CharacterSheet() {
   const { id = "" } = useParams();
-  // Suggestions (classes, races, backgrounds) follow the character's own campaign edition.
-  const { data, error } = useLoad(async () => {
-    const [ch, campaigns] = await Promise.all([api.get("characters", id), api.list("campaigns")]);
-    const edition = campaigns.find((c) => c.id === ch.campaign_id)?.edition ?? "2014";
-    return [ch, campaigns, await srdLists(edition)] as const;
-  }, [id]);
+  const { data, error } = useLoad(() => Promise.all([api.get("characters", id), api.list("campaigns")]), [id]);
   if (error) return <LoadError error={error} />;
   if (!data) return <Loading />;
-  const [ch, campaigns, lists] = data;
-  return <Sheet key={id} initial={ch} campaigns={campaigns} lists={lists} />;
+  const [ch, campaigns] = data;
+  return <Sheet key={id} initial={ch} campaigns={campaigns} />;
 }
 
 type Edit = (fn: (d: Character) => void) => void;
 type Roll = (expr: string, label: string) => void;
 
-function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: Campaign[]; lists: SrdLists }) {
+function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign[] }) {
   const { meta } = useApp();
   const dice = useDice();
   const toast = useToast();
@@ -191,7 +186,7 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
           <button type="button" className="btn danger" onClick={remove}>Delete</button>
         </div>
       </header>
-      <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} lists={lists} />
+      <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} />
       <div className="sheet-grid">
         <div className="sheet-col">
           <AbilitiesPanel ch={ch} d={d} edit={edit} roll={roll} />
@@ -267,7 +262,11 @@ function Sheet({ initial, campaigns, lists }: { initial: Character; campaigns: C
   );
 }
 
-function SheetHeader({ ch, d, edit, campaigns, lists }: { ch: Character; d: Derived; edit: Edit; campaigns: Campaign[]; lists: SrdLists }) {
+const NO_LISTS: SrdLists = { classes: [], races: [], backgrounds: [] };
+
+function SheetHeader({ ch, d, edit, campaigns }: { ch: Character; d: Derived; edit: Edit; campaigns: Campaign[] }) {
+  // Suggestions follow the character's own campaign edition, and switch when it's relinked.
+  const lists = useLoad(() => srdLists(d.edition), [d.edition]).data ?? NO_LISTS;
   const { meta } = useApp();
   const next = meta?.xp_by_level?.[d.level];
 
