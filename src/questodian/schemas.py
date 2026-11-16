@@ -372,6 +372,7 @@ class EncounterAction(Doc):
     character_ids: list[str] = []
     amount: int = 0
     which: Literal["all", "monsters", "unset"] = "all"
+    group: bool = False  # roll_initiative: one roll per group of identical monsters (the SRD's way)
     all: bool = False
 
 

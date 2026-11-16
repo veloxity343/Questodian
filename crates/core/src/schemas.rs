@@ -748,6 +748,8 @@ schema! {
         amount: i64 = 0,
         which: Which = Which::All,
         all: bool = false,
+        /// `roll_initiative`: one roll per group of identical monsters (the SRD's way).
+        group: bool = false,
     }
 }
 

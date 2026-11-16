@@ -407,7 +407,15 @@ def game_scenario(api: Session) -> None:
     act({"action": "roll_hp"}, keep_body=False)
     act({"action": "roll_initiative", "which": "monsters"}, keep_body=False)
     act({"action": "roll_initiative", "which": "unset"}, keep_body=False)
-    act({"action": "clear", "all": True}, keep_body=False)  # drop the randomly rolled wolf
+    act({"action": "add_monster", "srd_id": "monsters/zombie", "count": 3}, keep_body=False)
+    act({"action": "roll_initiative", "group": True}, keep_body=False)
+    rolled = api("GET", "/api/encounters/{enc}", keep_body=False) or {}
+    by_kind: dict = {}
+    for x in rolled.get("combatants", []):
+        if x["kind"] == "monster":
+            by_kind.setdefault(x["srd_id"], set()).add(x["initiative"])
+    api.log.append(("grouped initiative: one roll per kind of monster", 200, all(len(v) == 1 for v in by_kind.values())))
+    act({"action": "clear", "all": True}, keep_body=False)  # drop the randomly rolled monsters
 
     keep("sess", api("POST", "/api/sessions", {"campaign_id": "{c14}", "loot": [{"name": "Gem", "qty": 0, "value": "50 gp"}]}))
     api("POST", "/api/sessions/{sess}/award", {"xp": 300, "character_ids": ["{pc}", "{pc2}"]})
@@ -614,6 +622,9 @@ def check_records(c: Checker) -> None:
         label = anonymize(label, py_ids)
         if c.verbose:
             print(f"  {ps} {rs}  {label}")
+        if pb is False or rb is False:  # a property both servers must have (see game_scenario)
+            c.failures.append(f"{label}: python {pb}, rust {rb}")
+            continue
         pb, rb = anonymize(pb, py_ids), anonymize(rb, rust_ids)
         # Sessions are sorted by campaign id first, and ids are random: compare them as a set,
         # in the list and inside backups.

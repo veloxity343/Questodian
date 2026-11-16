@@ -18,7 +18,10 @@ def _log(doc: dict, text: str, kind: str) -> None:
 
 
 def sort_initiative(encounter: dict) -> None:
-    """Order combatants by initiative, breaking ties on initiative bonus."""
+    """Order combatants by initiative, breaking ties on initiative bonus, then name.
+
+    The SRD leaves ties to the GM; this is just the starting order.
+    """
     encounter["combatants"].sort(key=lambda c: (-c["initiative"], -c["init_bonus"], c["name"]))
 
 
@@ -223,12 +226,21 @@ def encounter_action(repo: Repo, encounter_id: str, body: schemas.EncounterActio
             _log(enc, f"{c['name']} drops to 0 HP", "combat")
         _sync_pc(repo, c, failures, healed_from_zero=before == 0 and c["hp"] > 0)
     elif action == "roll_initiative":
+        # With `group`, identical monsters (same SRD entry or stat block) share one roll and act
+        # together: "The GM makes one roll for an entire group of identical creatures" (SRD).
+        group_rolls: dict[tuple, int] = {}
         for c in combatants:
             if body.which == "monsters" and c["kind"] == "pc":
                 continue
             if body.which == "unset" and c["initiative"]:
                 continue
+            key = (c["srd_id"], c["monster_id"], c["init_bonus"]) if body.group and c["kind"] == "monster" and (c["srd_id"] or c["monster_id"]) else None
+            if key is not None and key in group_rolls:
+                c["initiative"] = group_rolls[key]
+                continue
             c["initiative"] = int(dice.roll(f"d20{c['init_bonus']:+d}").total)
+            if key is not None:
+                group_rolls[key] = c["initiative"]
         sort_initiative(enc)
     elif action == "roll_hp":
         edition = _edition(repo, enc)

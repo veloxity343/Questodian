@@ -28,7 +28,8 @@ pub async fn edition_of(repo: &mut Repo<'_>, campaign_id: &str) -> Result<Editio
 
 // --------------------------------------------------------------------------- encounter helpers
 
-/// Highest initiative first; ties go to the higher bonus, then by name.
+/// Highest initiative first; ties go to the higher bonus, then by name. The SRD leaves
+/// ties to the GM; this is just the starting order.
 pub fn sort_initiative(combatants: &mut [Combatant]) {
     combatants.sort_by(|a, b| {
         b.initiative.cmp(&a.initiative).then(b.init_bonus.cmp(&a.init_bonus)).then_with(|| a.name.cmp(&b.name))
@@ -255,14 +256,28 @@ pub async fn encounter_action(repo: &mut Repo<'_>, encounter_id: &str, body: Enc
         }
         ActionKind::Hp => change_hp(repo, &mut enc, &body.id, body.amount).await?,
         ActionKind::RollInitiative => {
+            // With `group`, identical monsters (same SRD entry or stat block) share one roll and act
+            // together: "The GM makes one roll for an entire group of identical creatures" (SRD).
+            let mut group_rolls: std::collections::HashMap<(String, String, i64), i64> = Default::default();
             for c in &mut enc.combatants {
                 let skip = match body.which {
                     Which::Monsters => c.kind == CombatantKind::Pc,
                     Which::Unset => c.initiative != 0,
                     Which::All => false,
                 };
-                if !skip {
-                    c.initiative = dice::roll(&format!("d20{:+}", c.init_bonus))?.total_f64() as i64;
+                if skip {
+                    continue;
+                }
+                let identical =
+                    body.group && c.kind == CombatantKind::Monster && !(c.srd_id.is_empty() && c.monster_id.is_empty());
+                let key = identical.then(|| (c.srd_id.clone(), c.monster_id.clone(), c.init_bonus));
+                if let Some(roll) = key.as_ref().and_then(|k| group_rolls.get(k)) {
+                    c.initiative = *roll;
+                    continue;
+                }
+                c.initiative = dice::roll(&format!("d20{:+}", c.init_bonus))?.total_f64() as i64;
+                if let Some(key) = key {
+                    group_rolls.insert(key, c.initiative);
                 }
             }
             sort_initiative(&mut enc.combatants);

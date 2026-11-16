@@ -292,3 +292,16 @@ def test_lair_xp_comes_from_the_srd(api):
     assert (aboleth["xp"], aboleth["xp_in_lair"], aboleth["in_lair"]) == (5900, 7200, False)
     _, enc = api("POST", f"/api/encounters/{enc['id']}/action", {"action": "add_monster", "srd_id": "monsters/zombie"})
     assert enc["combatants"][1]["xp_in_lair"] == 0
+
+
+def test_grouped_initiative_gives_identical_monsters_one_roll(api):
+    _, enc = api("POST", "/api/encounters", {})
+    path = f"/api/encounters/{enc['id']}/action"
+    api("POST", path, {"action": "add_monster", "srd_id": "monsters/zombie", "count": 3})
+    api("POST", path, {"action": "add_monster", "srd_id": "monsters/goblin", "count": 2})
+    for _ in range(5):
+        _, enc = api("POST", path, {"action": "roll_initiative", "group": True})
+        by_kind = {}
+        for c in enc["combatants"]:
+            by_kind.setdefault(c["srd_id"], set()).add(c["initiative"])
+        assert all(len(rolls) == 1 for rolls in by_kind.values())

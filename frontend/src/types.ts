@@ -355,7 +355,7 @@ export type EncounterAction =
   | { action: "update"; id: string; changes: Partial<Combatant> }
   | { action: "remove"; id: string }
   | { action: "hp"; id: string; amount: number }
-  | { action: "roll_initiative"; which: "all" | "monsters" | "unset" }
+  | { action: "roll_initiative"; which: "all" | "monsters" | "unset"; group?: boolean }
   | { action: "roll_hp" }
   | { action: "sort" | "next" | "prev" | "end" }
   | { action: "clear"; all?: boolean };

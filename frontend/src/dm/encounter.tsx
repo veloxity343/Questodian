@@ -5,7 +5,7 @@ import { api } from "../api";
 import { Checkbox, NumInput, TextInput } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs, useToast } from "../context/ui";
-import { useDebounced } from "../lib/hooks";
+import { useDebounced, usePref } from "../lib/hooks";
 import { fmtDate, hpLevel, signed, titleCase } from "../lib/util";
 import type { Combatant, Encounter, EncounterAction, SrdEntry } from "../types";
 import { useDeleteRecord } from "./parts";
@@ -40,6 +40,7 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
   const [adding, setAdding] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const party = useParty();
+  const [groupRolls, setGroupRolls] = usePref("group-initiative", false);
   const onDelete = useDeleteRecord("encounters", initial.id, initial.name, () => {});
   // Pick up changes made elsewhere (e.g. "To encounter" on an NPC or a stat block).
   const listed = dm.lists.encounters.find((e) => e.id === initial.id);
@@ -79,8 +80,11 @@ export function EncounterDoc({ initial }: { initial: Encounter }) {
           <div className="eyebrow">{enc.active ? `Round ${enc.round}` : "Not started"}</div>
         </div>
         <div className="doc-actions">
-          <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_initiative", which: enc.active ? "unset" : "all" })}
-            title="Roll for everyone without an initiative (all, before combat starts)">Roll initiative</button>
+          <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_initiative", which: enc.active ? "unset" : "all", group: groupRolls })}
+            title="Roll for everyone without an initiative (all, before combat starts). Ties start in order of initiative bonus; rearrange them as you like.">Roll initiative</button>
+          <label className="check small" title="One roll for each group of identical monsters, who then act together (the SRD's way)">
+            <Checkbox checked={groupRolls} onChange={setGroupRolls} /> group
+          </label>
           <button type="button" className="btn small ghost" onClick={() => act({ action: "roll_hp" })} title="Roll hit dice for every monster">Roll HP</button>
           {enc.active && <button type="button" className="btn small ghost" onClick={() => act({ action: "prev" })} aria-label="Previous turn">←</button>}
           <button type="button" className="btn small primary" onClick={() => act({ action: "next" })}>{enc.active ? "Next →" : "Start combat →"}</button>
