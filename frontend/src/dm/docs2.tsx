@@ -294,6 +294,11 @@ export function projectHandout() {
   const url = "/project";
   const native = (window as unknown as { pywebview?: { api?: { project?: (u: string) => void } } }).pywebview?.api?.project;
   if (native) return native(url);
+  // The desktop app answers this address itself; in a browser it doesn't exist.
+  if (location.protocol === "questodian:" || location.hostname === "questodian.localhost") {
+    void fetch("/desktop/players", { method: "POST", body: url });
+    return;
+  }
   window.open(url, "questodian-players", "popup,width=1280,height=800");
 }
 
