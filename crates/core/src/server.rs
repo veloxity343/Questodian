@@ -244,7 +244,12 @@ async fn derive(params: Params, Valid(character): Valid<Character>) -> Result<Js
 }
 
 async fn slots(Valid(body): Valid<ClassesIn>) -> Json<Value> {
-    Json(json!({"slots": rules::spell_slots_for(&body.classes, body.edition)}))
+    let slots = if rules::is_warlock_only(&body.classes) {
+        rules::pact_slots(rules::total_level(&body.classes), body.edition)
+    } else {
+        rules::spell_slots_for(&body.classes, body.edition)
+    };
+    Json(json!({ "slots": slots }))
 }
 
 async fn encounter_budget(params: Params) -> Result<Json<Value>> {

@@ -579,7 +579,7 @@ function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: E
           x.spellcasting.slots[lvl] = { max, used: Math.min(x.spellcasting.slots[lvl]?.used || 0, max) };
         }
       });
-      toast(slots.length ? "Spell slots set from your class levels" : "No spell slots for these classes (set warlock Pact Magic slots by hand; a single-class warlock gets them back on a short rest)");
+      toast(slots.length ? "Spell slots set from your class levels" : "No spell slots for these classes (for a multiclass warlock, add Pact Magic slots by hand)");
     } catch (e) {
       toast((e as Error).message, "error");
     }

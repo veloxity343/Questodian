@@ -263,6 +263,19 @@ pub fn spell_slots_for(classes: &[ClassLevel], edition: Edition) -> Vec<i64> {
     if level <= 0 { Vec::new() } else { SPELL_SLOTS[level.min(20) as usize].to_vec() }
 }
 
+/// Pact Magic slots for a single-class warlock of `level`, from the SRD's Warlock table
+/// (index 0 is 1st-level slots; trailing levels without slots are left off).
+pub fn pact_slots(level: i64, edition: Edition) -> Vec<i64> {
+    let level = level.clamp(1, 20).to_string();
+    let entry = crate::srd::srd(edition).get("classes/warlock");
+    let row = entry.and_then(|e| e.data.get("spell_slots")).and_then(|t| t.get(&level)).and_then(Value::as_array);
+    let mut slots: Vec<i64> = row.into_iter().flatten().map(|n| n.as_i64().unwrap_or(0)).collect();
+    while slots.last() == Some(&0) {
+        slots.pop();
+    }
+    slots
+}
+
 /// A single-class warlock, whose slots (Pact Magic) all come back on a short rest.
 pub fn is_warlock_only(classes: &[ClassLevel]) -> bool {
     !classes.is_empty() && classes.iter().all(|c| c.name.eq_ignore_ascii_case("warlock"))
@@ -525,6 +538,9 @@ mod tests {
         assert_eq!(spell_slots_for(&classes(&[("Paladin", 1)]), Edition::E2024), [2]);
         assert_eq!(spell_slots_for(&classes(&[("Ranger", 3)]), Edition::E2024), [3]);
         assert_eq!(spell_slots_for(&classes(&[("Fighter", 5)]), e14), Vec::<i64>::new());
+        // Warlock 5: two 3rd-level Pact Magic slots, in both editions.
+        assert_eq!(pact_slots(5, e14), [0, 0, 2]);
+        assert_eq!(pact_slots(1, Edition::E2024), [1]);
     }
 
     #[test]

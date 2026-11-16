@@ -97,7 +97,16 @@ def derive(body: schemas.Character, edition: Edition = srd.DEFAULT_EDITION) -> d
 
 @tools.post("/slots")
 def slots(body: schemas.ClassesIn) -> dict:
-    return {"slots": rules.spell_slots_for([c.model_dump() for c in body.classes], body.edition)}
+    classes = [c.model_dump() for c in body.classes]
+    if rules.is_warlock_only(classes):
+        # Pact Magic slots, from the Warlock class table in the SRD for this edition.
+        level = max(1, min(rules.total_level({"classes": classes}), 20))
+        table = (srd.get("classes/warlock", body.edition) or {}).get("data", {}).get("spell_slots", {})
+        row = list(table.get(str(level), []))
+        while row and row[-1] == 0:
+            row.pop()
+        return {"slots": row}
+    return {"slots": rules.spell_slots_for(classes, body.edition)}
 
 
 @tools.get("/srd/categories")

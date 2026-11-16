@@ -305,3 +305,8 @@ def test_grouped_initiative_gives_identical_monsters_one_roll(api):
         for c in enc["combatants"]:
             by_kind.setdefault(c["srd_id"], set()).add(c["initiative"])
         assert all(len(rolls) == 1 for rolls in by_kind.values())
+
+
+def test_warlock_slots_come_from_the_srd_table(api):
+    assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 5}]})[1]["slots"] == [0, 0, 2]
+    assert api("POST", "/api/slots", {"classes": [{"name": "Warlock", "level": 1}], "edition": "2024"})[1]["slots"] == [1]
