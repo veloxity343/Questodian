@@ -44,6 +44,8 @@ pub struct Repo<'a> {
     columns: &'a HashMap<Kind, Vec<Column>>,
     /// Where handout images live.
     pub files_dir: PathBuf,
+    /// Files no record uses once this unit of work is saved (images of replaced handouts).
+    remove_on_commit: Vec<PathBuf>,
 }
 
 impl<'a> Repo<'a> {
@@ -52,13 +54,21 @@ impl<'a> Repo<'a> {
         columns: &'a HashMap<Kind, Vec<Column>>,
         files_dir: PathBuf,
     ) -> Self {
-        Repo { tx, columns, files_dir }
+        Repo { tx, columns, files_dir, remove_on_commit: Vec::new() }
     }
 
-    /// Save everything done in this unit of work.
+    /// Save everything done in this unit of work, then remove the files it no longer uses.
     pub async fn commit(self) -> Result<()> {
         self.tx.commit().await?;
+        for path in self.remove_on_commit {
+            let _ = std::fs::remove_file(path); // already gone is fine
+        }
         Ok(())
+    }
+
+    /// Remove a file once this unit of work is saved (kept if it's rolled back).
+    pub fn remove_on_commit(&mut self, path: PathBuf) {
+        self.remove_on_commit.push(path);
     }
 
     fn columns(&self, kind: Kind) -> &'a [Column] {

@@ -275,6 +275,13 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
                     }
                 }
                 if kind == Kind::Handouts {
+                    // Overwriting a handout replaces its image; the old file goes once the import is saved.
+                    if mode == Mode::Overwrite && repo.exists(kind, &id).await? {
+                        let old = repo.get(kind, &id).await?;
+                        if let Some(path) = handout_file(&repo.files_dir, text(&old, "filename")) {
+                            repo.remove_on_commit(path);
+                        }
+                    }
                     let name = match image {
                         Some(bytes) => store_image(&repo.files_dir, &doc, &bytes)?,
                         None => String::new(),

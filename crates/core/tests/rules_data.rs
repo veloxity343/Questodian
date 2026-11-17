@@ -120,3 +120,27 @@ async fn resources_come_back_on_the_right_rest() {
         call(&router, Method::POST, &format!("/api/characters/{id}/rest"), Some(json!({"type": "long"}))).await;
     assert_eq!(current(&ch), [1, 3, 1, 0]);
 }
+
+#[tokio::test]
+async fn reimporting_a_backup_doesnt_leave_old_images_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, handout) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Map"}))).await;
+    let id = handout["id"].as_str().unwrap().to_string();
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/api/handouts/{id}/file"))
+        .header("content-type", "image/png")
+        .body(Body::from(vec![137u8, 80, 78, 71, 1, 2, 3]))
+        .unwrap();
+    assert_eq!(router.clone().oneshot(request).await.unwrap().status(), StatusCode::OK);
+    let images = || std::fs::read_dir(dir.path().join("handouts")).unwrap().count();
+    assert_eq!(images(), 1);
+
+    let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
+    let (status, report) = call(&router, Method::POST, "/api/import?mode=overwrite", Some(bundle)).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(images(), 1, "the replaced image is removed");
+    let (_, after) = call(&router, Method::GET, &format!("/api/handouts/{id}"), None).await;
+    assert!(dir.path().join("handouts").join(after["filename"].as_str().unwrap()).is_file());
+}
