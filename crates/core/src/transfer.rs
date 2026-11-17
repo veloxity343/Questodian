@@ -166,20 +166,36 @@ fn collections_from(payload: &Value) -> Result<HashMap<Kind, Vec<Value>>> {
     Ok(out)
 }
 
-/// Edits to the rules data in a full export, checked like edits made in the app.
-fn rule_edits_from(payload: &Value) -> Result<Vec<(String, String, Option<Value>)>> {
-    let Some(edits) = payload.get("collections").and_then(|c| c.get(RULE_EDITS)) else { return Ok(Vec::new()) };
+/// One rules data edit from a full export.
+struct RuleEdit {
+    kind: String,
+    key: String,
+    data: Option<Value>,
+    updated: Option<String>,
+}
+
+/// Edits to the rules data in a full export, checked like edits made in the app. An edit that
+/// doesn't fit this version's rules data (hiding an entry that's no longer bundled, a kind it
+/// doesn't know) is left out and counted, rather than refusing the whole file.
+fn rule_edits_from(payload: &Value) -> Result<(Vec<RuleEdit>, usize)> {
+    let Some(edits) = payload.get("collections").and_then(|c| c.get(RULE_EDITS)) else { return Ok((Vec::new(), 0)) };
     let Value::Array(edits) = edits else { return Err(invalid(format!("'{RULE_EDITS}' must be a list"))) };
-    edits
-        .iter()
-        .map(|edit| {
-            let (kind, key) = (text(edit, "kind"), text(edit, "key").trim());
-            let data = edit.get("data").filter(|d| !d.is_null()).cloned();
-            let data = builder::check(kind, key, data)
-                .map_err(|e| invalid(format!("invalid rules data edit {kind}/{key}: {e}")))?;
-            Ok((kind.to_string(), key.to_string(), data))
-        })
-        .collect()
+    let mut out = Vec::new();
+    let mut unusable = 0;
+    for edit in edits {
+        let (kind, key) = (text(edit, "kind"), text(edit, "key").trim());
+        let data = edit.get("data").filter(|d| !d.is_null()).cloned();
+        match builder::check(kind, key, data) {
+            Ok(data) => out.push(RuleEdit {
+                kind: kind.to_string(),
+                key: key.to_string(),
+                data,
+                updated: Some(text(edit, "updated").to_string()).filter(|u| !u.is_empty()),
+            }),
+            Err(_) => unusable += 1,
+        }
+    }
+    Ok((out, unusable))
 }
 
 /// Version 1 sessions carried one `encounter`; turn those into encounter records.
@@ -214,7 +230,7 @@ type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
 /// written, and the caller's unit of work makes it all-or-nothing.
 pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Result<Value> {
     let collections = collections_from(payload)?;
-    let rule_edits = rule_edits_from(payload)?;
+    let (rule_edits, unusable_edits) = rule_edits_from(payload)?;
     let mut docs: Checked = HashMap::new();
     for kind in Kind::ALL {
         let mut checked = Vec::new();
@@ -278,16 +294,16 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
                 skipped.insert(kind.plural().into(), json!(passed));
             }
         }
-        if !rule_edits.is_empty() {
+        if !rule_edits.is_empty() || unusable_edits > 0 {
             let existing = repo.rule_overrides().await?;
-            let (mut done, mut passed) = (0, 0);
-            for (kind, key, data) in &rule_edits {
-                let exists = existing.iter().any(|o| &o.kind == kind && &o.key == key);
+            let (mut done, mut passed) = (0, unusable_edits);
+            for edit in &rule_edits {
+                let exists = existing.iter().any(|o| o.kind == edit.kind && o.key == edit.key);
                 if exists && mode != Mode::Overwrite {
                     passed += 1;
                     continue;
                 }
-                repo.save_rule_override(kind, key, data.as_ref()).await?;
+                repo.save_rule_override(&edit.kind, &edit.key, edit.data.as_ref(), edit.updated.as_deref()).await?;
                 done += 1;
             }
             if done > 0 {

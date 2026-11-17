@@ -518,14 +518,13 @@ pub async fn rest(repo: &mut Repo<'_>, character_id: &str, kind: RestKind) -> Re
         }
     }
     for resource in &mut ch.resources {
-        let resets = match resource.reset {
-            crate::schemas::Reset::Short => true,
-            crate::schemas::Reset::Long => long,
-            crate::schemas::Reset::Never => false,
+        use crate::schemas::Reset;
+        resource.current = match resource.reset {
+            Reset::Short => resource.max,
+            Reset::Long | Reset::ShortOne if long => resource.max,
+            Reset::ShortOne => (resource.current + 1).min(resource.max).max(resource.current),
+            Reset::Long | Reset::Never => resource.current,
         };
-        if resets {
-            resource.current = resource.max;
-        }
     }
     repo.save_as(Kind::Characters, &ch).await
 }

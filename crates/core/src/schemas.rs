@@ -403,8 +403,9 @@ schema! {
 }
 
 choice! {
-    /// When a class resource comes back.
-    pub enum Reset { Long = "long", Short = "short", Never = "none" }
+    /// When a class resource comes back. `ShortOne`: one use on a short rest, all on a long rest
+    /// (Second Wind, Channel Divinity, Rage, Wild Shape in the 2024 rules).
+    pub enum Reset { Long = "long", Short = "short", ShortOne = "short_one", Never = "none" }
 }
 
 schema! {

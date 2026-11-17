@@ -91,7 +91,7 @@ pub fn check(kind: &str, key: &str, data: Option<Value>) -> Result<Option<Value>
             | (Value::Number(_), Value::Number(_))
             | (Value::String(_), Value::String(_))
     );
-    if !same_shape {
+    if !same_shape || (bundled_value.is_i64() && !value.is_i64()) {
         return Err(invalid(format!("{key} must be the same kind of value as the bundled one")));
     }
     Ok(Some(value))
@@ -199,6 +199,7 @@ mod tests {
         assert!(check("classes", "Fighter", Some(json!("text"))).is_err());
         assert!(check("classes", "Gunslinger", None).is_err(), "only bundled entries hide");
         assert!(check("settings", "score_cap", Some(json!("high"))).is_err());
+        assert!(check("settings", "score_cap", Some(json!(20.5))).is_err(), "a whole number");
         assert!(check("settings", "nonsense", Some(json!(1))).is_err());
         assert!(check("spells", "Fireball", Some(json!({}))).is_err());
         assert_eq!(check("feats", "Lucky", Some(json!({"name": "x"}))).unwrap(), Some(json!({"name": "Lucky"})));

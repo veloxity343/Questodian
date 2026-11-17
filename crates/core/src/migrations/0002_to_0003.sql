@@ -4,11 +4,11 @@
 ALTER TABLE characters ADD COLUMN build JSON DEFAULT '{}' NOT NULL;
 
 -- Your edits to the bundled rules data (data/rules-2024.json.gz). One row per edited entry;
--- `data` NULL means the entry was removed.
+-- `data` is JSON text (TEXT, so numbers keep their exact form); NULL means the entry was hidden.
 CREATE TABLE rule_overrides (
 	kind VARCHAR NOT NULL, 
 	"key" VARCHAR NOT NULL, 
-	data JSON, 
+	data TEXT, 
 	updated VARCHAR NOT NULL, 
 	CONSTRAINT pk_rule_overrides PRIMARY KEY (kind, "key")
 );

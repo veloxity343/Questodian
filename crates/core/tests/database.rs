@@ -318,3 +318,21 @@ async fn a_copy_waiting_for_the_lock_rechecks_the_version() {
     let error = opening.await.unwrap().expect_err("refused");
     assert!(error.contains("newer version"), "{error}");
 }
+
+#[tokio::test]
+async fn an_old_backup_isnt_reused_after_the_database_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let sql = std::fs::read_to_string(format!("{FIXTURES}/v0002.sql")).unwrap();
+    db::load_sql(&dir.path().join(DB_FILENAME), &sql).await.unwrap();
+    // A backup from an earlier upgrade, made before the data was last changed (say, by an
+    // earlier version of the app).
+    let stale = dir.path().join(format!("{DB_FILENAME}.backup-0002-20000101-000000"));
+    let file = std::fs::File::create(&stale).unwrap();
+    file.set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(946_684_800)).unwrap();
+    drop(file);
+    let db = Database::open(dir.path()).await.unwrap();
+    let backup = db.backup.clone().expect("a backup");
+    assert_ne!(backup, stale, "a fresh copy of the current data");
+    assert!(std::fs::metadata(&backup).unwrap().len() > 0);
+    db.close().await;
+}

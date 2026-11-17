@@ -60,9 +60,25 @@ async fn edit_hide_reset_and_carry_through_a_backup() {
     assert_eq!(bundle["collections"]["rule_overrides"].as_array().unwrap().len(), 4);
     let other = tempfile::tempdir().unwrap();
     let restored = app(other.path()).await;
+    // Edits this version can't use (from a later one, say) are skipped, not fatal.
+    let mut bundle = bundle;
+    let edits = bundle["collections"]["rule_overrides"].as_array_mut().unwrap();
+    let score_cap = edits.iter().find(|e| e["key"] == "score_cap").unwrap().clone();
+    edits.push(json!({"kind": "feats", "key": "Renamed Later", "data": null, "updated": "x"}));
+    edits.push(json!({"kind": "spells", "key": "Fireball", "data": {}, "updated": "x"}));
     let (status, report) = call(&restored, Method::POST, "/api/import?mode=overwrite", Some(bundle)).await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["imported"]["rule_overrides"], 4);
+    assert_eq!(report["skipped"]["rule_overrides"], 2);
+    let (_, again) = call(&restored, Method::GET, "/api/export", None).await;
+    let kept = again["collections"]["rule_overrides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["key"] == "score_cap")
+        .unwrap()
+        .clone();
+    assert_eq!(kept, score_cap, "kept exactly, time included");
     let (_, rules) = call(&restored, Method::GET, "/api/rules", None).await;
     assert_eq!(entry(&rules, "items", "Monster Hunter's Pack").unwrap()["source"], "added");
     assert_eq!(rules["score_cap"], 22);
@@ -74,4 +90,33 @@ async fn edit_hide_reset_and_carry_through_a_backup() {
     assert_eq!(entry(&rules, "classes", "Fighter").unwrap()["hit_die"], 10);
     let (status, _) = call(&router, Method::DELETE, "/api/rules/classes/Fighter", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn resources_come_back_on_the_right_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let resources = json!([
+        {"name": "Action Surge", "current": 0, "max": 1, "reset": "short"},
+        {"name": "Second Wind", "current": 0, "max": 3, "reset": "short_one"},
+        {"name": "Indomitable", "current": 0, "max": 1, "reset": "long"},
+        {"name": "Lucky charm", "current": 0, "max": 1, "reset": "none"},
+    ]);
+    let body = json!({"name": "Fighter", "hp": {"max": 12, "current": 5, "temp": 0}, "resources": resources});
+    let (status, ch) = call(&router, Method::POST, "/api/characters", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{ch}");
+    let id = ch["id"].as_str().unwrap();
+    let current = |ch: &Value| {
+        ch["resources"].as_array().unwrap().iter().map(|r| r["current"].as_i64().unwrap()).collect::<Vec<_>>()
+    };
+
+    let (_, ch) =
+        call(&router, Method::POST, &format!("/api/characters/{id}/rest"), Some(json!({"type": "short"}))).await;
+    assert_eq!(current(&ch), [1, 1, 0, 0]);
+    let (_, ch) =
+        call(&router, Method::POST, &format!("/api/characters/{id}/rest"), Some(json!({"type": "short"}))).await;
+    assert_eq!(current(&ch), [1, 2, 0, 0]);
+    let (_, ch) =
+        call(&router, Method::POST, &format!("/api/characters/{id}/rest"), Some(json!({"type": "long"}))).await;
+    assert_eq!(current(&ch), [1, 3, 1, 0]);
 }

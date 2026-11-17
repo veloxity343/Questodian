@@ -236,8 +236,7 @@ impl Repo<'_> {
     /// Every edit to the character builder's rules data.
     pub async fn rule_overrides(&mut self) -> Result<Vec<Override>> {
         let rows: Vec<(String, String, Option<String>, String)> =
-            // The column is declared JSON, so SQLite stores a bare number as one; read it back as text.
-            sqlx::query_as(r#"SELECT kind, "key", CAST(data AS TEXT), updated FROM rule_overrides ORDER BY kind, "key""#)
+            sqlx::query_as(r#"SELECT kind, "key", data, updated FROM rule_overrides ORDER BY kind, "key""#)
                 .fetch_all(&mut *self.tx)
                 .await?;
         Ok(rows
@@ -251,8 +250,15 @@ impl Repo<'_> {
             .collect())
     }
 
-    /// Store an edit (`data: None` hides a bundled entry), replacing any earlier one.
-    pub async fn save_rule_override(&mut self, kind: &str, key: &str, data: Option<&Value>) -> Result<()> {
+    /// Store an edit (`data: None` hides a bundled entry), replacing any earlier one. `updated`
+    /// defaults to now (imports keep the time the edit was made).
+    pub async fn save_rule_override(
+        &mut self,
+        kind: &str,
+        key: &str,
+        data: Option<&Value>,
+        updated: Option<&str>,
+    ) -> Result<()> {
         sqlx::query(
             r#"INSERT INTO rule_overrides (kind, "key", data, updated) VALUES (?, ?, ?, ?)
                ON CONFLICT (kind, "key") DO UPDATE SET data = excluded.data, updated = excluded.updated"#,
@@ -260,7 +266,7 @@ impl Repo<'_> {
         .bind(kind)
         .bind(key)
         .bind(data.map(Value::to_string))
-        .bind(now())
+        .bind(updated.map_or_else(now, str::to_string))
         .execute(&mut *self.tx)
         .await?;
         Ok(())

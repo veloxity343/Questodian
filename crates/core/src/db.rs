@@ -454,8 +454,10 @@ fn truthy(value: &Value) -> bool {
 }
 
 /// Copy a live database safely (WAL included) to `<name>.backup-<label>-<time>`, and make
-/// sure the copy is on disk before anything changes. If a backup of this revision already
-/// exists (an earlier attempt that failed), that one is kept instead of making another.
+/// sure the copy is on disk before anything changes. If a backup of this revision was made
+/// after the database last changed (an earlier attempt that failed), it's kept instead of
+/// making another; an older one (say, from before going back to an earlier version and
+/// carrying on there) isn't a copy of the current data, so a new one is made.
 async fn backup_database(conn: &mut SqliteConnection, path: &Path, label: &str) -> Result<PathBuf> {
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let prefix = format!("{name}.backup-{label}-");
@@ -465,7 +467,12 @@ async fn backup_database(conn: &mut SqliteConnection, path: &Path, label: &str) 
         .map(|e| e.path())
         .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix)))
         .max();
-    if let Some(existing) = existing {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let wal = folder.join(format!("{name}-wal"));
+    let changed = [modified(path), modified(&wal)].into_iter().flatten().max();
+    if let Some(existing) = existing
+        && modified(&existing).zip(changed).is_some_and(|(backup, data)| backup >= data)
+    {
         return Ok(existing);
     }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");

@@ -322,7 +322,7 @@ async fn edit_rule(
     let body = body.ok_or_else(|| body_error("send the entry, or null to hide it"))?;
     let data = builder::check(&kind, &key, Some(body).filter(|b| !b.is_null()))?;
     let mut repo = app.db.write().await?;
-    repo.save_rule_override(&kind, key.trim(), data.as_ref()).await?;
+    repo.save_rule_override(&kind, key.trim(), data.as_ref(), None).await?;
     let merged = builder::merged(&repo.rule_overrides().await?);
     repo.commit().await?;
     Ok(Json(merged))
@@ -331,7 +331,8 @@ async fn edit_rule(
 /// Undo an edit: back to the bundled entry (or gone, for one the user added).
 async fn reset_rule(State(app): State<Shared>, UrlPath((kind, key)): UrlPath<(String, String)>) -> Result<Json<Value>> {
     let mut repo = app.db.write().await?;
-    if !repo.delete_rule_override(&kind, &key).await? {
+    let key = key.trim();
+    if !repo.delete_rule_override(&kind, key).await? {
         return Err(not_found(format!("no edit to {kind}/{key}")));
     }
     let merged = builder::merged(&repo.rule_overrides().await?);
