@@ -1,16 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readPref, writePref } from "./util";
 
-/** State that persists in this browser's localStorage. */
+/** The latest value of each pref, in case localStorage is unavailable. */
+const prefs = new Map<string, unknown>();
+
+/** State that persists in this browser's localStorage, shared by every component using the same key. */
 export function usePref<T>(key: string, fallback: T) {
-  const [value, setValue] = useState<T>(() => readPref(key, fallback));
+  const [value, setValue] = useState<T>(() => (prefs.has(key) ? prefs.get(key) : readPref(key, fallback)) as T);
+  useEffect(() => {
+    const changed = (e: Event) => setValue((e as CustomEvent<T>).detail);
+    window.addEventListener(`pref:${key}`, changed);
+    return () => window.removeEventListener(`pref:${key}`, changed);
+  }, [key]);
   const set = useCallback(
-    (v: T | ((prev: T) => T)) =>
-      setValue((prev) => {
-        const next = typeof v === "function" ? (v as (p: T) => T)(prev) : v;
-        writePref(key, next);
-        return next;
-      }),
+    (v: T | ((prev: T) => T)) => {
+      const prev = (prefs.has(key) ? prefs.get(key) : readPref(key, fallback)) as T;
+      const next = typeof v === "function" ? (v as (p: T) => T)(prev) : v;
+      prefs.set(key, next);
+      writePref(key, next);
+      // Tell the other components using this pref (e.g. the top bar's ☰ and the DM screen).
+      window.dispatchEvent(new CustomEvent(`pref:${key}`, { detail: next }));
+    },
     [key],
   );
   return [value, set] as const;

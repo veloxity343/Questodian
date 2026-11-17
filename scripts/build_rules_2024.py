@@ -8,7 +8,7 @@ starting gear), `srd.json` (class level tables and weapons, from SRD 5.2.1) and 
 and its button macros. Most of it is from SRD 5.2.1 (CC BY 4.0). Backgrounds and origin
 feats not in the SRD come from the 2024 Player's Handbook and are marked `"srd": false`.
 
-Everything here can be edited inside the app (Library → Rules data); this file is only the
+Everything here can be edited inside the app (Characters → Rules data); this file is only the
 starting point.
 """
 
@@ -41,18 +41,20 @@ CLASSES = [
     ("Bard", 8, "Dexterity", "Charisma", 3, "Any", "Simple", "Light", 1, 0, 0, 0, "Charisma", None, ("Bardic Inspiration die", "", "")),
     ("Cleric", 8, "Wisdom", "Charisma", 2, "History, Insight, Medicine, Persuasion, Religion", "Simple", "Light, Medium, Shields", 1, 1, 0, 1, "Wisdom", None, ("Channel Divinity uses", "", "")),
     ("Druid", 8, "Intelligence", "Wisdom", 2, "Animal Handling, Arcana, Insight, Medicine, Nature, Perception, Religion, Survival", "Simple", "Light, Shields", 1, 0, 0, 1, "Wisdom", None, ("Wild Shape uses", "", "")),
-    ("Fighter", 10, "Strength", "Constitution", 2, "Acrobatics, Animal Handling, Athletics, History, Insight, Intimidation, Persuasion, Perception, Survival", "All", "Light, Medium, Heavy, Shields", 1, 1, 1, 1, None, None, ("Second Wind uses", "Weapon masteries", "")),
+    ("Fighter", 10, "Strength", "Constitution", 2, "Acrobatics, Animal Handling, Athletics, History, Insight, Intimidation, Perception, Survival", "All", "Light, Medium, Heavy, Shields", 1, 1, 1, 1, None, None, ("Second Wind uses", "Weapon masteries", "")),
     ("Monk", 8, "Strength", "Dexterity", 2, "Acrobatics, Athletics, History, Insight, Religion, Stealth", "Monk", "None", 0, 0, 0, 0, None, "Monk", ("Martial Arts die", "Focus Points", "Unarmored Movement")),
     ("Paladin", 10, "Wisdom", "Charisma", 2, "Athletics, Insight, Intimidation, Medicine, Persuasion, Religion", "All", "Light, Medium, Heavy, Shields", 1, 1, 1, 1, "Charisma", None, ("Channel Divinity uses", "", "")),
     ("Ranger", 10, "Strength", "Dexterity", 3, "Animal Handling, Athletics, Insight, Investigation, Nature, Perception, Stealth, Survival", "All", "Light, Medium, Shields", 1, 1, 0, 1, "Wisdom", None, ("Favored Enemy uses", "", "")),
-    ("Rogue", 8, "Dexterity", "Intelligence", 4, "Acrobatics, Athletics, Deception, Insight, Intimidation, Investigation, Perception, Persuasion, Sleight of Hand, Stealth", "Rogue", "Light", 1, 0, 0, 0, None, None, ("Sneak Attack", "", "")),
+    ("Rogue", 8, "Dexterity", "Intelligence", 4, "Acrobatics, Athletics, Deception, Insight, Intimidation, Investigation, Perception, Performance, Persuasion, Sleight of Hand, Stealth", "Rogue", "Light", 1, 0, 0, 0, None, None, ("Sneak Attack", "", "")),
     ("Sorcerer", 6, "Constitution", "Charisma", 2, "Arcana, Deception, Insight, Intimidation, Persuasion, Religion", "Simple", "None", 0, 0, 0, 0, "Charisma", None, ("Sorcery Points", "", "")),
     ("Warlock", 8, "Wisdom", "Charisma", 2, "Arcana, Deception, History, Intimidation, Investigation, Nature, Religion", "Simple", "Light", 1, 0, 0, 0, "Charisma", None, ("Eldritch Invocations", "", "")),
-    ("Wizard", 6, "Intelligence", "Wisdom", 2, "Arcana, History, Insight, Investigation, Medicine, Nature, Religion", "Simple", "None", 0, 0, 0, 0, "Intelligence", None, ("", "", "")),
+    ("Wizard", 6, "Intelligence", "Wisdom", 2, "Arcana, History, Insight, Investigation, Medicine, Religion", "Simple", "None", 0, 0, 0, 0, "Intelligence", None, ("", "", "")),
 ]
 WEAPON_TEXT = {"All": "Simple and Martial weapons", "Simple": "Simple weapons",
                "Monk": "Simple weapons and Martial weapons with the Light property",
-               "Rogue": "Simple weapons and Martial weapons with the Finesse or Light property"}
+               "Rogue": "Simple weapons, Martial weapons with the Finesse or Light property, and Longswords"}
+# Martial weapons a class is trained with beyond its weapon rule.
+EXTRA_WEAPONS = {"Rogue": ["Longsword"]}
 TOOLS = {"Bard": "3 Musical Instruments", "Druid": "Herbalism Kit", "Monk": "1 Artisan's Tools or Musical Instrument", "Rogue": "Thieves' Tools"}
 # SRD 5.2.1 "Standard Array by Class" (Str, Dex, Con, Int, Wis, Cha)
 STANDARD_ARRAY_BY_CLASS = {
@@ -84,12 +86,14 @@ SPECIES = [  # name, size, speed, darkvision, HP per level, extra skill picks, c
     ("Gnome", "Small", 30, 60, 0, 0, 1, "Darkvision 60 ft · Gnomish Cunning (Advantage on Int, Wis, Cha saves) · Gnomish Lineage (Forest or Rock Gnome)"),
     ("Goliath", "Medium", 35, 0, 0, 0, 2, "Giant Ancestry (choose a boon; PB uses per Long Rest) · Large Form at level 5 · Powerful Build (Advantage to escape Grappled; carry as one size larger, included)"),
     ("Halfling", "Small", 30, 0, 0, 0, 1, "Brave (Advantage vs Frightened) · Halfling Nimbleness · Luck (reroll natural 1s on D20 Tests) · Naturally Stealthy"),
-    ("Human", "Medium (or Small)", 30, 0, 0, 1, 1, "Resourceful (Heroic Inspiration after each Long Rest) · Skillful (one extra skill: mark it as a skill pick) · Versatile (an extra Origin feat: choose it above)"),
+    ("Human", "Medium", 30, 0, 0, 1, 1, "Resourceful (Heroic Inspiration after each Long Rest) · Skillful (one extra skill: mark it as a skill pick) · Versatile (an extra Origin feat: choose it above)"),
     ("Orc", "Medium", 30, 120, 0, 0, 1, "Adrenaline Rush (Dash as a Bonus Action + temp HP = PB; PB uses per Short or Long Rest) · Darkvision 120 ft · Relentless Endurance (drop to 1 HP instead of 0, once per Long Rest)"),
     ("Tiefling", "Medium (or Small)", 30, 60, 0, 0, 1, "Darkvision 60 ft · Fiendish Legacy (Abyssal, Chthonic or Infernal) · Otherworldly Presence (Thaumaturgy cantrip)"),
 ]
 SPECIES_RESOURCE = {"Dragonborn": ("Breath Weapon", "none"), "Dwarf": ("Stonecunning", "none"),
                     "Goliath": ("Giant Ancestry boon", "none"), "Orc": ("Adrenaline Rush", "all")}
+# Species whose extra skill comes from a list (Elf: Keen Senses); others choose any skill.
+SPECIES_SKILLS = {"Elf": ["Insight", "Perception", "Survival"]}
 CHOICE_LABEL = {"Dragonborn": "Dragon ancestor", "Elf": "Elven lineage", "Gnome": "Gnomish lineage", "Goliath": "Giant ancestry", "Tiefling": "Fiendish legacy"}
 SPELLS_NOTE = " Spells from this use Intelligence, Wisdom or Charisma (your choice); add them on the Spells tab."
 LATER = " At level 3 you learn {a} and at level 5 {b}: always prepared, each cast once per Long Rest without a slot (or with slots)."
@@ -139,13 +143,13 @@ ARMOR = [  # name, category, base AC, max Dex bonus, Str required, stealth
     ("Splint Armor", "Heavy", 17, 0, 15, "Disadvantage"), ("Plate Armor", "Heavy", 18, 0, 15, "Disadvantage"),
 ]
 MASTERY = [  # SRD 5.2.1, paraphrased
-    ("Cleave", "On a melee hit, make one more attack against a second creature within 5 ft of the first and in your reach; no ability modifier on its damage (once per turn)."),
+    ("Cleave", "On a melee hit, make one more attack against a second creature within 5 ft of the first and in your reach; no ability modifier on its damage unless that modifier is negative (once per turn)."),
     ("Graze", "On a miss, the target still takes damage equal to the ability modifier you attacked with."),
     ("Nick", "The extra attack from the Light property can be part of the Attack action instead of a Bonus Action (once per turn)."),
     ("Push", "On a hit, push a Large or smaller creature up to 10 ft straight away from you."),
     ("Sap", "On a hit, the target has Disadvantage on its next attack roll before the start of your next turn."),
     ("Slow", "On a hit that deals damage, cut the target's Speed by 10 ft until the start of your next turn."),
-    ("Topple", "On a hit, the target makes a Con save (DC 8 + your attack modifier + Proficiency Bonus) or falls Prone."),
+    ("Topple", "On a hit, the target makes a Con save (DC 8 + the ability modifier you attacked with + Proficiency Bonus) or falls Prone."),
     ("Vex", "On a hit that deals damage, you have Advantage on your next attack roll against that creature before the end of your next turn."),
 ]
 ABILITY_USES = {
@@ -223,7 +227,7 @@ def main(tools: Path) -> None:
         "classes": [
             {"name": c[0], "hit_die": c[1], "saves": [FULL[c[2]], FULL[c[3]]], "skill_picks": c[4],
              "skill_options": "any" if c[5] == "Any" else [s.strip() for s in c[5].split(",")],
-             "weapon_rule": c[6], "weapons_text": WEAPON_TEXT[c[6]], "armor_text": c[7],
+             "weapon_rule": c[6], "weapons_text": WEAPON_TEXT[c[6]], "extra_weapons": EXTRA_WEAPONS.get(c[0], []), "armor_text": c[7],
              "armor_training": {"light": bool(c[8]), "medium": bool(c[9]), "heavy": bool(c[10]), "shield": bool(c[11])},
              "spell_ability": FULL[c[12]] if c[12] else None, "unarmored_defense": c[13], "tools_text": TOOLS.get(c[0], ""),
              "column_labels": list(c[14]), "standard_array": STANDARD_ARRAY_BY_CLASS[c[0]],
@@ -234,6 +238,7 @@ def main(tools: Path) -> None:
         ],
         "species": [
             {"name": s[0], "size": s[1], "speed": s[2], "darkvision": s[3], "hp_per_level": s[4], "extra_skill_picks": s[5],
+             "extra_skill_options": SPECIES_SKILLS.get(s[0]),
              "carry_multiplier": s[6], "traits": s[7], "choice_label": CHOICE_LABEL.get(s[0]),
              "choices": [{"name": l[1], "text": l[2], "darkvision": l[3], "extra_speed": l[4]} for l in LINEAGES if l[0] == s[0]],
              "resource": ({"name": SPECIES_RESOURCE[s[0]][0], "max": {"proficiency_bonus": True}, "short_rest": SPECIES_RESOURCE[s[0]][1]}

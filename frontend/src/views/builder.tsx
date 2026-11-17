@@ -1,13 +1,13 @@
 // The character builder's parts of the sheet: every choice is a pick from the rules data, and
 // everything else is worked out (lib/builder.ts) with a note on how.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Checkbox, Field, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { Modal, useDialogs, useToast } from "../context/ui";
 import {
-  METHODS, canStep, fightingStyleAllowed, highestSpellLevel, levelUp, needsLineage, ordinal, parts, pickBackground, resetScores,
+  METHODS, canStep, standardArrayOK, fightingStyleAllowed, highestSpellLevel, levelUp, needsLineage, ordinal, parts, pickBackground, resetScores,
   resetText, skillKey, spellGuide, startingGear, step, type Build, type BuiltWeapon, type Method, type Rules, type Sheet,
 } from "../lib/builder";
 import { ABILITIES, ABILITY_NAMES, signed } from "../lib/util";
@@ -107,7 +107,7 @@ export function BuilderHeader({ ch, b, s, rules, edit, editBuild, campaigns, onL
         <Field label="Origin feat" hint="From your background">
           <span className="readout">{p.background?.feat ?? "—"}</span>
         </Field>
-        <Field label={`${p.species?.name ?? "Human"}'s feat`} hint={p.species?.extra_origin_feat ? "A second Origin feat" : "Only Humans get a second Origin feat"}>
+        <Field label="Extra Origin feat" hint={p.species?.extra_origin_feat ? `${p.species.name}: a second Origin feat` : "Only Humans get a second Origin feat"}>
           <Select value={b.human_feat} disabled={!p.species?.extra_origin_feat}
             options={[dash, ...rules.feats.filter((f) => f.type === "Origin").map((f): Option => [f.name, label(f)])]} onChange={(v) => set("human_feat", v)} />
         </Field>
@@ -168,7 +168,11 @@ export function BuilderAbilities({ b, s, rules, editBuild, roll }: { b: Build; s
       <div className="panel-head">
         <h2>Ability scores</h2>
         <div className="row gap wrap">
-          <Select aria-label="Ability method" value={b.method} options={METHODS} onChange={(v) => editBuild((x) => ({ ...x, method: v as Method }))} />
+          <Select aria-label="Ability method" value={b.method} options={METHODS} onChange={(v) => editBuild((x) => {
+            const next = { ...x, method: v as Method };
+            // The standard array's − / + only work on the array: deal it out if the scores aren't one.
+            return next.method === "standard_array" && !standardArrayOK(next, rules) ? resetScores(next, rules) : next;
+          })} />
           {b.method === "rolled" && <button type="button" className="btn small" onClick={rollScores}>🎲 Roll</button>}
           <button type="button" className="btn small" onClick={reset}>Reset scores</button>
         </div>
@@ -579,4 +583,21 @@ export function BuilderBanner({ onStart, again }: { onStart: () => void; again: 
 
 export function RulesDataLink() {
   return <Link to="/rules-data" className="btn small">Rules data</Link>;
+}
+
+/** If the rules data has been edited into a shape the builder can't read, say so instead of a blank page. */
+export class BuilderGuard extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <section className="panel warnings">
+        <h2>The builder can't work this sheet out</h2>
+        <p>Something in the rules data doesn't have the shape it expects ({this.state.error.message}). It's most likely an edit: open <Link to="/rules-data">Rules data</Link> and reset the entries or settings marked "edited", then come back.</p>
+      </section>
+    );
+  }
 }

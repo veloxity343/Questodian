@@ -493,7 +493,10 @@ pub async fn add_log(repo: &mut Repo<'_>, session_id: &str, body: LogIn) -> Resu
 /// A short or long rest, by the character's campaign edition.
 pub async fn rest(repo: &mut Repo<'_>, character_id: &str, kind: RestKind) -> Result<Value> {
     let mut ch: Character = repo.get_as(Kind::Characters, character_id).await?;
-    let edition = edition_of(repo, &ch.campaign_id).await?;
+    // The character builder uses the 2024 rules, whatever the campaign's edition.
+    let built = ch.build.get("class").and_then(Value::as_str).is_some_and(|c| !c.is_empty())
+        && ch.build.get("manual").and_then(Value::as_bool) != Some(true);
+    let edition = if built { Edition::E2024 } else { edition_of(repo, &ch.campaign_id).await? };
     let long = kind == RestKind::Long;
     // 2014: a long rest needs 1 HP at the start (rules/resting). 2024: both rests do.
     if ch.hp.current < 1 && (long || edition == Edition::E2024) {

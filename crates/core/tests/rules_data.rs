@@ -36,13 +36,20 @@ async fn edit_hide_reset_and_carry_through_a_backup() {
     assert_eq!(entry(&rules, "classes", "Fighter").unwrap()["source"], "bundled");
     assert_eq!(rules["point_buy"]["budget"], 27);
 
-    let fighter = json!({"name": "ignored", "hit_die": 12});
+    // The UI sends back the whole entry it was given, changed.
+    let mut fighter = entry(&rules, "classes", "Fighter").unwrap().clone();
+    fighter["hit_die"] = json!(12);
+    fighter["name"] = json!("ignored");
     let (status, rules) = call(&router, Method::PUT, "/api/rules/classes/Fighter", Some(fighter)).await;
     assert_eq!(status, StatusCode::OK);
+    let saved = entry(&rules, "classes", "Fighter").unwrap();
     assert_eq!(
-        entry(&rules, "classes", "Fighter").unwrap(),
-        &json!({"name": "Fighter", "hit_die": 12, "source": "edited"})
+        (&saved["name"], &saved["hit_die"], &saved["source"]),
+        (&json!("Fighter"), &json!(12), &json!("edited"))
     );
+    let (status, refused) =
+        call(&router, Method::PUT, "/api/rules/classes/Fighter", Some(json!({"hit_die": 12}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "an entry the builder can't read: {refused}");
 
     let (_, rules) = call(&router, Method::PUT, "/api/rules/feats/Lucky", Some(Value::Null)).await;
     assert!(entry(&rules, "feats", "Lucky").is_none());
@@ -143,4 +150,45 @@ async fn reimporting_a_backup_doesnt_leave_old_images_behind() {
     assert_eq!(images(), 1, "the replaced image is removed");
     let (_, after) = call(&router, Method::GET, &format!("/api/handouts/{id}"), None).await;
     assert!(dir.path().join("handouts").join(after["filename"].as_str().unwrap()).is_file());
+}
+
+#[tokio::test]
+async fn importing_with_skip_or_copy_keeps_your_rule_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    call(&router, Method::PUT, "/api/rules/settings/score_cap", Some(json!(22))).await;
+    let (_, mut bundle) = call(&router, Method::GET, "/api/export", None).await;
+    bundle["collections"]["rule_overrides"][0]["data"] = json!(24);
+    for mode in ["skip", "copy"] {
+        let (status, report) =
+            call(&router, Method::POST, &format!("/api/import?mode={mode}"), Some(bundle.clone())).await;
+        assert_eq!(status, StatusCode::OK, "{report}");
+        assert_eq!(report["skipped"]["rule_overrides"], 1, "{mode}");
+        let (_, rules) = call(&router, Method::GET, "/api/rules", None).await;
+        assert_eq!(rules["score_cap"], 22, "{mode}");
+    }
+    let (_, report) = call(&router, Method::POST, "/api/import?mode=overwrite", Some(bundle)).await;
+    assert_eq!(report["imported"]["rule_overrides"], 1);
+    let (_, rules) = call(&router, Method::GET, "/api/rules", None).await;
+    assert_eq!(rules["score_cap"], 24);
+}
+
+#[tokio::test]
+async fn builder_characters_rest_by_the_2024_rules_in_a_2014_campaign() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, campaign) = call(&router, Method::POST, "/api/campaigns", Some(json!({"edition": "2014"}))).await;
+    let body = |build: Value| {
+        json!({"campaign_id": campaign["id"], "classes": [{"name": "Fighter", "level": 4}], "build": build,
+               "hp": {"max": 30, "current": 30, "temp": 0}, "hit_dice": {"total": "4d10", "remaining": 0}})
+    };
+    for (build, regained) in
+        [(json!({"class": "Fighter"}), 4), (json!({"class": "Fighter", "manual": true}), 2), (json!({}), 2)]
+    {
+        let (_, ch) = call(&router, Method::POST, "/api/characters", Some(body(build.clone()))).await;
+        let id = ch["id"].as_str().unwrap();
+        let (_, ch) =
+            call(&router, Method::POST, &format!("/api/characters/{id}/rest"), Some(json!({"type": "long"}))).await;
+        assert_eq!(ch["hit_dice"]["remaining"], regained, "{build}");
+    }
 }

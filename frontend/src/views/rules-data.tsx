@@ -151,7 +151,9 @@ function EntryEditor({ entry, isNew, onSave, onCancel, onReset, onHide }: {
   const [editing, setEditing] = useState(isNew);
   const [draft, setDraft] = useState<Entry>(entry);
   const [broken, setBroken] = useState<Set<string>>(new Set());
-  useEffect(() => setDraft(entry), [entry]);
+  // Reset the draft when the saved entry changes (not just when a new object with the same content arrives).
+  const saved = JSON.stringify(entry);
+  useEffect(() => setDraft(JSON.parse(saved) as Entry), [saved]);
   const changed = JSON.stringify(draft) !== JSON.stringify(entry);
 
   const done = async () => {
@@ -227,7 +229,8 @@ function ValueEditor({ value, name, onChange, onBroken }: { value: unknown; name
       ? <TextArea rows={3} value={value} onChange={onChange} aria-label={name} />
       : <TextInput value={value} onChange={onChange} aria-label={name} />;
   }
-  if (Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string")) {
+  // A comma list for lists of names; lists with blank places (column labels) keep their positions in JSON.
+  if (Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string" && v.trim() && !v.includes(","))) {
     return <ListText value={value as string[]} onChange={onChange} name={name} />;
   }
   return <JsonText value={value} onChange={onChange} onBroken={onBroken} name={name} />;

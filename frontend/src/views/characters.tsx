@@ -13,9 +13,9 @@ import { derive, type Derived } from "../lib/derive";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, download, downloadJson, pickFiles, signed, slug, titleCase } from "../lib/util";
 import { targetEncounter } from "../lib/encounters";
-import { apply, buildOf, isBuilt, itemWeight, resetText, startBuild, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
+import { apply, buildOf, isBuilt, itemWeight, madeBy, parts, resetText, startBuild, startNotes, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
 import {
-  BuilderAbilities, BuilderBanner, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderSpellNotes, BuilderTiles, BuilderWarnings,
+  BuilderAbilities, BuilderBanner, BuilderGuard, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderSpellNotes, BuilderTiles, BuilderWarnings,
   BuilderWeapons, LevelLog, LevelUpDialog, RulesDataLink, StartingGearDialog, loadRules, useRules, type EditBuild,
 } from "./builder";
 import type { Ability, Campaign, Character, Edition, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
@@ -154,16 +154,39 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
   const { rules } = useRules();
   const [dialog, setDialog] = useState<"" | "level" | "gear">("");
   // The builder (2024 rules) works out most of the sheet; "by hand" switches it off but keeps the choices.
-  const building = !!rules && !!ch && isBuilt(ch) && !(ch.build as { manual?: boolean }).manual;
+  const wantsBuilder = !!rules && !!ch && isBuilt(ch) && !(ch.build as { manual?: boolean }).manual;
+  // A class missing from the rules data (hidden, or from another install) can't be worked out.
+  const missingClass = wantsBuilder && !parts(buildOf(ch!), rules!).cls ? buildOf(ch!).class : "";
+  let building = wantsBuilder && !missingClass;
   const b = building ? buildOf(ch!) : null;
-  const built = b && rules ? work(b, rules) : null;
-  const editBuild: EditBuild = (fn) => rules && edit((x) => void Object.assign(x, apply(x, fn(buildOf(x)), rules)));
+  // Rules data edited into a shape the builder can't read shows a message, not a broken page.
+  let built: Built | null = null;
+  let buildError = "";
+  try {
+    built = b && rules ? work(b, rules) : null;
+  } catch (e) {
+    buildError = (e as Error).message;
+    building = false;
+  }
+  const editBuild: EditBuild = (fn) => {
+    if (!rules) return;
+    try {
+      apply(ch!, fn(buildOf(ch!)), rules); // throws, before anything is saved, if the rules data can't be read
+      edit((x) => void Object.assign(x, apply(x, fn(buildOf(x)), rules)));
+    } catch (e) {
+      toast(`The builder couldn't work that out: ${(e as Error).message}`, "error");
+    }
+  };
   // When the rules data changes (an edit on the Rules data page), bring the worked-out fields up to date.
   const syncedFor = useRef<Rules | null>(null);
   useEffect(() => {
     if (!building || !rules || !ch || syncedFor.current === rules) return;
     syncedFor.current = rules;
-    if (JSON.stringify(apply(ch, buildOf(ch), rules)) !== JSON.stringify(ch)) edit((x) => void Object.assign(x, apply(x, buildOf(x), rules)));
+    try {
+      if (JSON.stringify(apply(ch, buildOf(ch), rules)) !== JSON.stringify(ch)) edit((x) => void Object.assign(x, apply(x, buildOf(x), rules)));
+    } catch {
+      /* shown by the guard below */
+    }
   }, [building, rules, ch, edit]);
   if (!ch) return null;
   // Rules follow the character's own campaign, which may not be the one open in the app.
@@ -174,12 +197,15 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
   const rollPlain: Roll = (expr, label) => void dice.roll(expr, `${ch.name}: ${label}`);
 
   const startBuilder = async () => {
-    if (!rules) return;
+    if (!rules || !ch) return;
+    const next = isBuilt(ch) ? buildOf(ch) : startBuild(ch, rules);
+    const notes = isBuilt(ch) ? [] : startNotes(ch, next);
     const ok = await confirm(
-      "Switch this sheet to the builder? It works out ability scores, saves, skills, AC, HP, speed, attacks, resources, spell slots and features from your choices, replacing what's typed in those places now. Spells, inventory, coins and notes stay.",
+      "Switch this sheet to the builder? It works out ability scores, saves, skills, AC, HP, speed, attacks, resources, spell slots and features from your choices, replacing what's typed in those places now. Spells, inventory, coins, notes and anything you added yourself stay."
+        + (notes.length ? ` Also: ${notes.join(" ")}` : ""),
       { label: "Use the builder", danger: false },
     );
-    if (ok) edit((x) => void Object.assign(x, apply(x, isBuilt(x) ? buildOf(x) : startBuild(x, rules), rules)));
+    if (ok) edit((x) => void Object.assign(x, apply(x, next, rules)));
   };
   const byHand = async () => {
     const ok = await confirm("Edit this sheet by hand? Every field becomes editable and nothing is worked out any more. Your builder choices are kept, so you can switch back (which works everything out again).", { label: "Edit by hand", danger: false });
@@ -247,11 +273,17 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
         </div>
       </header>
       {built && b && rules ? (
-        <BuiltSheet ch={ch} b={b} s={built} rules={rules} d={d} edit={edit} editBuild={editBuild} campaigns={campaigns} roll={roll} rollPlain={rollPlain}
-          rest={rest} openDialog={setDialog} />
+        <BuilderGuard>
+          <BuiltSheet ch={ch} b={b} s={built} rules={rules} d={d} edit={edit} editBuild={editBuild} campaigns={campaigns} roll={roll} rollPlain={rollPlain}
+            rest={rest} openDialog={setDialog} />
+        </BuilderGuard>
       ) : (
       <>
-      {rules && <BuilderBanner onStart={startBuilder} again={isBuilt(ch)} />}
+      {buildError ? (
+        <p className="panel warnings">The builder can't work this sheet out: something in the rules data doesn't have the shape it expects ({buildError}). It's most likely an edit: open <Link to="/rules-data">Rules data</Link> and reset the entries or settings marked "edited". Until then the sheet is shown as it was last saved.</p>
+      ) : missingClass ? (
+        <p className="panel warnings">The builder is off for this sheet: its class, {missingClass}, isn't in the rules data. Add it back on the <Link to="/rules-data">Rules data</Link> page (or bring it back if it was hidden).</p>
+      ) : rules && <BuilderBanner onStart={startBuilder} again={isBuilt(ch)} />}
       <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} />
       <div className="sheet-grid">
         <div className="sheet-col">
@@ -349,8 +381,9 @@ function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, roll
   rest: (t: "short" | "long") => void;
   openDialog: (which: "level" | "gear") => void;
 }) {
-  const builtAttacks = new Set([...rules.weapons.map((w) => w.name), "Unarmed Strike"]);
-  const builtResources = new Set(s.resources.map((r) => r.name));
+  const made = madeBy(ch);
+  const builtAttacks = new Set(made.attacks);
+  const builtResources = new Set(made.resources);
   const otherAttacks = ch.attacks.filter((a) => !builtAttacks.has(a.name));
   const otherResources = ch.resources.filter((r) => !builtResources.has(r.name));
   return (
@@ -378,9 +411,9 @@ function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, roll
               x.attacks = [...x.attacks.filter((a) => builtAttacks.has(a.name)), ...draft.attacks];
             })} roll={roll} />
           <BuilderResources ch={ch} s={s} edit={edit} />
-          {otherResources.length > 0 && (
+          {(
             <ListSection<Resource>
-              title="Other resources"
+              title="Other resources (magic items, feats…)"
               items={otherResources}
               onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))}
               blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
@@ -393,7 +426,8 @@ function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, roll
               ]}
             />
           )}
-          <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} built={s} b={b} />
+          {/* The spell attack shown already has exhaustion taken off. */}
+          <SpellsPanel ch={ch} d={d} edit={edit} roll={rollPlain} built={s} b={b} />
         </div>
       </div>
       <div className="grid-2">

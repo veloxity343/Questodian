@@ -37,6 +37,8 @@ export interface ClassRules {
   skill_picks: number;
   skill_options: string[] | "any";
   weapon_rule: "All" | "Simple" | "Monk" | "Rogue";
+  /** Martial weapons it's trained with beyond its rule (the Rogue's Longsword). */
+  extra_weapons?: string[];
   weapons_text: string;
   armor_text: string;
   armor_training: { light: boolean; medium: boolean; heavy: boolean; shield: boolean };
@@ -60,6 +62,8 @@ export interface SpeciesRules {
   darkvision: number;
   hp_per_level: number;
   extra_skill_picks: number;
+  /** Where the extra skill comes from (the Elf's Keen Senses); any skill when missing. */
+  extra_skill_options?: string[] | null;
   carry_multiplier: number;
   traits: string;
   choice_label: string | null;
@@ -141,7 +145,11 @@ export interface Build {
   /** HP from rolling instead of taking the average at level up (can be negative). */
   extra_hp: number;
   level_log: LevelLogEntry[];
+  /** What the builder last wrote, so it replaces only its own rows and leaves the player's alone. */
+  made?: Made;
 }
+
+export interface Made { features: string[]; attacks: string[]; resources: string[] }
 
 export const isBuilt = (ch: Character) => !!(ch.build as Partial<Build> | undefined)?.class;
 
@@ -169,6 +177,7 @@ export function buildOf(ch: Character): Build {
     weapons: [...(b.weapons ?? [])],
     extra_hp: Number(b.extra_hp) || 0,
     level_log: [...(b.level_log ?? [])],
+    made: b.made,
   };
 }
 
@@ -177,17 +186,34 @@ export function startBuild(ch: Character, rules: Rules): Build {
   const b = buildOf({ ...ch, build: {} });
   const named = <T extends { name: string }>(list: T[], name: string) => list.find((x) => x.name.toLowerCase() === name.trim().toLowerCase())?.name ?? "";
   b.class = named(rules.classes, ch.classes[0]?.name ?? "") || rules.classes[0]?.name || "";
-  b.level = Math.min(20, Math.max(1, Number(ch.classes[0]?.level) || 1));
+  // The builder has one class: it takes the character's whole level.
+  b.level = Math.min(20, Math.max(1, ch.classes.reduce((t, c) => t + (Number(c.level) || 0), 0) || 1));
   b.subclass = ch.classes[0]?.subclass ?? "";
-  b.species = named(rules.species, ch.race);
+  // "Elf (Wood Elf)" is the species and its lineage, as the builder writes it.
+  const [, speciesName = ch.race, lineageName = ""] = ch.race.match(/^(.*?)\s*\((.*)\)$/) ?? [];
+  b.species = named(rules.species, speciesName);
+  b.lineage = rules.species.find((x) => x.name === b.species)?.choices?.find((c) => c.name.toLowerCase() === lineageName.toLowerCase())?.name ?? "";
   b.background = named(rules.backgrounds, ch.background);
   const scores = ABILITIES.map((a) => Number(ch.abilities[a]) || 10);
-  const isDefault = scores.every((s) => s === 10);
-  if (!isDefault) {
+  if (!scores.every((x) => x === 10)) {
+    // Typed-in scores become rolled bases; anything above the rolled maximum goes in "Other +".
     b.method = "rolled";
-    b.base = Object.fromEntries(ABILITIES.map((a, i) => [a, Math.min(rules.rolled.max, Math.max(rules.rolled.min, scores[i]))])) as Record<Ability, number>;
+    ABILITIES.forEach((a, i) => {
+      b.base[a] = Math.min(rules.rolled.max, Math.max(rules.rolled.min, scores[i]));
+      b.other_bonus[a] = Math.max(0, scores[i] - b.base[a]);
+    });
   }
   return b;
+}
+
+/** What switching a hand-made sheet to the builder changes besides the worked-out numbers. */
+export function startNotes(ch: Character, b: Build): string[] {
+  const notes: string[] = [];
+  if (ch.classes.length > 1) notes.push(`The builder has one class: ${ch.classes.map((c) => `${c.name} ${c.level}`).join(" / ")} becomes ${b.class} ${b.level}.`);
+  else if (ch.classes[0]?.name && ch.classes[0].name.toLowerCase() !== b.class.toLowerCase()) notes.push(`${ch.classes[0].name} isn't in the rules data, so the class becomes ${b.class}.`);
+  if (ch.race && !b.species) notes.push(`${ch.race} isn't in the rules data: pick a species.`);
+  if (ch.background && !b.background) notes.push(`${ch.background} isn't in the rules data: pick a background.`);
+  return notes;
 }
 
 // ------------------------------------------------------------------ lookups
@@ -250,9 +276,16 @@ export function standardArrayOK(b: Build, rules: Rules) {
   return sorted(ABILITIES.map((a) => b.base[a])) === sorted(rules.standard_array);
 }
 
+/** Level 20 capstones that raise two scores by 4, to a maximum of 25 (Primal Champion, Body and Mind). */
+const CAPSTONES: Record<string, Ability[]> = { Barbarian: ["str", "con"], Monk: ["dex", "wis"] };
+export const capstone = (b: Build, a: Ability) => b.level >= 20 && !!CAPSTONES[b.class]?.includes(a);
+
 export function scores(b: Build, rules: Rules): Record<Ability, number> {
   return Object.fromEntries(
-    ABILITIES.map((a) => [a, Math.min(rules.score_cap, b.base[a] + (b.background_bonus[a] ?? 0) + (b.other_bonus[a] ?? 0))]),
+    ABILITIES.map((a) => {
+      const score = Math.min(rules.score_cap, b.base[a] + (b.background_bonus[a] ?? 0) + (b.other_bonus[a] ?? 0));
+      return [a, capstone(b, a) ? Math.min(25, score + 4) : score];
+    }),
   ) as Record<Ability, number>;
 }
 
@@ -294,7 +327,9 @@ export function step(b: Build, rules: Rules, a: Ability, dir: 1 | -1): Build {
 /** Deal out fresh scores for the method: 8s for point buy, the class's suggested array, or 10s. */
 export function resetScores(b: Build, rules: Rules): Build {
   const cls = find(rules.classes, b.class);
-  const array = cls?.standard_array?.length === 6 ? cls.standard_array : rules.standard_array;
+  // The class's suggested order, as long as it's the same six numbers as the (possibly edited) array.
+  const same = (x: number[]) => [...x].sort((m, n) => m - n).join() === [...rules.standard_array].sort((m, n) => m - n).join();
+  const array = cls?.standard_array?.length === 6 && same(cls.standard_array) ? cls.standard_array : rules.standard_array;
   const value = (i: number) => (b.method === "point_buy" ? rules.point_buy.min : b.method === "standard_array" ? array[i] : 10);
   return { ...b, base: Object.fromEntries(ABILITIES.map((a, i) => [a, value(i)])) as Record<Ability, number> };
 }
@@ -399,14 +434,21 @@ function weapon(w: WeaponRules, b: Build, p: Parts, mods: Record<Ability, number
   const rule = p.cls?.weapon_rule ?? "Simple";
   const light = hasProperty(w, "Light");
   const finesse = hasProperty(w, "Finesse");
-  const proficient = rule === "All" || w.category === "Simple" || (rule === "Monk" && light) || (rule === "Rogue" && (light || finesse));
-  const monkWeapon = b.class === "Monk" && w.kind === "Melee" && (w.category === "Simple" || light);
+  const proficient = rule === "All" || w.category === "Simple" || (rule === "Monk" && light) || (rule === "Rogue" && (light || finesse))
+    || !!p.cls?.extra_weapons?.includes(w.name);
+  // Martial Arts works only unarmored and without a shield.
+  const martialArts = b.class === "Monk" && p.armor?.category === "None" && !b.shield;
+  const monkWeapon = martialArts && w.kind === "Melee" && (w.category === "Simple" || light);
   const ranged = w.kind === "Ranged";
   const ability: Ability = finesse || monkWeapon ? (mods.dex > mods.str ? "dex" : "str") : ranged ? "dex" : "str";
   const mod = mods[ability];
   const archery = b.fighting_style === "Archery" && fightingStyleAllowed(b, p) && ranged;
   const attack = mod + (proficient ? pb : 0) + (archery ? 2 : 0);
-  const [dice, ...type] = w.damage.split(" ");
+  const [weaponDie, ...type] = w.damage.split(" ");
+  // Martial Arts: a Monk weapon can use the Martial Arts die instead, when it's bigger.
+  const artsDie = monkWeapon ? String(p.row?.columns[0] ?? "") : "";
+  const sides = (d: string) => Number(d.match(/d(\d+)/)?.[1] ?? 0);
+  const dice = artsDie && sides(artsDie) > sides(weaponDie) ? artsDie : weaponDie;
   const damage = `${dice}${mod === 0 ? "" : signed(mod)} ${type.join(" ")}`.trim();
   const why = finesse
     ? " (finesse: Str or Dex, whichever is higher)"
@@ -421,9 +463,9 @@ function weapon(w: WeaponRules, b: Build, p: Parts, mods: Record<Ability, number
   const masteries = p.row?.masteries ?? 0;
   const masteryText = rules.masteries.find((m) => m.name === w.mastery)?.text ?? "";
   const twf = b.fighting_style === "Two-Weapon Fighting" && fightingStyleAllowed(b, p);
-  const damageHow = `Damage ${damage} = weapon die + the same ${ABILITY_NAMES[ability].slice(0, 3)} modifier.`
+  const damageHow = `Damage ${damage} = ${dice === weaponDie ? "weapon die" : "Martial Arts die (bigger than the weapon's)"} + the same ${ABILITY_NAMES[ability].slice(0, 3)} modifier.`
     + (hasProperty(w, "Versatile") ? " Versatile: bigger die two-handed (see properties)." : "")
-    + (light ? ` Light: extra off-hand attack as a Bonus Action, without the modifier${twf ? " (Two-Weapon Fighting adds it)" : ""}.` : "")
+    + (light ? ` Light: extra off-hand attack as a Bonus Action, without the modifier unless it's negative${twf ? " (Two-Weapon Fighting adds it)" : ""}.` : "")
     + (masteries > 0 ? ` Mastery ${w.mastery}: ${masteryText}` : "");
   const notes = [`Uses ${ABILITY_NAMES[ability].slice(0, 3)}`, w.properties, proficient ? "" : "NOT PROFICIENT"].filter(Boolean).join(" · ");
   return { name: w.name, attack, damage, mastery: masteries > 0 ? w.mastery : "", notes, proficient, how, damageHow };
@@ -441,7 +483,7 @@ export function work(b: Build, rules: Rules): Sheet {
   const scoreHow = Object.fromEntries(ABILITIES.map((a) => {
     const raw = b.base[a] + (b.background_bonus[a] ?? 0) + (b.other_bonus[a] ?? 0);
     return [a, `Score ${sc[a]} = base ${b.base[a]} + background ${b.background_bonus[a] ?? 0} + other ${b.other_bonus[a] ?? 0}`
-      + (raw > rules.score_cap ? ` (capped at ${rules.score_cap})` : "") + `. Modifier ${S(mods[a])} = (score − 10) ÷ 2, rounded down.`];
+      + (raw > rules.score_cap ? ` (capped at ${rules.score_cap})` : "") + (capstone(b, a) ? ` + 4 from your level 20 feature (up to 25)` : "") + `. Modifier ${S(mods[a])} = (score − 10) ÷ 2, rounded down.`];
   })) as Record<Ability, string>;
 
   // Skills: background skills, then the player's picks; Expertise on top. Bards from level 2 add
@@ -464,10 +506,14 @@ export function work(b: Build, rules: Rules): Sheet {
   const options = cls?.skill_options === "any" ? null : (cls?.skill_options ?? []).map(skillKey);
   const outsideClass = options ? picks.filter((k) => !options.includes(k)).length : 0;
   const freePicks = allowed - (cls?.skill_picks ?? 0);
-  const pickOK = picks.length === allowed && outsideClass <= freePicks;
+  // The Elf's extra skill (Keen Senses) is one of a few; count picks that fit neither list.
+  const speciesOptions = species?.extra_skill_options?.map(skillKey);
+  const neither = options && speciesOptions && !skilled ? picks.filter((k) => !options.includes(k) && !speciesOptions.includes(k)).length : 0;
+  const pickOK = picks.length === allowed && outsideClass <= freePicks && neither === 0;
   const pickText = `Used ${picks.length} of ${allowed} (class ${cls?.skill_picks ?? 0}`
     + (species?.extra_skill_picks ? `, ${species.name} ${species.extra_skill_picks}` : "") + (skilled ? ", Skilled feat 3" : "") + ")."
-    + (options && outsideClass > freePicks ? ` ${outsideClass - freePicks} of your picks aren't on the ${cls?.name} list.` : options ? ` Class picks come from the ${cls?.name} list.` : "");
+    + (options && outsideClass > freePicks ? ` ${outsideClass - freePicks} of your picks aren't on the ${cls?.name} list.` : options ? ` Class picks come from the ${cls?.name} list.` : "")
+    + (neither ? ` The ${species!.name} pick must be ${species!.extra_skill_options!.join(", ")}.` : "");
 
   // Armor Class.
   const armor = p.armor;
@@ -476,24 +522,28 @@ export function work(b: Build, rules: Rules): Sheet {
   let acValue: number;
   let acHow: string;
   if (unarmored) {
-    if (cls?.unarmored_defense === "Barbarian") {
-      acValue = 10 + mods.dex + mods.con;
+    // Unarmored Defense is another way to work out AC: use whichever is higher.
+    acValue = 10 + mods.dex;
+    acHow = `No armor: 10 + Dex ${S(mods.dex)}`;
+    if (cls?.unarmored_defense === "Barbarian" && mods.con > 0) {
+      acValue += mods.con;
       acHow = `Unarmored Defense (Barbarian): 10 + Dex ${S(mods.dex)} + Con ${S(mods.con)}`;
-    } else if (cls?.unarmored_defense === "Monk" && !b.shield) {
-      acValue = 10 + mods.dex + mods.wis;
+    } else if (cls?.unarmored_defense === "Monk" && !b.shield && mods.wis > 0) {
+      acValue += mods.wis;
       acHow = `Unarmored Defense (Monk): 10 + Dex ${S(mods.dex)} + Wis ${S(mods.wis)}`;
-    } else {
-      acValue = 10 + mods.dex;
-      acHow = `No armor: 10 + Dex ${S(mods.dex)}`;
     }
   } else {
     const dex = Math.min(mods.dex, armor!.max_dex);
     acValue = armor!.base_ac + dex;
     acHow = `${armor!.name} ${armor!.base_ac}` + (cat === "Heavy" ? " (heavy armor: no Dex)" : ` + Dex ${S(dex)}${cat === "Medium" ? " (medium armor: Dex counts up to +2)" : ""}`);
   }
-  if (b.shield) {
+  // Without shield training there's no AC bonus from it (rules glossary: Armor Training).
+  const shieldTrained = cls?.armor_training.shield ?? false;
+  if (b.shield && shieldTrained) {
     acValue += 2;
     acHow += " + Shield 2";
+  } else if (b.shield) {
+    acHow += " (no Shield bonus: not trained with shields)";
   }
   if (style === "Defense" && !unarmored) {
     acValue += 1;
@@ -550,13 +600,15 @@ export function work(b: Build, rules: Rules): Sheet {
   const monkOK = b.class === "Monk" && unarmored && !b.shield;
   const uaAbility: Ability = monkOK && mods.dex > mods.str ? "dex" : "str";
   const uaMod = mods[uaAbility];
-  const uaDamage = monkOK ? `${row?.columns[0] ?? "1d6"}${uaMod === 0 ? "" : S(uaMod)} Bludgeoning` : `${Math.max(1, 1 + mods.str)} Bludgeoning`;
-  const grappleDC = 8 + mods.str + pb;
+  const uaDamage = monkOK ? `${row?.columns[0] ?? "1d6"}${uaMod === 0 ? "" : S(uaMod)} Bludgeoning` : `${1 + mods.str} Bludgeoning`;
+  // Martial Arts lets a Monk use Dex for the Grapple and Shove DC.
+  const grappleAbility: Ability = monkOK && mods.dex > mods.str ? "dex" : "str";
+  const grappleDC = 8 + mods[grappleAbility] + pb;
   const unarmed: BuiltWeapon = {
     name: "Unarmed Strike", attack: uaMod + pb, damage: uaDamage, mastery: "", proficient: true,
     notes: `Uses ${ABILITY_NAMES[uaAbility].slice(0, 3)} · 5 ft reach · or Grapple / Shove (DC ${grappleDC})`,
     how: `Unarmed Strike: ${S(uaMod + pb)} = ${ABILITY_NAMES[uaAbility].slice(0, 3)} ${S(uaMod)}${monkOK ? " (Martial Arts: higher of Str or Dex)" : ""} + Prof ${S(pb)} (everyone is proficient).`,
-    damageHow: `Damage ${uaDamage}${monkOK ? " (Martial Arts die + modifier)" : " (1 + Str)"}. Grapple or Shove instead: the target makes a Str or Dex save (its choice) against DC ${grappleDC} = 8 + Str ${S(mods.str)} + Prof ${S(pb)}.`,
+    damageHow: `Damage ${uaDamage}${monkOK ? " (Martial Arts die + modifier)" : " (1 + Str)"}. Grapple or Shove instead: the target makes a Str or Dex save (its choice) against DC ${grappleDC} = 8 + ${ABILITY_NAMES[grappleAbility].slice(0, 3)} ${S(mods[grappleAbility])} + Prof ${S(pb)}.`,
   };
 
   const resources: BuiltResource[] = [];
@@ -610,10 +662,12 @@ export function work(b: Build, rules: Rules): Sheet {
 
   // Warnings and notes.
   const warnings: string[] = [];
+  if (b.species && !species) warnings.push(`${b.species} isn't in the rules data any more: pick a species, or add it back on the Rules data page.`);
+  if (b.background && !background) warnings.push(`${b.background} isn't in the rules data any more: pick a background, or add it back on the Rules data page.`);
   const trained = cls?.armor_training;
   if (trained && ((cat === "Light" && !trained.light) || (cat === "Medium" && !trained.medium) || (cat === "Heavy" && !trained.heavy)))
     warnings.push("Not trained in this armor: Disadvantage on Str and Dex rolls, and no spellcasting.");
-  if (b.shield && trained && !trained.shield) warnings.push("Not trained with shields: no AC bonus in the real rules; remove it.");
+  if (b.shield && trained && !trained.shield) warnings.push("Not trained with shields: it gives no AC bonus (not counted).");
   if (strShort) warnings.push("Strength too low for this armor: Speed −10 ft (included).");
   if (armor?.stealth === "Disadvantage") warnings.push("This armor gives Disadvantage on Stealth.");
   if (b.class === "Monk" && !monkOK) warnings.push("Monks lose Unarmored Defense, Unarmored Movement and Martial Arts in armor or with a shield.");
@@ -679,10 +733,12 @@ function resourceHow(max: ResourceMax, name: string, value: number, b: Build, cl
  * spent resources are kept, within the new maximums.
  */
 export function apply(ch: Character, b: Build, rules: Rules): Character {
-  const s = work(b, rules);
   const p = parts(b, rules);
+  // A class missing from the rules data (hidden, or from another install): change nothing.
+  if (!p.cls) return ch;
+  const s = work(b, rules);
   const out: Character = structuredClone(ch);
-  out.build = b as unknown as Record<string, unknown>;
+  const before: Made = (ch.build as { made?: Made }).made ?? { features: [], attacks: [], resources: [] };
   out.classes = [{ name: b.class, subclass: b.subclass, level: b.level }];
   out.race = p.lineage ? `${b.species} (${p.lineage.name})` : b.species;
   out.background = b.background;
@@ -693,14 +749,20 @@ export function apply(ch: Character, b: Build, rules: Rules): Character {
   out.ac = s.ac.value;
   out.initiative_misc = s.initiative.value - s.mods.dex;
   out.speed = s.speed.value;
-  const gained = s.hp.value - ch.hp.max;
-  out.hp = { ...ch.hp, max: s.hp.value, current: Math.max(0, Math.min(s.hp.value, ch.hp.current + (gained > 0 && ch.hp.max > 0 ? gained : 0))) };
-  if (ch.hp.max === 0) out.hp.current = s.hp.value;
+  // Damage taken stays the same when the maximum changes (and 0 HP stays 0), so HP never
+  // depends on the order of edits.
+  const damage = Math.max(0, ch.hp.max - ch.hp.current);
+  const current = ch.hp.max <= 0 ? s.hp.value : ch.hp.current <= 0 ? 0 : Math.max(0, s.hp.value - damage);
+  out.hp = { ...ch.hp, max: s.hp.value, current: Math.min(s.hp.value, current) };
   out.hit_dice = { total: `${b.level}d${s.hitDie}`, remaining: Math.min(b.level, ch.hit_dice.remaining + Math.max(0, b.level - totalDice(ch.hit_dice.total))) };
   out.proficiencies = { ...s.proficiencies, languages: ch.proficiencies.languages && ch.proficiencies.languages !== "Common" ? ch.proficiencies.languages : s.proficiencies.languages };
+
+  // Rows the builder makes replace the ones it made last time (and same-named ones); the
+  // player's own rows stay.
   const attack = (w: BuiltWeapon): Attack => ({ name: w.name, bonus: signed(w.attack), damage: w.damage, notes: [w.mastery && `Mastery: ${w.mastery}`, w.notes].filter(Boolean).join(" · ") });
-  const builtNames = new Set([...rules.weapons.map((w) => w.name), "Unarmed Strike"]);
-  out.attacks = [...s.weapons.map(attack), attack(s.unarmed), ...ch.attacks.filter((a) => !builtNames.has(a.name))];
+  const attacks = [...s.weapons.map(attack), attack(s.unarmed)];
+  const attackNames = new Set([...before.attacks, ...attacks.map((a) => a.name)]);
+  out.attacks = [...attacks, ...ch.attacks.filter((a) => !attackNames.has(a.name))];
   out.spellcasting.ability = s.spell?.ability ?? "";
   const slots = s.pact.slots ? Array.from({ length: 9 }, (_, i) => (i + 1 === s.pact.level ? s.pact.slots : 0)) : s.slots;
   for (let lvl = 1; lvl <= 9; lvl++) {
@@ -708,18 +770,27 @@ export function apply(ch: Character, b: Build, rules: Rules): Character {
     const used = Math.min(ch.spellcasting.slots[lvl]?.used || 0, max);
     if (max || ch.spellcasting.slots[lvl]) out.spellcasting.slots[lvl] = { max, used };
   }
-  const builtResources = new Set([...rules.classes.flatMap((c) => c.resources.map((r) => r.name)), ...rules.species.flatMap((x) => (x.resource ? [x.resource.name] : []))]);
+  const resourceNames = new Set([...before.resources, ...s.resources.map((r) => r.name)]);
   out.resources = [
     ...s.resources.map((r) => {
       const old = ch.resources.find((x) => x.name === r.name);
       return { name: r.name, max: r.max, reset: r.reset, current: old ? Math.min(old.current, r.max) : r.max };
     }),
-    ...ch.resources.filter((r) => !builtResources.has(r.name)),
+    ...ch.resources.filter((r) => !resourceNames.has(r.name)),
   ];
-  const builtSources = (f: Feature) => /^(Species|Background \(|.* feat$)/.test(f.source) || rules.classes.some((c) => f.source.startsWith(`${c.name} `)) || f.name.startsWith("Fighting Style: ");
-  out.features = [...s.features.map((f) => ({ ...f, description: ch.features.find((x) => x.name === f.name && x.source === f.source)?.description || f.description })), ...ch.features.filter((f) => !builtSources(f))];
+  const key = (f: Feature) => `${f.name}|${f.source}`;
+  const featureKeys = new Set([...before.features, ...s.features.map(key)]);
+  out.features = [
+    ...s.features.map((f) => ({ ...f, description: ch.features.find((x) => key(x) === key(f))?.description || f.description })),
+    ...ch.features.filter((f) => !featureKeys.has(key(f))),
+  ];
+  const made: Made = { features: s.features.map(key), attacks: attacks.map((a) => a.name), resources: s.resources.map((r) => r.name) };
+  out.build = { ...b, made } as unknown as Record<string, unknown>;
   return out;
 }
+
+/** The attacks and resources the builder made, as opposed to ones the player added. */
+export const madeBy = (ch: Character): Made => (ch.build as { made?: Made }).made ?? { features: [], attacks: [], resources: [] };
 
 const totalDice = (text: string) => (String(text).match(/(\d+)d\d+/g) ?? []).reduce((t, part) => t + parseInt(part, 10), 0);
 

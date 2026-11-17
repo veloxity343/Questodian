@@ -72,7 +72,10 @@ pub fn check(kind: &str, key: &str, data: Option<Value>) -> Result<Option<Value>
             Some(Value::Object(mut entry)) => {
                 entry.insert("name".into(), json!(key));
                 entry.remove("source"); // added by `merged`, not part of the entry
-                Ok(Some(Value::Object(entry)))
+                let entry = Value::Object(entry);
+                let examples: Vec<&Value> = bundled()[kind].as_array().into_iter().flatten().collect();
+                fits(&entry, &examples, kind).map_err(|e| invalid(format!("{key}: {e}")))?;
+                Ok(Some(entry))
             }
             Some(_) => Err(invalid(format!("{kind} entries are objects"))),
         };
@@ -83,18 +86,77 @@ pub fn check(kind: &str, key: &str, data: Option<Value>) -> Result<Option<Value>
     let Some(value) = data else {
         return Err(invalid("settings can't be hidden; reset them instead"));
     };
-    let bundled_value = &bundled()[key];
-    let same_shape = matches!(
-        (bundled_value, &value),
-        (Value::Object(_), Value::Object(_))
-            | (Value::Array(_), Value::Array(_))
-            | (Value::Number(_), Value::Number(_))
-            | (Value::String(_), Value::String(_))
-    );
-    if !same_shape || (bundled_value.is_i64() && !value.is_i64()) {
-        return Err(invalid(format!("{key} must be the same kind of value as the bundled one")));
-    }
+    fits(&value, &[&bundled()[key]], key).map_err(|e| invalid(format!("{key}: {e}")))?;
     Ok(Some(value))
+}
+
+fn type_of(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "nothing",
+        Value::Bool(_) => "yes/no",
+        Value::Number(n) if n.is_i64() || n.is_u64() => "a whole number",
+        Value::Number(_) => "a number",
+        Value::String(_) => "text",
+        Value::Array(_) => "a list",
+        Value::Object(_) => "a group of fields",
+    }
+}
+
+/// Fields whose keys are data (point costs by score, uses by level, gear options, skill
+/// names): any keys will do, as long as the values have the right shape.
+const LOOKUPS: [&str; 4] = ["costs", "by_level", "starting_gear", "skills"];
+/// Fields an entry may leave out.
+const OPTIONAL: [&str; 2] = ["srd", "source"];
+
+/// Whether an edited value has the shape of the bundled ones it stands in for, so the
+/// builder can read it: the same kinds of value, and every field the bundled ones all have.
+/// Extra fields are fine. A whole number can stand in for a number.
+fn fits(value: &Value, examples: &[&Value], field: &str) -> std::result::Result<(), String> {
+    if examples.is_empty() {
+        return Ok(());
+    }
+    let mut allowed: Vec<&str> = examples.iter().map(|e| type_of(e)).collect();
+    if allowed.contains(&"a number") {
+        allowed.push("a whole number");
+    }
+    let found = type_of(value);
+    if !allowed.contains(&found) {
+        allowed.sort();
+        allowed.dedup();
+        return Err(format!("should be {}, not {found}", allowed.join(" or ")));
+    }
+    match value {
+        Value::Object(fields) => {
+            let objects: Vec<&Map<String, Value>> = examples.iter().filter_map(|e| e.as_object()).collect();
+            if LOOKUPS.contains(&field) {
+                let inner: Vec<&Value> = objects.iter().flat_map(|o| o.values()).collect();
+                for (name, item) in fields {
+                    fits(item, &inner, name).map_err(|e| format!("{name} {e}"))?;
+                }
+                return Ok(());
+            }
+            let Some(first) = objects.first() else { return Ok(()) };
+            for name in first.keys().filter(|k| objects.iter().all(|o| o.contains_key(*k))) {
+                let Some(item) = fields.get(name) else {
+                    if OPTIONAL.contains(&name.as_str()) {
+                        continue;
+                    }
+                    return Err(format!("{name} is missing"));
+                };
+                let inner: Vec<&Value> = objects.iter().map(|o| &o[name]).collect();
+                fits(item, &inner, name).map_err(|e| format!("{name} {e}"))?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            let inner: Vec<&Value> = examples.iter().filter_map(|e| e.as_array()).flatten().collect();
+            for (i, item) in items.iter().enumerate() {
+                fits(item, &inner, field).map_err(|e| format!("item {}: {e}", i + 1))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The bundled data with the edits applied. Each named entry gets `"source"`:
@@ -175,6 +237,46 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_entry_and_setting_passes_its_own_check() {
+        for kind in ENTRY_KINDS {
+            for entry in bundled()[kind].as_array().unwrap() {
+                let name = entry["name"].as_str().unwrap();
+                check(kind, name, Some(entry.clone())).unwrap_or_else(|e| panic!("{kind}/{name}: {e}"));
+            }
+        }
+        for key in SETTINGS {
+            check("settings", key, Some(bundled()[key].clone())).unwrap_or_else(|e| panic!("{key}: {e}"));
+        }
+    }
+
+    #[test]
+    fn edits_must_keep_the_shape_the_builder_reads() {
+        let fighter = bundled()["classes"].as_array().unwrap().iter().find(|c| c["name"] == "Fighter").unwrap().clone();
+        assert!(check("classes", "Fighter", Some(fighter.clone())).is_ok(), "the bundled entry itself");
+        let with = |change: &dyn Fn(&mut Value)| {
+            let mut entry = fighter.clone();
+            change(&mut entry);
+            check("classes", "Fighter", Some(entry))
+        };
+        assert!(with(&|e| e["hit_die"] = json!(12)).is_ok());
+        assert!(with(&|e| e["spell_ability"] = json!("int")).is_ok(), "other classes have one");
+        let error = with(&|e| e["levels"] = json!({})).unwrap_err().to_string();
+        assert!(error.contains("levels should be a list"), "{error}");
+        assert!(with(&|e| e.as_object_mut().unwrap().remove("levels").map(|_| ()).unwrap()).is_err());
+        assert!(with(&|e| e["levels"][0]["slots"] = json!("none")).is_err());
+        assert!(check("settings", "standard_array", Some(json!(["a"]))).is_err());
+        assert!(
+            check("settings", "point_buy", Some(json!({"budget": 30, "min": 8, "max": 15}))).is_err(),
+            "costs missing"
+        );
+        assert!(
+            check("settings", "point_buy", Some(json!({"budget": 30, "min": 8, "max": 15, "costs": {"8": 0}}))).is_ok()
+        );
+        let pack = json!({"weight": 30, "cost": "5 GP", "kind": "Gear", "note": ""});
+        assert!(check("items", "Big Pack", Some(pack)).is_ok(), "a whole number for a weight");
+    }
+
+    #[test]
     fn edits_replace_add_and_hide() {
         let merged = merged(&[
             edit("classes", "Fighter", Some(json!({"name": "Fighter", "hit_die": 12}))),
@@ -202,9 +304,10 @@ mod tests {
         assert!(check("settings", "score_cap", Some(json!(20.5))).is_err(), "a whole number");
         assert!(check("settings", "nonsense", Some(json!(1))).is_err());
         assert!(check("spells", "Fireball", Some(json!({}))).is_err());
-        assert_eq!(check("feats", "Lucky", Some(json!({"name": "x"}))).unwrap(), Some(json!({"name": "Lucky"})));
+        let lucky = json!({"name": "x", "type": "Origin", "text": "Reroll.", "srd": false});
+        assert_eq!(check("feats", "Lucky", Some(lucky)).unwrap().unwrap()["name"], "Lucky");
         assert_eq!(check("classes", "Wizard", None).unwrap(), None);
-        let sent_back = json!({"name": "Lucky", "source": "edited"});
-        assert_eq!(check("feats", "Lucky", Some(sent_back)).unwrap(), Some(json!({"name": "Lucky"})));
+        let sent_back = json!({"name": "Lucky", "type": "Origin", "text": "Reroll.", "source": "edited"});
+        assert!(check("feats", "Lucky", Some(sent_back)).unwrap().unwrap().get("source").is_none());
     }
 }
