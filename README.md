@@ -80,6 +80,7 @@ the rules); typing `[[` suggests names. **Ctrl K** searches everything: records,
 | **Handbook** | Your own Markdown documents (house rules, lore, random tables…), with templates and live preview. |
 | **Tools** | Dice pool builder, macros, roll history, a calculator that understands dice, and quick calculators (ability modifiers, point buy, encounter XP, XP to level, coin splitting, spell DC). Press **R** for the quick roller. |
 | **Data** | A full backup, or one campaign with everything linked to it (handout images included), as JSON. Single records export as JSON or Markdown. Imports accept these and `.md` files in *overwrite*, *skip* or *copy* mode, in one transaction: a bad file changes nothing. |
+| **Settings** | Update checks (desktop app): on first launch it asks whether to check GitHub for a new version once a day; turn it off or check now here. See [docs/updates.md](docs/updates.md). Also the theme. |
 
 ### Dice syntax
 

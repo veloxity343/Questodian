@@ -7,6 +7,8 @@ import { usePref } from "./lib/hooks";
 import { CampaignList } from "./views/campaigns";
 import { CharacterList, CharacterSheet } from "./views/characters";
 import { RulesData } from "./views/rules-data";
+import { Settings } from "./views/settings";
+import { UpdatesProvider, useUpdates } from "./context/updates";
 import { DataPage } from "./views/data";
 import { HandbookEditor, HandbookList } from "./views/handbook";
 import { Reference } from "./views/reference";
@@ -58,7 +60,8 @@ function TopBar() {
   const onDm = pathname === "/";
   return (
     <header className="topbar">
-      <button type="button" className="icon-btn menu-btn" aria-label="Toggle navigator" disabled={!onDm} onClick={() => setNav(!nav)}>☰</button>
+      <button type="button" className="icon-btn menu-btn" aria-label="Show or hide the navigator" disabled={!onDm}
+        title={onDm ? "Show or hide the navigator (scenes, NPCs, notes…)" : "The navigator is on the DM screen"} onClick={() => setNav(!nav)}>☰</button>
       <NavLink className="brand" to="/"><span aria-hidden="true">✦</span> Questodian</NavLink>
       <nav className="modes" aria-label="Main">
         {MODES.map((m) => <NavLink key={m.to} to={m.to} end={m.end} className={({ isActive }) => (isActive ? "on" : "")}>{m.label}</NavLink>)}
@@ -71,7 +74,20 @@ function TopBar() {
       )}
       <CampaignChip />
       <button type="button" className="icon-btn" onClick={toggleTheme} aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
+      <SettingsLink />
     </header>
+  );
+}
+
+/** The settings button, with a dot while a new version is waiting. */
+function SettingsLink() {
+  const { state } = useUpdates();
+  const waiting = !!state?.check && !!state.available;
+  return (
+    <NavLink to="/settings" className="icon-btn settings-btn" aria-label={waiting ? "Settings: an update is available" : "Settings"}
+      title={waiting ? `Settings: Questodian ${state!.available!.version} is out` : "Settings"}>
+      ⚙{waiting && <span className="dot" aria-hidden="true" />}
+    </NavLink>
   );
 }
 
@@ -107,6 +123,7 @@ export default function App() {
   }
   const onDm = pathname === "/";
   return (
+    <UpdatesProvider>
     <div className="app">
       <TopBar />
       <main ref={main} tabIndex={-1} className={onDm ? "app-main dm-main" : "app-main page"}>
@@ -125,9 +142,11 @@ export default function App() {
           <Route path="/handbook/:id" element={<HandbookEditor />} />
           <Route path="/tools" element={<Tools />} />
           <Route path="/data" element={<DataPage />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>
+    </UpdatesProvider>
   );
 }
