@@ -157,7 +157,8 @@
    },
    "appearance": "",
    "backstory": "",
-   "notes": ""
+   "notes": "",
+   "build": {}
   },
   {
    "id": "char2",
@@ -237,7 +238,8 @@
    },
    "appearance": "",
    "backstory": "",
-   "notes": ""
+   "notes": "",
+   "build": {}
   }
  ],
  "handbook": [

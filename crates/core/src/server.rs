@@ -23,7 +23,7 @@ use crate::kinds::Kind;
 use crate::schemas::{
     self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
 };
-use crate::{dice, game, rules, srd, transfer};
+use crate::{builder, dice, game, rules, srd, transfer};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -66,6 +66,8 @@ pub fn router(app: Shared) -> Router {
         .route("/srd/search", get(srd_search))
         .route("/srd/entry", get(srd_entry))
         .route("/projection", get(get_projection).put(set_projection))
+        .route("/rules", get(get_rules))
+        .route("/rules/{kind}/{key}", axum::routing::put(edit_rule).delete(reset_rule))
         .route("/encounters/{id}/action", post(encounter_action))
         .route("/sessions/{id}/award", post(award))
         .route("/sessions/{id}/log", post(add_log))
@@ -302,6 +304,39 @@ async fn set_projection(State(app): State<Shared>, Valid(mut body): Valid<Projec
     body.seq = current.seq + 1;
     *current = body.clone();
     Json(body)
+}
+
+// --------------------------------------------------------------------------- rules data
+
+async fn get_rules(State(app): State<Shared>) -> Result<Json<Value>> {
+    let mut repo = app.db.read().await?;
+    Ok(Json(builder::merged(&repo.rule_overrides().await?)))
+}
+
+/// Replace, add or (with a `null` body) hide an entry; returns the rules data as it now is.
+async fn edit_rule(
+    State(app): State<Shared>,
+    UrlPath((kind, key)): UrlPath<(String, String)>,
+    JsonBody(body): JsonBody,
+) -> Result<Json<Value>> {
+    let body = body.ok_or_else(|| body_error("send the entry, or null to hide it"))?;
+    let data = builder::check(&kind, &key, Some(body).filter(|b| !b.is_null()))?;
+    let mut repo = app.db.write().await?;
+    repo.save_rule_override(&kind, key.trim(), data.as_ref()).await?;
+    let merged = builder::merged(&repo.rule_overrides().await?);
+    repo.commit().await?;
+    Ok(Json(merged))
+}
+
+/// Undo an edit: back to the bundled entry (or gone, for one the user added).
+async fn reset_rule(State(app): State<Shared>, UrlPath((kind, key)): UrlPath<(String, String)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    if !repo.delete_rule_override(&kind, &key).await? {
+        return Err(not_found(format!("no edit to {kind}/{key}")));
+    }
+    let merged = builder::merged(&repo.rule_overrides().await?);
+    repo.commit().await?;
+    Ok(Json(merged))
 }
 
 // --------------------------------------------------------------------------- records

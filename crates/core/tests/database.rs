@@ -70,8 +70,8 @@ async fn check_fixture(name: &str, expect_backup: bool) {
 }
 
 #[tokio::test]
-async fn current_schema_reads_like_python() {
-    check_fixture("v0002", false).await;
+async fn revision_0002_upgrades_with_a_backup() {
+    check_fixture("v0002", true).await;
 }
 
 #[tokio::test]
@@ -89,8 +89,8 @@ async fn schema_shape(path: &Path) -> Vec<String> {
     use sqlx::{Connection, Row};
     let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", path.display())).await.unwrap();
     let mut out = Vec::new();
-    for kind in Kind::ALL {
-        let t = kind.table();
+    let tables = Kind::ALL.iter().map(|kind| kind.table()).chain(["rule_overrides"]);
+    for t in tables {
         for pragma in ["table_info", "foreign_key_list", "index_list"] {
             let rows =
                 sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA {pragma}({t})"))).fetch_all(&mut conn).await.unwrap();
@@ -120,12 +120,13 @@ async fn schema_shape(path: &Path) -> Vec<String> {
 async fn upgraded_schema_matches_a_new_database() {
     let fresh = tempfile::tempdir().unwrap();
     Database::open(fresh.path()).await.unwrap().close().await;
-    let upgraded = tempfile::tempdir().unwrap();
-    open_fixture("v0001", upgraded.path()).await.close().await;
-    assert_eq!(
-        schema_shape(&upgraded.path().join(DB_FILENAME)).await,
-        schema_shape(&fresh.path().join(DB_FILENAME)).await
-    );
+    let fresh = schema_shape(&fresh.path().join(DB_FILENAME)).await;
+    assert!(fresh.iter().any(|line| line.starts_with("rule_overrides table_info")));
+    for name in ["v0001", "v0002"] {
+        let upgraded = tempfile::tempdir().unwrap();
+        open_fixture(name, upgraded.path()).await.close().await;
+        assert_eq!(schema_shape(&upgraded.path().join(DB_FILENAME)).await, fresh, "{name}");
+    }
 }
 
 #[tokio::test]

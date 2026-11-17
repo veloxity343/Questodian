@@ -10,6 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 
+use crate::builder;
 use crate::error::{Error, Result, invalid};
 use crate::kinds::{Kind, LINKS};
 use crate::repo::{Repo, new_id, now, valid_id};
@@ -55,6 +56,9 @@ fn text<'a>(doc: &'a Value, key: &str) -> &'a str {
 
 // --------------------------------------------------------------------------- export
 
+/// The collection holding edits to the character builder's rules data (full exports only).
+const RULE_EDITS: &str = "rule_overrides";
+
 /// Everything, or one campaign together with the records linked to it. Handout images
 /// are embedded (base64) so the bundle is self-contained.
 pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Result<Value> {
@@ -86,6 +90,12 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
             for kind in Kind::ALL {
                 collections.insert(kind.plural().into(), Value::Array(repo.list(kind, &[]).await?));
             }
+            let edits = repo.rule_overrides().await?;
+            let edits = edits
+                .into_iter()
+                .map(|o| json!({"kind": o.kind, "key": o.key, "data": o.data, "updated": o.updated}))
+                .collect();
+            collections.insert(RULE_EDITS.into(), Value::Array(edits));
         }
     }
     if let Some(Value::Array(handouts)) = collections.get_mut("handouts") {
@@ -156,6 +166,22 @@ fn collections_from(payload: &Value) -> Result<HashMap<Kind, Vec<Value>>> {
     Ok(out)
 }
 
+/// Edits to the rules data in a full export, checked like edits made in the app.
+fn rule_edits_from(payload: &Value) -> Result<Vec<(String, String, Option<Value>)>> {
+    let Some(edits) = payload.get("collections").and_then(|c| c.get(RULE_EDITS)) else { return Ok(Vec::new()) };
+    let Value::Array(edits) = edits else { return Err(invalid(format!("'{RULE_EDITS}' must be a list"))) };
+    edits
+        .iter()
+        .map(|edit| {
+            let (kind, key) = (text(edit, "kind"), text(edit, "key").trim());
+            let data = edit.get("data").filter(|d| !d.is_null()).cloned();
+            let data = builder::check(kind, key, data)
+                .map_err(|e| invalid(format!("invalid rules data edit {kind}/{key}: {e}")))?;
+            Ok((kind.to_string(), key.to_string(), data))
+        })
+        .collect()
+}
+
 /// Version 1 sessions carried one `encounter`; turn those into encounter records.
 fn upgrade_v1(collections: &mut HashMap<Kind, Vec<Value>>) {
     let mut found = Vec::new();
@@ -188,6 +214,7 @@ type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
 /// written, and the caller's unit of work makes it all-or-nothing.
 pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Result<Value> {
     let collections = collections_from(payload)?;
+    let rule_edits = rule_edits_from(payload)?;
     let mut docs: Checked = HashMap::new();
     for kind in Kind::ALL {
         let mut checked = Vec::new();
@@ -249,6 +276,25 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
             }
             if passed > 0 {
                 skipped.insert(kind.plural().into(), json!(passed));
+            }
+        }
+        if !rule_edits.is_empty() {
+            let existing = repo.rule_overrides().await?;
+            let (mut done, mut passed) = (0, 0);
+            for (kind, key, data) in &rule_edits {
+                let exists = existing.iter().any(|o| &o.kind == kind && &o.key == key);
+                if exists && mode != Mode::Overwrite {
+                    passed += 1;
+                    continue;
+                }
+                repo.save_rule_override(kind, key, data.as_ref()).await?;
+                done += 1;
+            }
+            if done > 0 {
+                imported.insert(RULE_EDITS.into(), json!(done));
+            }
+            if passed > 0 {
+                skipped.insert(RULE_EDITS.into(), json!(passed));
             }
         }
         Ok::<(), Error>(())

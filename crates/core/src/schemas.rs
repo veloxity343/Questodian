@@ -496,6 +496,10 @@ schema! {
         appearance: String = String::new(),
         backstory: String = String::new(),
         notes: String = String::new(),
+        /// The character builder's choices (ability method, base scores, background bonuses,
+        /// species and lineage, skill picks...), kept as the UI writes them. Empty for
+        /// characters made without the builder.
+        build: IndexMap<String, Value> = IndexMap::new(),
     }
 }
 

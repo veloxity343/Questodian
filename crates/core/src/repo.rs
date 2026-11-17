@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite, Transaction, TypeInfo, ValueRef};
 
+use crate::builder::Override;
 use crate::error::{Error, Result, invalid, not_found};
 use crate::kinds::{Column, ColumnKind, FILTERS, Kind, LINKS};
 
@@ -226,6 +227,53 @@ impl<'a> Repo<'a> {
         let sql = format!("DELETE FROM {} WHERE id = ?", kind.table());
         sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).execute(&mut *self.tx).await?;
         Ok(())
+    }
+}
+
+impl Repo<'_> {
+    // ------------------------------------------------------------------ rules data edits
+
+    /// Every edit to the character builder's rules data.
+    pub async fn rule_overrides(&mut self) -> Result<Vec<Override>> {
+        let rows: Vec<(String, String, Option<String>, String)> =
+            // The column is declared JSON, so SQLite stores a bare number as one; read it back as text.
+            sqlx::query_as(r#"SELECT kind, "key", CAST(data AS TEXT), updated FROM rule_overrides ORDER BY kind, "key""#)
+                .fetch_all(&mut *self.tx)
+                .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(kind, key, data, updated)| Override {
+                kind,
+                key,
+                data: data.map(parse_stored_json).filter(|v| !v.is_null()),
+                updated,
+            })
+            .collect())
+    }
+
+    /// Store an edit (`data: None` hides a bundled entry), replacing any earlier one.
+    pub async fn save_rule_override(&mut self, kind: &str, key: &str, data: Option<&Value>) -> Result<()> {
+        sqlx::query(
+            r#"INSERT INTO rule_overrides (kind, "key", data, updated) VALUES (?, ?, ?, ?)
+               ON CONFLICT (kind, "key") DO UPDATE SET data = excluded.data, updated = excluded.updated"#,
+        )
+        .bind(kind)
+        .bind(key)
+        .bind(data.map(Value::to_string))
+        .bind(now())
+        .execute(&mut *self.tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Drop an edit, bringing back the bundled entry. False if there was none.
+    pub async fn delete_rule_override(&mut self, kind: &str, key: &str) -> Result<bool> {
+        let done = sqlx::query(r#"DELETE FROM rule_overrides WHERE kind = ? AND "key" = ?"#)
+            .bind(kind)
+            .bind(key)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(done.rows_affected() > 0)
     }
 }
 
