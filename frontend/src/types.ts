@@ -119,7 +119,7 @@ export interface Resource {
   name: string;
   current: number;
   max: number;
-  reset: "long" | "short" | "none";
+  reset: "long" | "short" | "short_one" | "none";
 }
 
 export interface Item {
@@ -171,6 +171,8 @@ export interface Character extends RecordBase {
   appearance: string;
   backstory: string;
   notes: string;
+  /** The character builder's choices (see lib/builder.ts); empty for sheets filled in by hand. */
+  build: Record<string, unknown>;
 }
 
 export interface HandbookEntry extends RecordBase {

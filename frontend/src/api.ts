@@ -4,6 +4,7 @@ import type {
   Character, ClassLevel, Edition, Encounter, EncounterAction, Handout, ImportSummary, Kind, KindMap, Meta, RollResult,
   Session, SrdCategory, SrdEntry, SrdMeta, HandbookEntry,
 } from "./types";
+import type { Rules } from "./lib/builder";
 
 type Params = Record<string, string | number | boolean | undefined | null>;
 
@@ -86,6 +87,10 @@ export const api = {
     request<{ categories: SrdCategory[]; meta: SrdMeta }>("GET", `srd/categories${qs({ edition })}`),
   srdSearch: (params: Params & { edition?: Edition }) => request<SrdSearchResult>("GET", `srd/search${qs(params)}`),
   srdEntry: (id: string, edition?: Edition) => request<SrdEntry>("GET", `srd/entry${qs({ id, edition })}`),
+  rules: () => request<Rules>("GET", "rules"),
+  /** Replace or add a rules data entry; `null` hides a bundled one. */
+  editRule: (kind: string, key: string, data: unknown) => request<Rules>("PUT", `rules/${kind}/${encodeURIComponent(key)}`, data),
+  resetRule: (kind: string, key: string) => request<Rules>("DELETE", `rules/${kind}/${encodeURIComponent(key)}`),
   exportAll: (campaign_id?: string) => request<unknown>("GET", `export${qs({ campaign_id })}`),
   exportOne: (kind: Kind, id: string) => request<unknown>("GET", `export/${kind}/${id}`),
   exportMarkdown: async (kind: Kind, id: string) => {

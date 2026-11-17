@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { SrdPicker, useStatblock } from "../components/srd";
@@ -13,6 +13,11 @@ import { derive, type Derived } from "../lib/derive";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, download, downloadJson, pickFiles, signed, slug, titleCase } from "../lib/util";
 import { targetEncounter } from "../lib/encounters";
+import { apply, buildOf, isBuilt, itemWeight, resetText, startBuild, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
+import {
+  BuilderAbilities, BuilderBanner, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderSpellNotes, BuilderTiles, BuilderWarnings,
+  BuilderWeapons, LevelLog, LevelUpDialog, RulesDataLink, StartingGearDialog, loadRules, useRules, type EditBuild,
+} from "./builder";
 import type { Ability, Campaign, Character, Edition, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
 
 const ALIGNMENTS = ["", "Lawful Good", "Neutral Good", "Chaotic Good", "Lawful Neutral", "True Neutral", "Chaotic Neutral", "Lawful Evil", "Neutral Evil", "Chaotic Evil", "Unaligned"];
@@ -58,8 +63,15 @@ export function CharacterList() {
   if (!all) return <Loading />;
   const list = showAll ? all : all.filter((c) => c.campaign_id === campaignId);
 
+  // New characters start in the builder (point buy at 8s); "Edit by hand" on the sheet turns it off.
   const create = async () => {
     const ch = await api.create("characters", { campaign_id: campaignId });
+    try {
+      const rules = await loadRules();
+      await api.update("characters", ch.id, apply(ch, startBuild(ch, rules), rules));
+    } catch (e) {
+      toast(`Opened a blank sheet: ${(e as Error).message}`, "error");
+    }
     navigate(`/characters/${ch.id}`);
   };
   const importChar = async () => {
@@ -80,6 +92,7 @@ export function CharacterList() {
         <h1>Characters</h1>
         <div className="row gap wrap">
           {campaignId && <label className="check small"><Checkbox checked={showAllPref} onChange={setShowAll} /> Show all campaigns</label>}
+          <RulesDataLink />
           <button type="button" className="btn" onClick={importChar}>Import</button>
           <button type="button" className="btn primary" onClick={create}>+ New character</button>
         </div>
@@ -138,10 +151,52 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
   const { doc: ch, setDoc, edit, flush, discard, status } = useDraft<Character>(initial, (doc) => api.update("characters", id, doc), {
     onError: (e) => toast(e.message, "error"),
   });
+  const { rules } = useRules();
+  const [dialog, setDialog] = useState<"" | "level" | "gear">("");
+  // The builder (2024 rules) works out most of the sheet; "by hand" switches it off but keeps the choices.
+  const building = !!rules && !!ch && isBuilt(ch) && !(ch.build as { manual?: boolean }).manual;
+  const b = building ? buildOf(ch!) : null;
+  const built = b && rules ? work(b, rules) : null;
+  const editBuild: EditBuild = (fn) => rules && edit((x) => void Object.assign(x, apply(x, fn(buildOf(x)), rules)));
+  // When the rules data changes (an edit on the Rules data page), bring the worked-out fields up to date.
+  const syncedFor = useRef<Rules | null>(null);
+  useEffect(() => {
+    if (!building || !rules || !ch || syncedFor.current === rules) return;
+    syncedFor.current = rules;
+    if (JSON.stringify(apply(ch, buildOf(ch), rules)) !== JSON.stringify(ch)) edit((x) => void Object.assign(x, apply(x, buildOf(x), rules)));
+  }, [building, rules, ch, edit]);
   if (!ch) return null;
   // Rules follow the character's own campaign, which may not be the one open in the app.
-  const d = derive(ch, meta, campaigns.find((c) => c.id === ch.campaign_id)?.edition);
-  const roll: Roll = (expr, label) => void dice.roll(expr, `${ch.name}: ${label}`);
+  const d = derive(ch, meta, built ? "2024" : campaigns.find((c) => c.id === ch.campaign_id)?.edition);
+  // 2024 exhaustion takes 2 per level off every D20 Test; the builder's numbers are before it.
+  const tired = built ? 2 * Math.max(0, Math.min(6, Number(ch.exhaustion) || 0)) : 0;
+  const roll: Roll = (expr, label) => void dice.roll(tired && expr.startsWith("d20") ? `${expr}-${tired}` : expr, `${ch.name}: ${label}`);
+  const rollPlain: Roll = (expr, label) => void dice.roll(expr, `${ch.name}: ${label}`);
+
+  const startBuilder = async () => {
+    if (!rules) return;
+    const ok = await confirm(
+      "Switch this sheet to the builder? It works out ability scores, saves, skills, AC, HP, speed, attacks, resources, spell slots and features from your choices, replacing what's typed in those places now. Spells, inventory, coins and notes stay.",
+      { label: "Use the builder", danger: false },
+    );
+    if (ok) edit((x) => void Object.assign(x, apply(x, isBuilt(x) ? buildOf(x) : startBuild(x, rules), rules)));
+  };
+  const byHand = async () => {
+    const ok = await confirm("Edit this sheet by hand? Every field becomes editable and nothing is worked out any more. Your builder choices are kept, so you can switch back (which works everything out again).", { label: "Edit by hand", danger: false });
+    if (ok) edit((x) => void (x.build = { ...x.build, manual: true }));
+  };
+  const fillGear = (f: GearFill) =>
+    rules && edit((x) => {
+      const next: Build = { ...buildOf(x), armor: f.armor, shield: f.shield, weapons: f.weapons };
+      const worn = [f.armor !== "None (unarmored)" ? f.armor : "", f.shield ? "Shield" : ""].filter(Boolean);
+      x.inventory = [
+        ...worn.map((name) => ({ name, qty: 1, weight: itemWeight(rules, name) ?? 0, equipped: true, notes: "" })),
+        ...f.items.map((i) => ({ name: i.name, qty: i.qty, weight: i.weight, equipped: f.weapons.includes(i.name), notes: "" })),
+      ];
+      x.currency = { cp: 0, sp: f.sp, ep: 0, gp: f.gp, pp: 0 };
+      Object.assign(x, apply(x, next, rules));
+      toast(`Starting gear filled: ${f.gp} GP${f.sp ? `, ${f.sp} SP` : ""}.${f.notes.length ? ` ${f.notes.join(" ")}` : ""}`);
+    });
 
   const addToEncounter = async () => {
     await flush();
@@ -183,6 +238,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
         <Link to="/characters" className="small">← Characters</Link>
         <div className="row gap wrap">
           <SaveStatus status={status} />
+          {building && <button type="button" className="btn" title="Turn off the builder for this sheet" onClick={byHand}>Edit by hand</button>}
           <button type="button" className="btn" title="Add to the campaign's running (or last edited) encounter" onClick={addToEncounter}>⚔️ To encounter</button>
           <button type="button" className="btn" onClick={async () => { await flush(); download(`${slug(ch.name, "character")}.md`, await api.exportMarkdown("characters", id), "text/markdown"); }}>Export .md</button>
           <button type="button" className="btn" onClick={async () => { await flush(); downloadJson(`${slug(ch.name, "character")}.character.json`, await api.exportOne("characters", id)); }}>Export .json</button>
@@ -190,6 +246,12 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
           <button type="button" className="btn danger" onClick={remove}>Delete</button>
         </div>
       </header>
+      {built && b && rules ? (
+        <BuiltSheet ch={ch} b={b} s={built} rules={rules} d={d} edit={edit} editBuild={editBuild} campaigns={campaigns} roll={roll} rollPlain={rollPlain}
+          rest={rest} openDialog={setDialog} />
+      ) : (
+      <>
+      {rules && <BuilderBanner onStart={startBuilder} again={isBuilt(ch)} />}
       <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} />
       <div className="sheet-grid">
         <div className="sheet-col">
@@ -218,7 +280,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
               <TextInput value={r.name} onChange={(v) => set({ name: v })} placeholder="Rage, Ki, Channel Divinity…" aria-label="Resource" />,
               <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
               <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
-              <Select value={r.reset} options={[["long", "Long rest"], ["short", "Short rest"], ["none", "Manual"]]} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
+              <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
             ]}
           />
           <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} />
@@ -262,7 +324,139 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
           <Field key={k} label={titleCase(k)}><TextArea rows={k === "appearance" ? 2 : 5} value={ch[k]} onChange={(v) => edit((x) => void (x[k] = v))} /></Field>
         ))}
       </section>
+      </>
+      )}
+      {dialog === "level" && b && built && rules && (
+        <LevelUpDialog b={b} s={built} rules={rules} onClose={() => setDialog("")} onDone={(next) => editBuild(() => next)} />
+      )}
+      {dialog === "gear" && b && rules && <StartingGearDialog b={b} rules={rules} onClose={() => setDialog("")} onFill={fillGear} />}
     </>
+  );
+}
+
+/** The sheet when the builder works it out: choices at the top, numbers worked out, play state editable. */
+function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, rollPlain, rest, openDialog }: {
+  ch: Character;
+  b: Build;
+  s: Built;
+  rules: Rules;
+  d: Derived;
+  edit: Edit;
+  editBuild: EditBuild;
+  campaigns: Campaign[];
+  roll: Roll;
+  rollPlain: Roll;
+  rest: (t: "short" | "long") => void;
+  openDialog: (which: "level" | "gear") => void;
+}) {
+  const builtAttacks = new Set([...rules.weapons.map((w) => w.name), "Unarmed Strike"]);
+  const builtResources = new Set(s.resources.map((r) => r.name));
+  const otherAttacks = ch.attacks.filter((a) => !builtAttacks.has(a.name));
+  const otherResources = ch.resources.filter((r) => !builtResources.has(r.name));
+  return (
+    <>
+      <BuilderHeader ch={ch} b={b} s={s} rules={rules} edit={edit} editBuild={editBuild} campaigns={campaigns} onLevelUp={() => openDialog("level")} />
+      <BuilderWarnings s={s} />
+      <div className="sheet-grid">
+        <div className="sheet-col">
+          <BuilderAbilities b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
+          <BuilderSkills b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
+          <section className="panel">
+            <h2>Proficiencies &amp; Languages</h2>
+            <p className="small"><strong>Saving throws:</strong> {s.saves.map((a) => ABILITY_NAMES[a]).join(", ") || "—"}</p>
+            {(["armor", "weapons", "tools"] as const).map((k) => <p key={k} className="small"><strong>{titleCase(k)}:</strong> {ch.proficiencies[k] || "—"}</p>)}
+            <Field label="Languages"><TextInput value={ch.proficiencies.languages} onChange={(v) => edit((x) => void (x.proficiencies.languages = v))} /></Field>
+          </section>
+        </div>
+        <div className="sheet-col">
+          <CombatPanel ch={ch} d={d} edit={edit} roll={roll} rest={rest} built={s} tiles={<BuilderTiles s={s} initiative={d.initiative} roll={rollPlain} />} />
+          <BuilderWeapons b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
+          <AttacksPanel ch={{ ...ch, attacks: otherAttacks }} title="Other attacks & actions"
+            edit={(fn) => edit((x) => {
+              const draft = { ...x, attacks: x.attacks.filter((a) => !builtAttacks.has(a.name)) };
+              fn(draft);
+              x.attacks = [...x.attacks.filter((a) => builtAttacks.has(a.name)), ...draft.attacks];
+            })} roll={roll} />
+          <BuilderResources ch={ch} s={s} edit={edit} />
+          {otherResources.length > 0 && (
+            <ListSection<Resource>
+              title="Other resources"
+              items={otherResources}
+              onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))}
+              blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
+              head={["Name", "Current", "Max", "Resets on", ""]}
+              row={(r, set) => [
+                <TextInput value={r.name} onChange={(v) => set({ name: v })} aria-label="Resource" />,
+                <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
+                <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
+                <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
+              ]}
+            />
+          )}
+          <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} built={s} b={b} />
+        </div>
+      </div>
+      <div className="grid-2">
+        <div>
+          <InventoryPanel ch={ch} edit={edit} rules={rules} capacity={s.carry.value} onStartingGear={() => openDialog("gear")} />
+          <CoinsPanel ch={ch} edit={edit} />
+        </div>
+        <div>
+          <FeaturesPanel ch={ch} edit={edit} />
+        </div>
+      </div>
+      <PersonalityPanel ch={ch} edit={edit} />
+      <LevelLog b={b} />
+      <BuilderHow b={b} s={s} rules={rules} />
+    </>
+  );
+}
+
+const RESETS: Option[] = [["long", resetText("long")], ["short", resetText("short")], ["short_one", resetText("short_one")], ["none", resetText("none")]];
+
+function CoinsPanel({ ch, edit }: { ch: Character; edit: Edit }) {
+  return (
+    <section className="panel">
+      <h2>Coins</h2>
+      <div className="row gap wrap currency">
+        {(["cp", "sp", "ep", "gp", "pp"] as const).map((k) => (
+          <label key={k} className="field coin"><span>{k.toUpperCase()}</span><NumInput min={0} value={ch.currency[k]} onChange={(v) => edit((x) => void (x.currency[k] = v))} /></label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FeaturesPanel({ ch, edit }: { ch: Character; edit: Edit }) {
+  return (
+    <ListSection
+      title="Features & Traits"
+      items={ch.features}
+      onChange={(v) => edit((x) => void (x.features = v))}
+      blank={() => ({ name: "", source: "", description: "" })}
+      head={["Name", "Source", "Description", ""]}
+      row={(f, set) => [
+        <TextInput value={f.name} onChange={(v) => set({ name: v })} aria-label="Feature" />,
+        <TextInput value={f.source} onChange={(v) => set({ source: v })} placeholder="Class, species, feat…" aria-label="Source" />,
+        <TextArea rows={2} value={f.description} onChange={(v) => set({ description: v })} aria-label="Description" />,
+      ]}
+    />
+  );
+}
+
+function PersonalityPanel({ ch, edit }: { ch: Character; edit: Edit }) {
+  return (
+    <section className="panel">
+      <h2>Personality &amp; Story</h2>
+      <div className="form-grid">
+        {(["traits", "ideals", "bonds", "flaws"] as const).map((k) => (
+          <Field key={k} label={titleCase(k)}><TextArea rows={2} value={ch.personality[k]} onChange={(v) => edit((x) => void (x.personality[k] = v))} /></Field>
+        ))}
+      </div>
+      {(["appearance", "backstory", "notes"] as const).map((k) => (
+        <Field key={k} label={titleCase(k)}><TextArea rows={k === "appearance" ? 2 : 5} value={ch[k]} onChange={(v) => edit((x) => void (x[k] = v))} /></Field>
+      ))}
+    </section>
   );
 }
 
@@ -427,7 +621,16 @@ function StatBox({ label, children }: { label: string; children: ReactNode }) {
   return <div className="stat-box"><span>{label}</span>{children}</div>;
 }
 
-function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; edit: Edit; roll: Roll; rest: (t: "short" | "long") => void }) {
+function CombatPanel({ ch, d, edit, roll, rest, built, tiles }: {
+  ch: Character;
+  d: Derived;
+  edit: Edit;
+  roll: Roll;
+  rest: (t: "short" | "long") => void;
+  /** With the builder: AC, speed, max HP and Hit Dice are worked out, shown in `tiles`. */
+  built?: Built;
+  tiles?: ReactNode;
+}) {
   const toast = useToast();
   const [amount, setAmount] = useState("");
   const changeHp = (sign: number) => {
@@ -484,7 +687,7 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
           <button type="button" className="btn small" onClick={() => rest("long")}>Long rest</button>
         </div>
       </div>
-      <div className="stat-boxes">
+      {tiles ?? <div className="stat-boxes">
         <StatBox label="Armor Class"><NumInput className="num-input big-num" aria-label="Armor class" value={ch.ac} onChange={(v) => edit((x) => void (x.ac = v))} /></StatBox>
         <StatBox label="Initiative">
           <button type="button" className="big-num link" onClick={() => roll(d20(d.initiative), "Initiative")}>{signed(d.initiative)}</button>
@@ -495,11 +698,13 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
           {d.speed !== Number(ch.speed) && <span className="small muted">{d.speed} ft. while exhausted</span>}
         </StatBox>
         <StatBox label="Passive Perception"><strong className="big-num">{d.passive.perception}</strong></StatBox>
-      </div>
+      </div>}
       <div className="hp-block">
         <div className="row gap wrap">
           <label className="field"><span>Current HP</span><NumInput className="num-input big-num" aria-label="Current HP" value={ch.hp.current} onChange={(v) => edit((x) => void (x.hp.current = v))} /></label>
-          <label className="field"><span>Max HP</span><NumInput value={ch.hp.max} onChange={(v) => edit((x) => void (x.hp.max = v))} /></label>
+          {built
+            ? <div className="field" title={built.hp.how}><span>Max HP</span><strong className="readout">{ch.hp.max}</strong></div>
+            : <label className="field"><span>Max HP</span><NumInput value={ch.hp.max} onChange={(v) => edit((x) => void (x.hp.max = v))} /></label>}
           <label className="field"><span>Temp HP</span><NumInput aria-label="Temporary HP" value={ch.hp.temp} onChange={(v) => edit((x) => void (x.hp.temp = v))} /></label>
           <div className="field">
             <span>Damage / heal</span>
@@ -511,7 +716,9 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
           </div>
         </div>
         <div className="row gap wrap">
-          <label className="field"><span>Hit dice</span><TextInput placeholder="e.g. 5d10" aria-label="Hit dice total" value={ch.hit_dice.total} onChange={(v) => edit((x) => void (x.hit_dice.total = v))} /></label>
+          {built
+            ? <div className="field"><span>Hit dice</span><strong className="readout">{ch.hit_dice.total}</strong></div>
+            : <label className="field"><span>Hit dice</span><TextInput placeholder="e.g. 5d10" aria-label="Hit dice total" value={ch.hit_dice.total} onChange={(v) => edit((x) => void (x.hit_dice.total = v))} /></label>}
           <label className="field"><span>Remaining</span><NumInput min={0} aria-label="Hit dice remaining" value={ch.hit_dice.remaining} onChange={(v) => edit((x) => void (x.hit_dice.remaining = v))} /></label>
           <div className="field"><span>Spend</span><button type="button" className="btn small" onClick={spendHitDie}>🎲 Roll hit die</button></div>
           <label className="field">
@@ -534,7 +741,7 @@ function CombatPanel({ ch, d, edit, roll, rest }: { ch: Character; d: Derived; e
   );
 }
 
-function AttacksPanel({ ch, edit, roll }: { ch: Character; edit: Edit; roll: Roll }) {
+function AttacksPanel({ ch, edit, roll, title = "Attacks & Actions" }: { ch: Character; edit: Edit; roll: Roll; title?: string }) {
   const toast = useToast();
   const rollDamage = (a: Character["attacks"][number], crit: boolean) => {
     const m = String(a.damage).match(/^[\d\sd+\-*()]+/i);
@@ -545,7 +752,7 @@ function AttacksPanel({ ch, edit, roll }: { ch: Character; edit: Edit; roll: Rol
   };
   return (
     <ListSection
-      title="Attacks & Actions"
+      title={title}
       items={ch.attacks}
       onChange={(v) => edit((x) => void (x.attacks = v))}
       blank={() => ({ name: "", bonus: "+0", damage: "1d6", notes: "" })}
@@ -567,7 +774,7 @@ function AttacksPanel({ ch, edit, roll }: { ch: Character; edit: Edit; roll: Rol
   );
 }
 
-function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: Edit; roll: Roll }) {
+function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d: Derived; edit: Edit; roll: Roll; built?: Built; b?: Build }) {
   const toast = useToast();
   const showStatblock = useStatblock();
   const [picking, setPicking] = useState(false);
@@ -593,15 +800,20 @@ function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: E
     <section className="panel">
       <h2>Spellcasting</h2>
       <div className="row gap wrap">
-        <Field label="Spellcasting ability">
-          <Select value={sc.ability} options={[["", "— none —"], ...ABILITIES.map((a): Option => [a, ABILITY_NAMES[a]])]} onChange={(v) => edit((x) => void (x.spellcasting.ability = v))} />
-        </Field>
+        {built ? (
+          <Field label="Spellcasting ability"><span className="readout">{built.spell ? ABILITY_NAMES[built.spell.ability] : "—"}</span></Field>
+        ) : (
+          <Field label="Spellcasting ability">
+            <Select value={sc.ability} options={[["", "— none —"], ...ABILITIES.map((a): Option => [a, ABILITY_NAMES[a]])]} onChange={(v) => edit((x) => void (x.spellcasting.ability = v))} />
+          </Field>
+        )}
         <StatBox label="Save DC"><strong className="big-num">{d.spell ? d.spell.dc : "—"}</strong></StatBox>
         <StatBox label="Spell attack">
           <button type="button" className="link big-num" onClick={() => d.spell && roll(d20(d.spell.atk), "Spell attack")}>{d.spell ? signed(d.spell.atk) : "—"}</button>
         </StatBox>
-        <button type="button" className="btn small" onClick={autoFill}>Auto-fill slots</button>
+        {!built && <button type="button" className="btn small" onClick={autoFill}>Auto-fill slots</button>}
       </div>
+      {built && b && <BuilderSpellNotes b={b} s={built} ch={ch} />}
       <h3>Spell slots</h3>
       <div className="slots">
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => {
@@ -609,8 +821,10 @@ function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: E
           return (
             <div key={lvl} className={`slot ${s.max ? "" : "empty-slot"}`}>
               <span className="slot-level">L{lvl}</span>
-              <NumInput className="num-input tiny" min={0} max={9} aria-label={`Level ${lvl} slots`} value={s.max}
-                onChange={(v) => setSlot(lvl, { max: Math.max(0, v), used: Math.min(s.used, Math.max(0, v)) })} />
+              {built ? <strong className="slot-max">{s.max}</strong> : (
+                <NumInput className="num-input tiny" min={0} max={9} aria-label={`Level ${lvl} slots`} value={s.max}
+                  onChange={(v) => setSlot(lvl, { max: Math.max(0, v), used: Math.min(s.used, Math.max(0, v)) })} />
+              )}
               <div className="pips">
                 {Array.from({ length: s.max }, (_, i) => (
                   <button type="button" key={i} className={`pip ${i < s.used ? "used" : ""}`} aria-label={`Level ${lvl} slot ${i + 1}${i < s.used ? " (used)" : ""}`}
@@ -639,18 +853,31 @@ function SpellsPanel({ ch, d, edit, roll }: { ch: Character; d: Derived; edit: E
         ]}
       />
       {picking && (
-        <SrdPicker category="spells" className={ch.classes[0]?.name} onClose={() => setPicking(false)} onPick={(e) =>
+        <SrdPicker category="spells" className={b?.class ?? ch.classes[0]?.name} onClose={() => setPicking(false)} onPick={(e) =>
           edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: false, notes: e.summary, srd_id: e.id }))} />
       )}
     </section>
   );
 }
 
-function InventoryPanel({ ch, edit }: { ch: Character; edit: Edit }) {
+function InventoryPanel({ ch, edit, rules, capacity, onStartingGear }: {
+  ch: Character;
+  edit: Edit;
+  /** With the builder: item weights fill in from the rules data, and the starting gear button shows. */
+  rules?: Rules;
+  capacity?: number;
+  onStartingGear?: () => void;
+}) {
   const [picking, setPicking] = useState<"" | "equipment" | "magic-items">("");
   const weight = ch.inventory.reduce((t, i) => t + (Number(i.weight) || 0) * (Number(i.qty) || 0), 0);
   const coins = Object.values(ch.currency).reduce((a, b) => a + (Number(b) || 0), 0) / 50;
-  const carrying = `Carrying ${Math.round((weight + coins) * 10) / 10} / ${(Number(ch.abilities.str) || 10) * 15} lb.`;
+  const max = capacity ?? (Number(ch.abilities.str) || 10) * 15;
+  const total = Math.round((weight + coins) * 10) / 10;
+  const carrying = `Carrying ${total} / ${max} lb.${total > max ? " Over capacity: Speed drops to 5 ft." : ""}`;
+  const named = (name: string) => {
+    const w = rules ? itemWeight(rules, name) : null;
+    return w === null ? { name } : { name, weight: w };
+  };
   return (
     <>
       <ListSection
@@ -661,19 +888,21 @@ function InventoryPanel({ ch, edit }: { ch: Character; edit: Edit }) {
         head={["Item", "Qty", "Wt (lb)", "Equipped", "Notes", ""]}
         extra={
           <>
-            <span className="muted small">{carrying}</span>
+            <span className={`small ${total > max ? "bad-text" : "muted"}`}>{carrying}</span>
+            {onStartingGear && <button type="button" className="btn small" onClick={onStartingGear}>Fill starting gear</button>}
             <button type="button" className="btn small" onClick={() => setPicking("equipment")}>+ Equipment</button>
             <button type="button" className="btn small" onClick={() => setPicking("magic-items")}>+ Magic item</button>
           </>
         }
         row={(it, set) => [
-          <TextInput value={it.name} onChange={(v) => set({ name: v })} aria-label="Item" />,
+          <TextInput list={rules ? "dl-items" : undefined} value={it.name} onChange={(v) => set(named(v))} aria-label="Item" />,
           <NumInput className="num-input tiny" min={0} aria-label="Quantity" value={it.qty} onChange={(v) => set({ qty: v })} />,
           <NumInput className="num-input tiny" min={0} step="0.1" aria-label="Weight" value={it.weight} onChange={(v) => set({ weight: v })} />,
           <Checkbox aria-label="Equipped" checked={it.equipped} onChange={(v) => set({ equipped: v })} />,
           <TextInput value={it.notes} onChange={(v) => set({ notes: v })} aria-label="Notes" />,
         ]}
       />
+      {rules && <datalist id="dl-items">{[...rules.items.map((i) => i.name), ...rules.weapons.map((w) => w.name)].map((n) => <option key={n} value={n} />)}</datalist>}
       {picking && (
         <SrdPicker category={picking} onClose={() => setPicking("")} onPick={(e) =>
           edit((x) => void x.inventory.push({ name: e.name, qty: 1, weight: picking === "equipment" ? e.data.weight || 0 : 0, equipped: false, notes: e.summary || "" }))} />

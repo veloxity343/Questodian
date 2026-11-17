@@ -6,6 +6,7 @@ import { DmScreen } from "./dm/screen";
 import { usePref } from "./lib/hooks";
 import { CampaignList } from "./views/campaigns";
 import { CharacterList, CharacterSheet } from "./views/characters";
+import { RulesData } from "./views/rules-data";
 import { DataPage } from "./views/data";
 import { HandbookEditor, HandbookList } from "./views/handbook";
 import { Reference } from "./views/reference";
@@ -116,6 +117,8 @@ export default function App() {
           <Route path="/sessions/*" element={<Navigate to="/" replace />} />
           <Route path="/characters" element={<CharacterList />} />
           <Route path="/characters/:id" element={<CharacterSheet />} />
+          <Route path="/rules-data" element={<RulesData />} />
+          <Route path="/rules-data/:kind" element={<RulesData />} />
           <Route path="/library/*" element={<Reference />} />
           <Route path="/reference/*" element={<ReferenceRedirect />} />
           <Route path="/handbook" element={<HandbookList />} />
