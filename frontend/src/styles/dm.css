@@ -307,3 +307,7 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 .palette li button.on { background: var(--accent-soft); }
 .palette li button .muted { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-foot { padding: 6px 14px; border-top: 1px solid var(--border); }
+.section-toggle { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; font: inherit; }
+.section-toggle:disabled { cursor: default; }
+.section-toggle:not(:disabled):hover { color: var(--accent); }
+.doc-section.folded { padding-bottom: 0; }

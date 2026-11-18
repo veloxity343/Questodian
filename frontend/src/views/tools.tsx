@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { Board } from "../components/board";
 import { NumInput, Select } from "../components/ui";
 import { useApp } from "../context/app";
 import { HistoryItem, useDice } from "../context/dice";
@@ -12,14 +13,18 @@ export function Tools() {
   return (
     <>
       <header className="page-head"><h1>Dice &amp; Calculator</h1></header>
-      <div className="grid-2">
-        <div><Roller /><Macros /></div>
-        <div><Calculator /><History /></div>
-      </div>
-      <h2 className="section-title">Quick calculators</h2>
-      <div className="cards calc-cards">
-        <AbilityCalc /><PointBuy /><EncounterXp /><XpLevel /><CoinCalc /><SpellDc />
-      </div>
+      <Board id="tools" items={[
+        { id: "roller", title: "Dice", node: <Roller /> },
+        { id: "calculator", title: "Calculator", node: <Calculator /> },
+        { id: "macros", title: "Macros", node: <Macros /> },
+        { id: "history", title: "Roll history", node: <History /> },
+        { id: "ability", title: "Ability modifier", width: "third", node: <AbilityCalc /> },
+        { id: "point-buy", title: "Point buy", width: "third", node: <PointBuy /> },
+        { id: "encounter-xp", title: "Encounter XP", width: "third", node: <EncounterXp /> },
+        { id: "xp-level", title: "XP to level", width: "third", node: <XpLevel /> },
+        { id: "coins", title: "Coin splitter", width: "third", node: <CoinCalc /> },
+        { id: "spell-dc", title: "Spell DC", width: "third", node: <SpellDc /> },
+      ]} />
     </>
   );
 }

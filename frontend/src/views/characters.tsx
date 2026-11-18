@@ -13,6 +13,7 @@ import { derive, type Derived } from "../lib/derive";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, download, downloadJson, pickFiles, signed, slug, titleCase } from "../lib/util";
 import { targetEncounter } from "../lib/encounters";
+import { Board } from "../components/board";
 import { apply, buildOf, extraSpell, highestSpellLevel, isBuilt, itemWeight, madeBy, parts, resetText, spellCounts, startBuild, startNotes, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
 import {
   BuilderAbilities, BuilderBanner, BuilderGuard, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderSpellNotes, BuilderTiles, BuilderWarnings,
@@ -284,11 +285,13 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
       ) : missingClass ? (
         <p className="panel warnings">The builder is off for this sheet: its class, {missingClass}, isn't in the rules data. Add it back on the <Link to="/rules-data">Rules data</Link> page (or bring it back if it was hidden).</p>
       ) : rules && <BuilderBanner onStart={startBuilder} again={isBuilt(ch)} />}
-      <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} />
-      <div className="sheet-grid">
-        <div className="sheet-col">
-          <AbilitiesPanel ch={ch} d={d} edit={edit} roll={roll} />
-          <SkillsPanel ch={ch} d={d} edit={edit} roll={roll} />
+      <Board id="sheet" items={[
+        { id: "who", title: "Who you are", width: "full", node: <SheetHeader ch={ch} d={d} edit={edit} campaigns={campaigns} /> },
+        { id: "abilities", title: "Abilities", node: <AbilitiesPanel ch={ch} d={d} edit={edit} roll={roll} /> },
+        { id: "combat", title: "Combat", node: <CombatPanel ch={ch} d={d} edit={edit} roll={roll} rest={rest} /> },
+        { id: "skills", title: "Skills", node: <SkillsPanel ch={ch} d={d} edit={edit} roll={roll} /> },
+        { id: "attacks", title: "Attacks", node: <AttacksPanel ch={ch} edit={edit} roll={roll} /> },
+        { id: "proficiencies", title: "Proficiencies", node: (
           <section className="panel">
             <h2>Proficiencies &amp; Languages</h2>
             <label className="check">
@@ -298,10 +301,8 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
               <Field key={k} label={titleCase(k)}><TextInput value={ch.proficiencies[k]} onChange={(v) => edit((x) => void (x.proficiencies[k] = v))} /></Field>
             ))}
           </section>
-        </div>
-        <div className="sheet-col">
-          <CombatPanel ch={ch} d={d} edit={edit} roll={roll} rest={rest} />
-          <AttacksPanel ch={ch} edit={edit} roll={roll} />
+        ) },
+        { id: "resources", title: "Class resources", node: (
           <ListSection<Resource>
             title="Class resources"
             items={ch.resources}
@@ -315,47 +316,13 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
               <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
             ]}
           />
-          <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} />
-        </div>
-      </div>
-      <div className="grid-2">
-        <div>
-          <InventoryPanel ch={ch} edit={edit} />
-          <section className="panel">
-            <h2>Coins</h2>
-            <div className="row gap wrap currency">
-              {(["cp", "sp", "ep", "gp", "pp"] as const).map((k) => (
-                <label key={k} className="field coin"><span>{k.toUpperCase()}</span><NumInput min={0} value={ch.currency[k]} onChange={(v) => edit((x) => void (x.currency[k] = v))} /></label>
-              ))}
-            </div>
-          </section>
-        </div>
-        <div>
-          <ListSection
-            title="Features & Traits"
-            items={ch.features}
-            onChange={(v) => edit((x) => void (x.features = v))}
-            blank={() => ({ name: "", source: "", description: "" })}
-            head={["Name", "Source", "Description", ""]}
-            row={(f, set) => [
-              <TextInput value={f.name} onChange={(v) => set({ name: v })} aria-label="Feature" />,
-              <TextInput value={f.source} onChange={(v) => set({ source: v })} placeholder="Class, race, feat…" aria-label="Source" />,
-              <TextArea rows={2} value={f.description} onChange={(v) => set({ description: v })} aria-label="Description" />,
-            ]}
-          />
-        </div>
-      </div>
-      <section className="panel">
-        <h2>Personality &amp; Story</h2>
-        <div className="form-grid">
-          {(["traits", "ideals", "bonds", "flaws"] as const).map((k) => (
-            <Field key={k} label={titleCase(k)}><TextArea rows={2} value={ch.personality[k]} onChange={(v) => edit((x) => void (x.personality[k] = v))} /></Field>
-          ))}
-        </div>
-        {(["appearance", "backstory", "notes"] as const).map((k) => (
-          <Field key={k} label={titleCase(k)}><TextArea rows={k === "appearance" ? 2 : 5} value={ch[k]} onChange={(v) => edit((x) => void (x[k] = v))} /></Field>
-        ))}
-      </section>
+        ) },
+        { id: "spells", title: "Spellcasting", node: <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} /> },
+        { id: "inventory", title: "Inventory", node: <InventoryPanel ch={ch} edit={edit} /> },
+        { id: "coins", title: "Coins", node: <CoinsPanel ch={ch} edit={edit} /> },
+        { id: "features", title: "Features & Traits", node: <FeaturesPanel ch={ch} edit={edit} /> },
+        { id: "story", title: "Personality & Story", width: "full", node: <PersonalityPanel ch={ch} edit={edit} /> },
+      ]} />
       </>
       )}
       {dialog === "level" && b && built && rules && (
@@ -387,62 +354,53 @@ function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, roll
   const otherAttacks = ch.attacks.filter((a) => !builtAttacks.has(a.name));
   const otherResources = ch.resources.filter((r) => !builtResources.has(r.name));
   return (
-    <>
-      <BuilderHeader ch={ch} b={b} s={s} rules={rules} edit={edit} editBuild={editBuild} campaigns={campaigns} onLevelUp={() => openDialog("level")} />
-      <BuilderWarnings s={s} />
-      <div className="sheet-grid">
-        <div className="sheet-col">
-          <BuilderAbilities b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
-          <BuilderSkills b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
-          <section className="panel">
-            <h2>Proficiencies &amp; Languages</h2>
-            <p className="small"><strong>Saving throws:</strong> {s.saves.map((a) => ABILITY_NAMES[a]).join(", ") || "—"}</p>
-            {(["armor", "weapons", "tools"] as const).map((k) => <p key={k} className="small"><strong>{titleCase(k)}:</strong> {ch.proficiencies[k] || "—"}</p>)}
-            <Field label="Languages"><TextInput value={ch.proficiencies.languages} onChange={(v) => edit((x) => void (x.proficiencies.languages = v))} /></Field>
-          </section>
-        </div>
-        <div className="sheet-col">
-          <CombatPanel ch={ch} d={d} edit={edit} roll={roll} rest={rest} built={s} tiles={<BuilderTiles s={s} initiative={d.initiative} roll={rollPlain} />} />
-          <BuilderWeapons b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} />
-          <AttacksPanel ch={{ ...ch, attacks: otherAttacks }} title="Other attacks & actions"
-            edit={(fn) => edit((x) => {
-              const draft = { ...x, attacks: x.attacks.filter((a) => !builtAttacks.has(a.name)) };
-              fn(draft);
-              x.attacks = [...x.attacks.filter((a) => builtAttacks.has(a.name)), ...draft.attacks];
-            })} roll={roll} />
-          <BuilderResources ch={ch} s={s} edit={edit} />
-          {(
-            <ListSection<Resource>
-              title="Other resources (magic items, feats…)"
-              items={otherResources}
-              onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))}
-              blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
-              head={["Name", "Current", "Max", "Resets on", ""]}
-              row={(r, set) => [
-                <TextInput value={r.name} onChange={(v) => set({ name: v })} aria-label="Resource" />,
-                <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
-                <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
-                <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
-              ]}
-            />
-          )}
-          {/* The spell attack shown already has exhaustion taken off. */}
-          <SpellsPanel ch={ch} d={d} edit={edit} roll={rollPlain} built={s} b={b} />
-        </div>
-      </div>
-      <div className="grid-2">
-        <div>
-          <InventoryPanel ch={ch} edit={edit} rules={rules} capacity={s.carry.value} onStartingGear={() => openDialog("gear")} />
-          <CoinsPanel ch={ch} edit={edit} />
-        </div>
-        <div>
-          <FeaturesPanel ch={ch} edit={edit} />
-        </div>
-      </div>
-      <PersonalityPanel ch={ch} edit={edit} />
-      <LevelLog b={b} />
-      <BuilderHow b={b} s={s} rules={rules} />
-    </>
+    <Board id="built-sheet" items={[
+      { id: "who", title: "Who you are", width: "full", node: <BuilderHeader ch={ch} b={b} s={s} rules={rules} edit={edit} editBuild={editBuild} campaigns={campaigns} onLevelUp={() => openDialog("level")} /> },
+      { id: "warnings", title: "Warnings", width: "full", node: <BuilderWarnings s={s} /> },
+      { id: "abilities", title: "Ability scores", node: <BuilderAbilities b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} /> },
+      { id: "combat", title: "Combat", node: <CombatPanel ch={ch} d={d} edit={edit} roll={roll} rest={rest} built={s} tiles={<BuilderTiles s={s} initiative={d.initiative} roll={rollPlain} />} /> },
+      { id: "skills", title: "Skills", node: <BuilderSkills b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} /> },
+      { id: "weapons", title: "Weapons and armor", node: <BuilderWeapons b={b} s={s} rules={rules} editBuild={editBuild} roll={roll} /> },
+      { id: "proficiencies", title: "Proficiencies", node: (
+        <section className="panel">
+          <h2>Proficiencies &amp; Languages</h2>
+          <p className="small"><strong>Saving throws:</strong> {s.saves.map((a) => ABILITY_NAMES[a]).join(", ") || "—"}</p>
+          {(["armor", "weapons", "tools"] as const).map((k) => <p key={k} className="small"><strong>{titleCase(k)}:</strong> {ch.proficiencies[k] || "—"}</p>)}
+          <Field label="Languages"><TextInput value={ch.proficiencies.languages} onChange={(v) => edit((x) => void (x.proficiencies.languages = v))} /></Field>
+        </section>
+      ) },
+      { id: "resources", title: "Class resources", node: <BuilderResources ch={ch} s={s} edit={edit} /> },
+      { id: "spells", title: "Spellcasting", node: <SpellsPanel ch={ch} d={d} edit={edit} roll={rollPlain} built={s} b={b} /> },
+      { id: "other-attacks", title: "Other attacks", node: (
+        <AttacksPanel ch={{ ...ch, attacks: otherAttacks }} title="Other attacks & actions"
+          edit={(fn) => edit((x) => {
+            const draft = { ...x, attacks: x.attacks.filter((a) => !builtAttacks.has(a.name)) };
+            fn(draft);
+            x.attacks = [...x.attacks.filter((a) => builtAttacks.has(a.name)), ...draft.attacks];
+          })} roll={roll} />
+      ) },
+      { id: "other-resources", title: "Other resources", node: (
+        <ListSection<Resource>
+          title="Other resources (magic items, feats…)"
+          items={otherResources}
+          onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))}
+          blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
+          head={["Name", "Current", "Max", "Resets on", ""]}
+          row={(r, set) => [
+            <TextInput value={r.name} onChange={(v) => set({ name: v })} aria-label="Resource" />,
+            <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
+            <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
+            <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
+          ]}
+        />
+      ) },
+      { id: "inventory", title: "Inventory", node: <InventoryPanel ch={ch} edit={edit} rules={rules} capacity={s.carry.value} onStartingGear={() => openDialog("gear")} /> },
+      { id: "coins", title: "Coins", node: <CoinsPanel ch={ch} edit={edit} /> },
+      { id: "features", title: "Features & Traits", node: <FeaturesPanel ch={ch} edit={edit} /> },
+      { id: "story", title: "Personality & Story", width: "full", node: <PersonalityPanel ch={ch} edit={edit} /> },
+      { id: "level-log", title: "Level log", width: "full", node: <LevelLog b={b} /> },
+      { id: "how", title: "How it's worked out", width: "full", node: <BuilderHow b={b} s={s} rules={rules} /> },
+    ]} />
   );
 }
 

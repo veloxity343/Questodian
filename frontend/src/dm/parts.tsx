@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, type ReactNode, type TextareaHTMLAttributes 
 import { api } from "../api";
 import { Markdown, SaveStatus } from "../components/ui";
 import { useDialogs, useToast } from "../context/ui";
-import { useDraft } from "../lib/hooks";
+import { useDraft, usePref } from "../lib/hooks";
 import type { KindMap } from "../types";
 import { KIND_LABEL, useDM, type DocKind, type ListKind } from "./store";
 
@@ -143,11 +143,19 @@ export function Section({ label, value, editing, onChange, rows = 5, placeholder
   variant?: "read-aloud" | "secret";
   rollContext?: string;
 }) {
+  // Folded sections stay folded on every document with that label (fold "DM notes" once).
+  const [folded, setFolded] = usePref(`section.folded.${label || "body"}`, false);
   if (!editing && !value.trim()) return null;
+  const open = editing || !folded;
   return (
-    <section className={`doc-section ${variant ?? ""}`}>
-      <div className="eyebrow">{label}</div>
-      {editing ? (
+    <section className={`doc-section ${variant ?? ""} ${open ? "" : "folded"}`}>
+      {label && (
+        <button type="button" className="eyebrow section-toggle" aria-expanded={open} disabled={editing}
+          title={editing ? undefined : open ? "Fold this section" : "Unfold"} onClick={() => setFolded(!folded)}>
+          {editing ? "" : open ? "▾ " : "▸ "}{label}
+        </button>
+      )}
+      {!open ? null : editing ? (
         <MdField value={value} onChange={onChange} rows={rows} placeholder={placeholder} aria-label={label} />
       ) : (
         <Markdown source={value} rollContext={rollContext} />

@@ -1,5 +1,6 @@
 // Settings: update checks (desktop app only) and the theme.
 
+import { Board } from "../components/board";
 import { Checkbox } from "../components/ui";
 import { useUpdates } from "../context/updates";
 import { usePref } from "../lib/hooks";
@@ -9,8 +10,10 @@ export function Settings() {
   return (
     <>
       <header className="page-head"><h1>Settings</h1></header>
-      <UpdatesPanel />
-      <ThemePanel />
+      <Board id="settings" items={[
+        { id: "updates", title: "Updates", node: <UpdatesPanel /> },
+        { id: "appearance", title: "Appearance", node: <ThemePanel /> },
+      ]} />
     </>
   );
 }

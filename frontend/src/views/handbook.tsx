@@ -1,6 +1,7 @@
 import { useDeferredValue, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
+import { Board } from "../components/board";
 import { EmptyState, Field, LoadError, Loading, Markdown, SaveStatus, Select, TextArea, TextInput, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { Modal, useDialogs, useToast } from "../context/ui";
@@ -81,9 +82,9 @@ export function HandbookList() {
       <p className="muted">Your own rules, lore and notes — searchable alongside the SRD in Rules &amp; SRD.</p>
       <input type="search" className="wide page-search" placeholder="Search your handbook…" aria-label="Search handbook" value={q} onChange={(e) => setQ(e.target.value)} />
       {list.length ? (
-        <div className="cards">
-          {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (
-            <section className="panel" key={cat}>
+        <Board id="handbook" items={Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => ({
+          id: `category:${cat}`, title: cat, width: "third", node: (
+            <section className="panel">
               <h2>{cat}<span className="muted small"> {items.length}</span></h2>
               <ul className="list">
                 {items.map((e) => (
@@ -97,8 +98,8 @@ export function HandbookList() {
                 ))}
               </ul>
             </section>
-          ))}
-        </div>
+          ),
+        }))} />
       ) : (
         <EmptyState
           title={all.length ? "No matches" : "Your handbook is empty"}
@@ -154,8 +155,10 @@ function Editor({ initial, campaigns }: { initial: HandbookEntry; campaigns: Opt
           <button type="button" className="btn danger" onClick={remove}>Delete</button>
         </div>
       </header>
-      <div className="grid-2 editor-grid">
+      <Board id="handbook-entry" items={[
+        { id: "editor", title: "Editor", node: (
         <section className="panel">
+          <h2>Edit</h2>
           <Field label="Title"><TextInput className="title-input" value={e.title} onChange={set("title")} /></Field>
           <div className="form-grid">
             <Field label="Category"><TextInput list="hb-cats" value={e.category} onChange={set("category")} /></Field>
@@ -170,11 +173,14 @@ function Editor({ initial, campaigns }: { initial: HandbookEntry; campaigns: Opt
           <datalist id="hb-cats">{cats.map((c) => <option key={c} value={c} />)}</datalist>
           <Field label="Body (Markdown — dice like 2d6 become clickable)"><TextArea rows={24} className="mono" value={e.body} onChange={set("body")} /></Field>
         </section>
+        ) },
+        { id: "preview", title: "Preview", node: (
         <div className="panel preview">
           <h2>{preview.title}</h2>
           <Markdown source={preview.body || "*Empty*"} rollContext={preview.title} />
         </div>
-      </div>
+        ) },
+      ]} />
     </>
   );
 }

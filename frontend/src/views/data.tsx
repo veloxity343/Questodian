@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { Board } from "../components/board";
 import { LoadError, Loading, Select, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { useToast } from "../context/ui";
@@ -57,7 +58,8 @@ export function DataPage() {
   return (
     <>
       <header className="page-head"><h1>Import / Export</h1></header>
-      <div className="grid-2">
+      <Board id="data" items={[
+        { id: "export", title: "Export", node: (
         <section className="panel">
           <h2>Export</h2>
           <p>Everything is plain JSON you can back up, version, or hand to another DM.</p>
@@ -77,6 +79,8 @@ export function DataPage() {
           <ul className="small">{counts.map(([k, n]) => <li key={k}>{n} {k}</li>)}</ul>
           <p className="muted small">Database: <code>{meta?.database || "?"}</code></p>
         </section>
+        ) },
+        { id: "import", title: "Import", node: (
         <section className="panel">
           <h2>Import</h2>
           <p>Accepts Questodian backups, campaign exports, single-record exports (.json), and Markdown files (.md) which become handbook entries.</p>
@@ -94,13 +98,16 @@ export function DataPage() {
             </div>
           )}
         </section>
-      </div>
-      <section className="panel">
-        <h2>About the rules content</h2>
-        <p className="small">{meta?.srd?.attribution}</p>
-        <p className="muted small">{meta?.srd?.source}</p>
-        <p className="muted small">Questodian {meta?.version}</p>
-      </section>
+        ) },
+        { id: "about", title: "About the rules content", width: "full", node: (
+        <section className="panel">
+          <h2>About the rules content</h2>
+          <p className="small">{meta?.srd?.attribution}</p>
+          <p className="muted small">{meta?.srd?.source}</p>
+          <p className="muted small">Questodian {meta?.version}</p>
+        </section>
+        ) },
+      ]} />
     </>
   );
 }
