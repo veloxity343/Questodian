@@ -76,6 +76,8 @@ export const api = {
     if (!res.ok) throw new Error(errorMessage(data, res));
     return data as Handout;
   },
+  /** Take a handout's image away; the server deletes the file. */
+  removeHandoutImage: (id: string) => request<Handout>("DELETE", `handouts/${id}/file`),
   projection: () => request<Projection>("GET", "projection"),
   project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
   /** Move tokens on a map handout (the players' screen): positions only, the rest of the map is left alone. */

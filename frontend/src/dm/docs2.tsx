@@ -295,6 +295,7 @@ interface ViewState { id: string; zoom: number; x: number; y: number }
 export function HandoutDoc({ initial }: { initial: Handout }) {
   const dm = useDM();
   const toast = useToast();
+  const { confirm } = useDialogs();
   const { doc, edit, setDoc, discard, status } = useRecordDraft("handouts", initial);
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<ViewState>({ id: initial.id, zoom: 1, x: 0, y: 0 });
@@ -324,6 +325,21 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
       dm.upsert("handouts", saved);
     } catch (e) {
       toast((e as Error).message, "error");
+    }
+  };
+  // A handout is an image or a map; switching removes the other, after asking.
+  const drawInstead = async () => {
+    if (!(await confirm("This removes the image from this handout. Draw a map instead?", { label: "Remove the image" }))) return;
+    try {
+      await api.removeHandoutImage(doc.id);
+      edit((d) => { d.filename = ""; d.mime = ""; d.map = blankMap() as unknown as Record<string, unknown>; });
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const imageInstead = async () => {
+    if (await confirm("This removes the drawn map from this handout. Use an image instead?", { label: "Remove the map" })) {
+      edit((d) => void (d.map = {}));
     }
   };
   const folders = [...new Set(dm.lists.handouts.map((h) => h.folder).filter(Boolean))];
@@ -359,8 +375,16 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
           <strong>Add an image</strong><span className="muted small">Drop a file here, paste one, or click to choose (PNG, JPG, WebP, GIF, SVG).</span>
         </label>
       )}
-      {doc.filename && editing && !drawn && (
-        <label className="btn small ghost upload-btn"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
+      {editing && (doc.filename || drawn) && (
+        <div className="row gap upload-btn">
+          {doc.filename && !drawn && (
+            <>
+              <label className="btn small ghost"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
+              <button type="button" className="btn small ghost" onClick={drawInstead}>Draw a map instead…</button>
+            </>
+          )}
+          {drawn && <button type="button" className="btn small ghost" onClick={imageInstead}>Use an image instead…</button>}
+        </div>
       )}
       <Section label="Notes and key" value={doc.body} editing={editing} onChange={set("body")} rows={8}
         placeholder="Map key, what the players see, secrets…" />

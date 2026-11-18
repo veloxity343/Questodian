@@ -72,7 +72,7 @@ pub fn router(app: Shared) -> Router {
         .route("/sessions/{id}/award", post(award))
         .route("/sessions/{id}/log", post(add_log))
         .route("/characters/{id}/rest", post(rest))
-        .route("/handouts/{id}/file", get(handout_file).put(upload_handout))
+        .route("/handouts/{id}/file", get(handout_file).put(upload_handout).delete(remove_handout_image))
         .route("/handouts/{id}/tokens", post(move_tokens))
         .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
         .route("/export", get(export_bundle))
@@ -547,6 +547,18 @@ async fn handout_file(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String
     let mime = mime.unwrap_or_else(|| mime_guess::from_path(&path).first_or_octet_stream().essence_str().to_string());
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache".to_string())], Body::from(bytes))
         .into_response())
+}
+
+/// Take a handout's image away (to draw a map instead): the record forgets it and the file goes.
+async fn remove_handout_image(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = repo.get(Kind::Handouts, &id).await?;
+    let saved = repo.update(Kind::Handouts, &id, json!({"filename": "", "mime": ""})).await?;
+    repo.commit().await?;
+    if let Some(path) = handout_path(&app.db.files_dir(), doc["filename"].as_str().unwrap_or("")) {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    Ok(Json(saved))
 }
 
 /// Deleting a handout also removes its image file.
