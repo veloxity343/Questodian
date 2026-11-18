@@ -174,7 +174,7 @@ function MapStage({ map, view, onView, players = false, children, tool }: {
   // The middle and right buttons always pan; the left one does whatever the tool does, or pans.
   const panning = (e: ReactPointerEvent) => !tool || e.button !== 0 || !tool.down(toMap(e), e);
   return (
-    <div className="map-stage" onWheel={pan.onWheel} onContextMenu={(e) => e.preventDefault()}>
+    <div ref={pan.wheelRef} className="map-stage" onContextMenu={(e) => e.preventDefault()}>
       <MapSvg map={map} players={players} svgRef={svg}
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
         onPointerDown={(e) => {

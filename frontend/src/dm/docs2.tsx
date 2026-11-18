@@ -359,6 +359,14 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>
+            {drawn ? (
+              <button type="button" className="btn small ghost" onClick={imageInstead}>Use an image instead…</button>
+            ) : (
+              <>
+                <label className="btn small ghost upload-btn"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
+                <button type="button" className="btn small ghost" onClick={drawInstead}>Draw a map instead…</button>
+              </>
+            )}
           </>
         ) : undefined}
       />
@@ -374,17 +382,6 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
           <input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />
           <strong>Add an image</strong><span className="muted small">Drop a file here, paste one, or click to choose (PNG, JPG, WebP, GIF, SVG).</span>
         </label>
-      )}
-      {editing && (doc.filename || drawn) && (
-        <div className="row gap upload-btn">
-          {doc.filename && !drawn && (
-            <>
-              <label className="btn small ghost"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
-              <button type="button" className="btn small ghost" onClick={drawInstead}>Draw a map instead…</button>
-            </>
-          )}
-          {drawn && <button type="button" className="btn small ghost" onClick={imageInstead}>Use an image instead…</button>}
-        </div>
       )}
       <Section label="Notes and key" value={doc.body} editing={editing} onChange={set("body")} rows={8}
         placeholder="Map key, what the players see, secrets…" />
@@ -405,7 +402,7 @@ function PanZoom({ src, alt, view, onView, interactive = true }: {
 }) {
   const pan = usePanZoom(view, onView, [0.2, 8]);
   return (
-    <div className={`panzoom ${interactive ? "interactive" : ""}`} onWheel={interactive ? pan.onWheel : undefined}
+    <div ref={interactive ? pan.wheelRef : undefined} className={`panzoom ${interactive ? "interactive" : ""}`}
       onPointerDown={interactive ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); pan.start(e); } : undefined}
       onPointerMove={interactive ? pan.move : undefined} onPointerUp={pan.end} onPointerCancel={pan.end}>
       <img src={src} alt={alt} draggable={false} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }} />

@@ -8,7 +8,7 @@ import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
 import { useDragReorder, usePref } from "../lib/hooks";
 import { placed } from "../lib/util";
-import { blankMap } from "../lib/map";
+import { blankMap, isMap } from "../lib/map";
 import type { Campaign, KindMap, Scene, SceneStatus } from "../types";
 import { MonsterDoc, NoteDoc, NpcDoc, SceneDoc, TrackerDoc } from "./docs";
 import { CampaignDoc, HandoutDoc, SessionDoc } from "./docs2";
@@ -199,7 +199,7 @@ function SectionList({ section, q }: { section: Section; q: string }) {
         <>{folders.map((f) => (
           <div key={f} className="nav-group">
             <div className="eyebrow">{f || "Unfiled"}</div>
-            {items.filter((h) => h.folder === f).map((h) => <Card key={h.id} kind="handouts" id={h.id} title={h.title} extra={h.filename ? "" : "no image"} />)}
+            {items.filter((h) => h.folder === f).map((h) => <Card key={h.id} kind="handouts" id={h.id} title={h.title} extra={isMap(h.map) ? "map" : h.filename ? "" : "no image"} />)}
           </div>
         ))}</>
       );

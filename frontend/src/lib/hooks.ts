@@ -219,14 +219,30 @@ export function useDragReorder(
 
 /**
  * Wheel to zoom around the cursor and drag to pan, for anything drawn with
- * `translate(x, y) scale(zoom)`: handout images and maps. `start` begins a pan from a pointerdown,
- * `move` follows it (false when not panning), `end` stops it.
+ * `translate(x, y) scale(zoom)`: handout images and maps. Put `wheelRef` on the element: its wheel
+ * zooms and doesn't also scroll the page (React's own wheel handler can't stop that). `start`
+ * begins a pan from a pointerdown, `move` follows it (false when not panning), `end` stops it.
  */
 export function usePanZoom<V extends { zoom: number; x: number; y: number }>(view: V, onView: ((v: V) => void) | undefined, limits: [number, number]) {
   const from = useRef<{ x: number; y: number } | null>(null);
+  const latest = useRef({ view, onView, limits });
+  latest.current = { view, onView, limits };
+  const attached = useRef<{ el: HTMLElement; fn: (e: WheelEvent) => void } | null>(null);
+  const wheelRef = useCallback((el: HTMLElement | null) => {
+    if (attached.current) attached.current.el.removeEventListener("wheel", attached.current.fn);
+    attached.current = null;
+    if (!el) return;
+    const fn = (e: WheelEvent) => {
+      const { view, onView, limits } = latest.current;
+      if (!onView) return;
+      e.preventDefault();
+      onView(zoomAround(view, e, el.getBoundingClientRect(), limits));
+    };
+    el.addEventListener("wheel", fn, { passive: false });
+    attached.current = { el, fn };
+  }, []);
   return {
-    onWheel: (e: { clientX: number; clientY: number; deltaY: number; deltaMode: number; ctrlKey: boolean; currentTarget: Element }) =>
-      onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), limits)),
+    wheelRef,
     start: (e: { clientX: number; clientY: number }) => { from.current = { x: e.clientX - view.x, y: e.clientY - view.y }; },
     move: (e: { clientX: number; clientY: number }) => {
       if (!from.current) return false;

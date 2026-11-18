@@ -202,8 +202,7 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 
 .dropzone { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; text-align: center; padding: 40px; border: 2px dashed var(--border); border-radius: 8px; cursor: pointer; }
 .dropzone:hover { border-color: var(--accent); }
-.upload-btn { margin: 8px 0; }
-.upload-btn label { cursor: pointer; }
+.upload-btn { cursor: pointer; }
 .panzoom { overflow: hidden; height: min(62vh, 640px); background: #000; border-radius: 6px; display: flex; align-items: center; justify-content: center; user-select: none; touch-action: none; }
 .panzoom.interactive { cursor: grab; }
 .panzoom.interactive:active { cursor: grabbing; }
