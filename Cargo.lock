@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "questodian-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "chrono",
@@ -3361,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "questodian-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "questodian-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
