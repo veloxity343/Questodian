@@ -216,3 +216,40 @@ export function cropTo(m: MapData): MapData {
     fog: { ...m.fog, revealed: m.fog.revealed.filter((k) => inside(...(k.split(",").map(Number) as [number, number]))) },
   };
 }
+
+/**
+ * Walls and doors for a Universal VTT file, in grid squares: edges in a straight line join
+ * into one wall; doors become portals; secret doors stay walls (the players mustn't find them
+ * in a VTT either). Square grids only.
+ */
+export function vttWalls(m: MapData) {
+  type P = { x: number; y: number };
+  const walls: P[][] = [];
+  const portals: { position: P; bounds: [P, P]; rotation: number; closed: boolean; freestanding: boolean }[] = [];
+  if (m.grid.type !== "square") return { walls, portals };
+  const solid = (key: string) => !!m.walls[key] && m.walls[key] !== "door";
+  for (let r = 0; r <= m.grid.rows; r++) {
+    for (let c = 0; c < m.grid.cols; c++) {
+      if (!solid(`${c},${r},n`) || solid(`${c - 1},${r},n`)) continue;
+      let end = c;
+      while (solid(`${end + 1},${r},n`)) end++;
+      walls.push([{ x: c, y: r }, { x: end + 1, y: r }]);
+    }
+  }
+  for (let c = 0; c <= m.grid.cols; c++) {
+    for (let r = 0; r < m.grid.rows; r++) {
+      if (!solid(`${c},${r},w`) || solid(`${c},${r - 1},w`)) continue;
+      let end = r;
+      while (solid(`${c},${end + 1},w`)) end++;
+      walls.push([{ x: c, y: r }, { x: c, y: end + 1 }]);
+    }
+  }
+  for (const [key, kind] of Object.entries(m.walls)) {
+    if (kind !== "door") continue;
+    const [c, r, side] = key.split(",");
+    const a = { x: Number(c), y: Number(r) };
+    const b = side === "w" ? { x: a.x, y: a.y + 1 } : { x: a.x + 1, y: a.y };
+    portals.push({ position: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, bounds: [a, b], rotation: side === "w" ? Math.PI / 2 : 0, closed: true, freestanding: false });
+  }
+  return { walls, portals };
+}

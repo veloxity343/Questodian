@@ -9,7 +9,7 @@ import { api } from "../api";
 import { Checkbox, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useDialogs, useToast } from "../context/ui";
 import {
-  MARKER_ICONS, TOKEN_COLORS, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId,
+  MARKER_ICONS, TOKEN_COLORS, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
 import { download, slug } from "../lib/util";
@@ -363,8 +363,12 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   const exportAs = async (format: string) => {
     const file = slug(name, "map");
     try {
-      if (format === "png-players") downloadBlob(`${file}-players.png`, await mapPng(map, true));
-      if (format === "png-dm") downloadBlob(`${file}-dm.png`, await mapPng(map, false));
+      if (format === "png-players") downloadBlob(`${file}-players.png`, (await mapPng(map, true)).blob);
+      if (format === "png-dm") downloadBlob(`${file}-dm.png`, (await mapPng(map, false)).blob);
+      if (format === "uvtt") {
+        if (map.grid.type === "hex") toast("Universal VTT grids are square: the image is exported, but walls and doors only exist on square grids");
+        download(`${file}.dd2vtt`, JSON.stringify(await universalVtt(map)), "application/json");
+      }
       if (format === "svg") download(`${file}.svg`, mapSvgText(map, false), "image/svg+xml");
     } catch (e) {
       toast((e as Error).message, "error");
@@ -393,6 +397,7 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
           ["png-players", "PNG: what the players see (fog, no DM notes)"],
           ["png-dm", "PNG: the DM's view"],
           ["svg", "SVG (the DM's view)"],
+          ["uvtt", "Universal VTT (.dd2vtt): walls and doors for Foundry and other VTTs"],
         ]} />
       </div>
 
@@ -601,7 +606,7 @@ export function mapSvgText(map: MapData, players: boolean): string {
 }
 
 /** The map as a PNG: twice the on-screen size, as long as that stays within what browsers can draw. */
-export async function mapPng(map: MapData, players: boolean): Promise<Blob> {
+export async function mapPng(map: MapData, players: boolean): Promise<{ blob: Blob; scale: number }> {
   const { width, height } = mapSize(map);
   const scale = Math.max(0.25, Math.min(2, 8192 / Math.max(width, height)));
   const url = URL.createObjectURL(new Blob([mapSvgText(map, players)], { type: "image/svg+xml" }));
@@ -618,7 +623,8 @@ export async function mapPng(map: MapData, players: boolean): Promise<Blob> {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("This browser can't draw images");
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((done, fail) => canvas.toBlob((b) => (b ? done(b) : fail(new Error("The map couldn't be saved as a PNG"))), "image/png"));
+    const blob = await new Promise<Blob>((done, fail) => canvas.toBlob((b) => (b ? done(b) : fail(new Error("The map couldn't be saved as a PNG"))), "image/png"));
+    return { blob, scale };
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -634,4 +640,43 @@ function downloadBlob(filename: string, blob: Blob) {
     URL.revokeObjectURL(a.href);
     a.remove();
   }, 500);
+}
+
+/**
+ * The map as a Universal VTT file (.dd2vtt), the format Dungeondraft exports and Foundry's
+ * Universal Battlemap Importer, Arkenforge and others read: the picture, plus walls and doors
+ * that block line of sight. Positions are in grid squares. The picture is what the players
+ * see, without fog or tokens (the VTT has its own); secret doors go out as walls.
+ */
+export async function universalVtt(map: MapData) {
+  const picture = { ...map, fog: { ...map.fog, on: false }, tokens: [] };
+  const { blob, scale } = await mapPng(picture, true);
+  const { width, height } = mapSize(map);
+  const size = map.grid.size;
+  const { walls, portals } = vttWalls(map);
+  return {
+    format: 0.2,
+    software: "Questodian",
+    resolution: {
+      map_origin: { x: 0, y: 0 },
+      map_size: { x: width / size, y: height / size },
+      pixels_per_grid: Math.round(size * scale),
+    },
+    line_of_sight: walls,
+    objects_line_of_sight: [],
+    portals,
+    environment: { baked_lighting: true, ambient_light: "ffffffff" },
+    lights: [],
+    image: await base64(blob),
+  };
+}
+
+/** A file's bytes as plain base64 (no "data:" prefix). */
+function base64(blob: Blob): Promise<string> {
+  return new Promise((done, fail) => {
+    const reader = new FileReader();
+    reader.onload = () => done(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => fail(new Error("The map's picture couldn't be read"));
+    reader.readAsDataURL(blob);
+  });
 }
