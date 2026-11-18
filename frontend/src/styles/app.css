@@ -331,9 +331,11 @@ input.big-num { width: 80px; padding: 2px; font-size: 1.4rem; }
 
 /* ---------------------------------------------------------------- tray, toasts, overlays */
 .tray { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.tray-fab { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 1.6rem; cursor: pointer; box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
+.tray-fab { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 1.25rem; transition: transform 0.15s; cursor: pointer; box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
 .tray-fab:hover { background: var(--accent-2); }
-.tray-panel { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.2); }
+.tray-fab[aria-expanded="true"] { transform: rotate(-20deg); }
+.tray-panel { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 100px); display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.2); transform-origin: bottom right; animation: tray-in 0.16s ease-out; }
+@keyframes tray-in { from { opacity: 0; transform: translateY(8px) scale(0.96); } }
 .tray-panel input { flex: 1; font-family: var(--mono); }
 .tray-head { display: flex; justify-content: space-between; align-items: center; }
 .tray-panel .die-row { margin: 0; gap: 0; flex-wrap: nowrap; }
