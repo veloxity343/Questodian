@@ -21,7 +21,7 @@ The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it wa
 - `make check`: Rust format check, lint and tests; the frontend typecheck and tests. Run this before committing.
 - `make run` builds the UI and serves the app in the browser; `make app` opens the desktop app.
 - `make desktop` builds the desktop app and its installers for this OS.
-- Releases: push a `v*` tag matching the version in `src-tauri/tauri.conf.json` (see the README).
+- Releases: bump the version (on a branch: `main` takes PRs only), merge, then push a `v*` tag matching `src-tauri/tauri.conf.json`. Steps and update signing: `docs/dev/releasing.md`.
 
 ## Rules
 
@@ -41,8 +41,9 @@ The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it wa
 ### Project conventions
 
 - The app is called Questodian, and has always been. Don't add notes or compatibility code for any earlier name.
-- Schema changes always come with a migration and a test that upgrades a database containing real data: add the upgrade to `crates/core/src/db.rs` (bump `HEAD`, keep writing `alembic_version`), and add a fixture database at the old version to `crates/core/tests/fixtures/` (see the README's "Database migrations").
+- Schema changes always come with a migration and a test that upgrades a database containing real data: add the upgrade to `crates/core/src/db.rs` (bump `HEAD`, keep writing `alembic_version`), and add a fixture database at the old version to `crates/core/tests/fixtures/` (see `docs/dev/database.md`).
 - Match the surrounding code's style and comment density. Keep user-facing text plain and specific.
+- The documentation is in `docs/` (`docs/README.md` is its contents page): `guide/` for people using the app, `dev/` for working on it. Update the page a change affects in the same PR.
 
 ## Agents (`.claude/agents/`)
 

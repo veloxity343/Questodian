@@ -15,7 +15,7 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [features]
 # Installing updates in place (Tauri's updater plugin), on in release builds; see
-# docs/updates.md. Without it, the app still checks for updates and opens the release page.
+# docs/dev/releasing.md. Without it, the app still checks for updates and opens the release page.
 updater = ["dep:tauri-plugin-updater"]
 
 [dependencies]

@@ -78,7 +78,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - run: npm ci
       - run: npm ci --prefix frontend
-      # Built with the updater and signed with the updater key (docs/updates.md), so installed
+      # Built with the updater and signed with the updater key (docs/dev/releasing.md), so installed
       # copies can update in place; tauri-action adds this build to the release's latest.json.
       - uses: tauri-apps/tauri-action@v1
         env:
