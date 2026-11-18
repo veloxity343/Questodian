@@ -154,7 +154,7 @@ function DiceTray({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean)
 function Tray({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean) => boolean) => void }) {
   const { roll, history, clearHistory } = useDice();
   const [expr, setExpr] = useState("");
-  const [showHistory, setShowHistory] = usePref("dice.tray.history", true);
+  const [showHistory, setShowHistory] = usePref("dice.tray.history", false);
   const input = useRef<HTMLInputElement>(null);
   const last = history[0];
   const recent = useMemo(() => history.slice(1, 30), [history]);
