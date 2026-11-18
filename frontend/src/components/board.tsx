@@ -1,8 +1,9 @@
 // A page of panels you can arrange: drag to reorder, set each one's width, drag its height,
 // collapse it, or hide it. The layout is kept per page on this device.
 
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { usePref } from "../lib/hooks";
+import { Splitter } from "./splitter";
 
 export type Width = "third" | "half" | "two-thirds" | "full";
 const WIDTHS: [Width, string][] = [["third", "⅓"], ["half", "½"], ["two-thirds", "⅔"], ["full", "Full"]];
@@ -27,7 +28,6 @@ interface Layout {
 const EMPTY: Layout = { order: [], hidden: [], collapsed: [], width: {}, height: {} };
 /** The grid's row unit; each card spans as many as its height needs. */
 const ROW = 4;
-const GAP = 16;
 
 export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const [stored, setLayout] = usePref<Layout>(`layout.${id}`, EMPTY);
@@ -115,27 +115,26 @@ function Card({ item, width, height, collapsed, arranging, dragging, onCollapse,
   onDragEnd: () => void;
   onDropHere: () => void;
 }) {
+  const tile = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [span, setSpan] = useState(1);
   const [empty, setEmpty] = useState(false);
   const [over, setOver] = useState(false);
 
-  // Masonry: a card spans as many grid rows as its content is tall.
+  // Masonry: a tile spans as many grid rows as it is tall (its body's padding is the gap below).
   useEffect(() => {
-    const el = body.current;
-    if (!el) return;
+    const el = tile.current;
+    if (!el || !body.current) return;
     const measure = () => {
-      const h = el.getBoundingClientRect().height;
-      setEmpty(h === 0 && !el.firstElementChild);
-      setSpan(Math.max(1, Math.ceil((h + GAP) / ROW)));
+      setEmpty(!body.current?.firstElementChild);
+      setSpan(Math.max(1, Math.ceil(el.getBoundingClientRect().height / ROW)));
     };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(body.current);
     return () => observer.disconnect();
   }, []);
 
-  const resize = useRef<{ y: number; h: number } | null>(null);
   const fixed = !collapsed && height !== undefined;
   const drop = {
     onDragOver: (e: DragEvent) => {
@@ -152,12 +151,12 @@ function Card({ item, width, height, collapsed, arranging, dragging, onCollapse,
   };
 
   return (
-    <div className={`card w-${width} ${collapsed ? "collapsed" : ""} ${dragging ? "dragging" : ""} ${over ? "drop-here" : ""} ${empty ? "empty" : ""}`}
+    <div ref={tile} className={`tile w-${width} ${collapsed ? "collapsed" : ""} ${dragging ? "dragging" : ""} ${over ? "drop-here" : ""} ${empty ? "empty" : ""}`}
       style={{ gridRowEnd: `span ${span}` }} {...drop}>
-      <div ref={body} className="card-body" style={fixed ? { height, overflowY: "auto" } : undefined}>
+      <div ref={body} className="tile-body" style={fixed ? { height, overflowY: "auto" } : undefined}>
         {item.node}
       </div>
-      <div className="card-tools">
+      <div className="tile-tools">
         {arranging && (
           <>
             <span className="drag-handle" draggable title="Drag to move" aria-label={`Move ${item.title}`}
@@ -175,16 +174,8 @@ function Card({ item, width, height, collapsed, arranging, dragging, onCollapse,
           title={collapsed ? "Expand" : "Collapse"} onClick={onCollapse}>{collapsed ? "▸" : "▾"}</button>
       </div>
       {arranging && !collapsed && (
-        <div className="height-handle" role="separator" aria-orientation="horizontal" title="Drag to set the height; double-click to fit the content"
-          onPointerDown={(e: ReactPointerEvent) => {
-            resize.current = { y: e.clientY, h: body.current?.getBoundingClientRect().height ?? 200 };
-            (e.target as HTMLElement).setPointerCapture(e.pointerId);
-          }}
-          onPointerMove={(e: ReactPointerEvent) => {
-            if (resize.current) onHeight(Math.max(80, Math.round(resize.current.h + e.clientY - resize.current.y)));
-          }}
-          onPointerUp={() => (resize.current = null)}
-          onDoubleClick={() => onHeight(null)} />
+        <Splitter className="height-handle" axis="y" min={80} start={() => body.current?.getBoundingClientRect().height ?? 200}
+          onChange={onHeight} onReset={() => onHeight(null)} title="Drag to set the height; double-click to fit the content" label={`${item.title} height`} />
       )}
     </div>
   );

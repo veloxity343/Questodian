@@ -1,7 +1,8 @@
 // The DM screen: navigator on the left, tabbed workspace in the middle, reference on the right.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Splitter } from "../components/splitter";
 import { EmptyState, HpBar, Loading } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
@@ -58,27 +59,12 @@ function Screen({ campaign }: { campaign: Campaign }) {
   return (
     <div className="dm" style={{ gridTemplateColumns: cols }}>
       {navOpen && <Navigator />}
-      {navOpen && <Resizer value={left} onChange={setLeft} min={220} max={480} />}
+      {navOpen && <Splitter className="resizer" axis="x" start={() => left} onChange={setLeft} min={220} max={480} onReset={() => setLeft(300)} label="Resize the navigator" />}
       <Workspace campaign={campaign} />
-      <Resizer value={right} onChange={setRight} min={300} max={720} invert />
+      <Splitter className="resizer" axis="x" start={() => right} onChange={setRight} min={300} max={720} invert onReset={() => setRight(420)} label="Resize the reference panel" />
       <RightPanel />
       <CommandPalette />
     </div>
-  );
-}
-
-function Resizer({ value, onChange, min, max, invert = false }: { value: number; onChange: (v: number) => void; min: number; max: number; invert?: boolean }) {
-  const start = useRef<{ x: number; v: number } | null>(null);
-  return (
-    <div className="resizer" role="separator" aria-orientation="vertical"
-      onPointerDown={(e: ReactPointerEvent) => { start.current = { x: e.clientX, v: value }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
-      onPointerMove={(e: ReactPointerEvent) => {
-        if (!start.current) return;
-        const dx = (e.clientX - start.current.x) * (invert ? -1 : 1);
-        onChange(Math.max(min, Math.min(max, start.current.v + dx)));
-      }}
-      onPointerUp={() => (start.current = null)}
-      onDoubleClick={() => onChange(invert ? 420 : 300)} />
   );
 }
 

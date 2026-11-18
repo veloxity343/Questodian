@@ -36,7 +36,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
-export const qs = (params: Params = {}) => {
+const qs = (params: Params = {}) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
   const s = p.toString();
@@ -78,8 +78,8 @@ export const api = {
   },
   projection: () => request<Projection>("GET", "projection"),
   project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
-  /** Move the tokens on a map handout (the players' screen), leaving the rest of the map alone. */
-  moveTokens: (id: string, tokens: unknown[]) => request<Handout>("POST", `handouts/${id}/tokens`, { tokens }),
+  /** Move tokens on a map handout (the players' screen): positions only, the rest of the map is left alone. */
+  moveTokens: (id: string, moves: { id: string; c: number; r: number }[]) => request<Handout>("POST", `handouts/${id}/tokens`, { moves }),
   handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),

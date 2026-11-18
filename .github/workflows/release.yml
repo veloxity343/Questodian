@@ -14,8 +14,8 @@ jobs:
     name: Tests
     uses: ./.github/workflows/ci.yml
 
-  # One draft release for every build to upload into. (When each build job created its own,
-  # v0.1.0 ended up split across two drafts.)
+  # One draft release for every build to upload into, so all the installers land in one release
+  # (build jobs that each made their own would split them across drafts).
   create-release:
     name: Create the draft release
     needs: checks

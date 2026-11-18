@@ -1,5 +1,5 @@
-//! Editing the character builder's rules data through the API, and carrying the edits
-//! through a full export and import.
+//! The HTTP API end to end: rules data edits and backups, rests, handout images, map tokens,
+//! and import rules (copying, newer files).
 
 use axum::Router;
 use axum::body::Body;
@@ -194,7 +194,7 @@ async fn builder_characters_rest_by_the_2024_rules_in_a_2014_campaign() {
 }
 
 #[tokio::test]
-async fn players_move_tokens_only_when_allowed_and_only_tokens() {
+async fn players_move_existing_tokens_only_and_only_when_allowed() {
     let dir = tempfile::tempdir().unwrap();
     let router = app(dir.path()).await;
     let map = json!({"grid": {"type": "square", "cols": 4, "rows": 3, "size": 40}, "cells": {"0,0": "water"},
@@ -203,26 +203,72 @@ async fn players_move_tokens_only_when_allowed_and_only_tokens() {
         call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Mill", "map": map}))).await;
     assert_eq!(status, StatusCode::CREATED, "{handout}");
     let id = handout["id"].as_str().unwrap();
-    let moved = json!({"tokens": [{"id": "t1", "c": 2, "r": 1, "name": "Ann"}]});
     let path = format!("/api/handouts/{id}/tokens");
-    let (status, _) = call(&router, Method::POST, &path, Some(moved.clone())).await;
+    let step = |c: i64, r: i64| json!({"moves": [{"id": "t1", "c": c, "r": r}]});
+    let (status, _) = call(&router, Method::POST, &path, Some(step(2, 1))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "not allowed yet");
 
-    let mut allowed = handout.clone();
-    allowed["map"]["players_move"] = json!(true);
-    call(&router, Method::PUT, &format!("/api/handouts/{id}"), Some(allowed)).await;
-    let (status, saved) = call(&router, Method::POST, &path, Some(moved)).await;
+    // The DM allows moves, renames the token and adds another; a player then moves the first.
+    let mut dm = handout.clone();
+    dm["map"]["players_move"] = json!(true);
+    dm["map"]["tokens"] =
+        json!([{"id": "t1", "c": 0, "r": 0, "name": "Ann (renamed)"}, {"id": "t2", "c": 3, "r": 2, "name": "Ogre"}]);
+    call(&router, Method::PUT, &format!("/api/handouts/{id}"), Some(dm)).await;
+    let (status, saved) = call(&router, Method::POST, &path, Some(step(2, 1))).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
-    assert_eq!(saved["map"]["tokens"][0]["c"], 2);
+    let tokens = &saved["map"]["tokens"];
+    assert_eq!((&tokens[0]["c"], &tokens[0]["r"], &tokens[0]["name"]), (&json!(2), &json!(1), &json!("Ann (renamed)")));
+    assert_eq!(tokens[1]["name"], "Ogre", "the DM's new token stays");
     assert_eq!(saved["map"]["cells"]["0,0"], "water", "the rest of the map is kept");
 
+    for bad in [step(4, 0), step(0, -1), json!({"moves": [{"id": "t1", "c": "x", "r": 0}]}), json!({"tokens": []})] {
+        let (status, _) = call(&router, Method::POST, &path, Some(bad.clone())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    let (_, unknown) =
+        call(&router, Method::POST, &path, Some(json!({"moves": [{"id": "nobody", "c": 1, "r": 1}]}))).await;
+    assert_eq!(unknown["map"]["tokens"].as_array().unwrap().len(), 2, "an unknown token isn't added");
+
     let (_, image) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Portrait"}))).await;
-    let (status, _) = call(
+    let image_path = format!("/api/handouts/{}/tokens", image["id"].as_str().unwrap());
+    let (status, _) = call(&router, Method::POST, &image_path, Some(step(0, 0))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "an image handout has no tokens");
+}
+
+#[tokio::test]
+async fn copying_a_campaign_keeps_map_tokens_on_their_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, ch) = call(&router, Method::POST, "/api/characters", Some(json!({"name": "Pip"}))).await;
+    let map = json!({"grid": {"type": "square", "cols": 2, "rows": 2, "size": 40},
+                     "tokens": [{"id": "t1", "c": 0, "r": 0, "name": "Pip", "character_id": ch["id"]}]});
+    call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Mill", "map": map}))).await;
+    let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
+    let (status, _) = call(&router, Method::POST, "/api/import?mode=copy", Some(bundle)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, handouts) = call(&router, Method::GET, "/api/handouts", None).await;
+    let (_, characters) = call(&router, Method::GET, "/api/characters", None).await;
+    let ids: Vec<&Value> = characters["characters"].as_array().unwrap().iter().map(|c| &c["id"]).collect();
+    let linked: Vec<&Value> =
+        handouts["handouts"].as_array().unwrap().iter().map(|h| &h["map"]["tokens"][0]["character_id"]).collect();
+    assert_eq!(linked.len(), 2);
+    assert_ne!(linked[0], linked[1], "the copy's token points at the copied character");
+    assert!(linked.iter().all(|l| ids.contains(l)));
+}
+
+#[tokio::test]
+async fn files_from_a_newer_version_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (status, error) = call(
         &router,
         Method::POST,
-        &format!("/api/handouts/{}/tokens", image["id"].as_str().unwrap()),
-        Some(json!({"tokens": []})),
+        "/api/import",
+        Some(json!({"format": "questodian", "version": 4, "collections": {}})),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "an image handout has no tokens");
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(error.to_string().contains("newer version"), "{error}");
+    let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
+    assert_eq!(bundle["version"], 3);
 }

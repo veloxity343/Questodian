@@ -288,7 +288,10 @@ async fn upgrade_from(conn: &mut SqliteConnection, version: String, moves: Vec<E
         upgrade_0001_to_0002(conn, moves).await?;
         at = "0002";
     }
-    let first = STEPS.iter().position(|(from, _)| *from == at).unwrap_or(STEPS.len());
+    let first = STEPS
+        .iter()
+        .position(|(from, _)| *from == at)
+        .ok_or_else(|| Error::Internal(format!("no upgrade from revision {at}")))?;
     for (_, sql) in &STEPS[first..] {
         sqlx::raw_sql(sqlx::AssertSqlSafe(*sql)).execute(&mut *conn).await?;
     }

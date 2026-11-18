@@ -12,15 +12,32 @@ import {
   MARKER_ICONS, TOKEN_COLORS, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
-import { download, slug } from "../lib/util";
+import { download, slug, zoomAround } from "../lib/util";
 import type { Character } from "../types";
 
 export interface MapViewState { zoom: number; x: number; y: number }
 
 // ------------------------------------------------------------------ drawing
 
+/** How a map draws, kept inside its SVG so the screen, the players' window and every export match. */
+const MAP_CSS = [
+  ".map-grid{fill:none;stroke:rgba(0,0,0,.18);stroke-width:1;pointer-events:none}",
+  ".map-edge{stroke-width:5;stroke-linecap:round}",
+  ".map-edge.wall{stroke:#2a241e}",
+  ".map-edge.door{stroke:#8a5a2b;stroke-dasharray:10 6}",
+  ".map-edge.secret{stroke:#7a6cf0;stroke-dasharray:3 5}",
+  ".fog{fill:rgba(20,20,30,.35);pointer-events:none}",
+  ".fog.solid{fill:#0b0e13}",
+  ".map-label{font-family:Alegreya,Georgia,serif;font-weight:600;text-anchor:middle;dominant-baseline:middle;paint-order:stroke;stroke:rgba(255,252,246,.85);stroke-width:.22em;stroke-linejoin:round}",
+  ".map-label.secret,.map-marker.secret{opacity:.6}",
+  ".map-marker text,.map-token text{text-anchor:middle;dominant-baseline:central}",
+  ".map-marker-label{font-family:'Alegreya Sans',sans-serif;fill:#2a241e;paint-order:stroke;stroke:rgba(255,252,246,.85);stroke-width:.22em;stroke-linejoin:round}",
+  ".map-token circle{stroke:#fff;stroke-width:2}",
+  ".map-token text{fill:#fff;font-weight:700;font-family:'Alegreya Sans',sans-serif;pointer-events:none}",
+].join("");
+
 /** The map as SVG. `players` hides fog, secret doors and secret notes. */
-export function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, onPointerUp, onDoubleClick, style }: {
+function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, onPointerUp, onDoubleClick, style }: {
   map: MapData;
   players?: boolean;
   svgRef?: React.Ref<SVGSVGElement>;
@@ -38,17 +55,15 @@ export function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerM
   const fog: ReactNode[] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      // Only painted cells are drawn (pointer tools find cells by position, not by element).
       const key = cellKey(c, r);
-      const fill = colour.get(map.cells[key] ?? "") ?? "transparent";
+      const fill = colour.get(map.cells[key] ?? "");
       const hidden = map.fog.on && !revealed.has(key);
-      if (type === "square") {
-        cells.push(<rect key={key} x={c * size} y={r * size} width={size} height={size} fill={fill} className="map-cell" />);
-        if (hidden) fog.push(<rect key={key} x={c * size} y={r * size} width={size} height={size} className={players ? "fog solid" : "fog"} />);
-      } else {
-        const points = hexPoints(map, c, r);
-        cells.push(<polygon key={key} points={points} fill={fill} className="map-cell" />);
-        if (hidden) fog.push(<polygon key={key} points={points} className={players ? "fog solid" : "fog"} />);
-      }
+      if (!fill && !hidden) continue;
+      const shape = (props: React.SVGProps<SVGRectElement> & React.SVGProps<SVGPolygonElement>) =>
+        type === "square" ? <rect key={key} x={c * size} y={r * size} width={size} height={size} {...props} /> : <polygon key={key} points={hexPoints(map, c, r)} {...props} />;
+      if (fill) cells.push(shape({ fill }));
+      if (hidden) fog.push(shape({ className: players ? "fog solid" : "fog" }));
     }
   }
   // On the players' screen, things under fog stay hidden. Labels sit anywhere (in cell units).
@@ -63,6 +78,7 @@ export function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerM
   return (
     <svg ref={svgRef} className="map-svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={style}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}>
+      <style>{MAP_CSS}</style>
       <rect width={width} height={height} fill={map.background} />
       <g>{cells}</g>
       {Object.entries(map.walls).map(([key, kind]) => {
@@ -114,9 +130,9 @@ function GridLines({ cols, rows, size }: { cols: number; rows: number; size: num
   return <g>{lines}</g>;
 }
 
-const initials = (name: string) => name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
+const initials = (name: unknown) => String(name ?? "").trim().split(/\s+/).map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
 
-export function MapLegend({ map }: { map: MapData }) {
+function MapLegend({ map }: { map: MapData }) {
   if (!map.show_legend || !map.legend.length) return null;
   return (
     <ul className="map-legend">
@@ -126,7 +142,7 @@ export function MapLegend({ map }: { map: MapData }) {
 }
 
 /** A map you can pan (drag) and zoom (wheel), mirroring the DM's view on the players' screen. */
-export function MapStage({ map, view, onView, players = false, children, tool }: {
+function MapStage({ map, view, onView, players = false, children, tool }: {
   map: MapData;
   view: MapViewState;
   onView?: (v: MapViewState) => void;
@@ -138,19 +154,18 @@ export function MapStage({ map, view, onView, players = false, children, tool }:
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const { width, height } = mapSize(map);
-  // A point on the page, in the map's own px.
+  // A point on the page, in the map's own px, and what's drawn there (found by position: while
+  // a drag holds the pointer, events name the map rather than the token or marker under it).
   const toMap = (e: { clientX: number; clientY: number }): Point => {
     const rect = svg.current!.getBoundingClientRect();
-    return { x: ((e.clientX - rect.left) / rect.width) * width, y: ((e.clientY - rect.top) / rect.height) * height, target: (e as ReactPointerEvent).target as Element };
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * width,
+      y: ((e.clientY - rect.top) / rect.height) * height,
+      target: document.elementFromPoint(e.clientX, e.clientY) ?? undefined,
+    };
   };
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-    if (!onView) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const cx = e.clientX - rect.left - rect.width / 2;
-    const cy = e.clientY - rect.top - rect.height / 2;
-    const zoom = Math.max(0.15, Math.min(6, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-    const k = zoom / view.zoom;
-    onView({ zoom, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k });
+    onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), [0.15, 6]));
   };
   // The middle and right buttons always pan; the left one does whatever the tool does, or pans.
   const panning = (e: ReactPointerEvent) => !tool || e.button !== 0 || !tool.down(toMap(e), e);
@@ -180,7 +195,7 @@ export function MapStage({ map, view, onView, players = false, children, tool }:
 export interface Point { x: number; y: number; target?: Element }
 
 /** The size that fits the whole map in a box. */
-export function fitView(map: MapData, box: { width: number; height: number }): MapViewState {
+function fitView(map: MapData, box: { width: number; height: number }): MapViewState {
   const { width, height } = mapSize(map);
   return { zoom: Math.max(0.15, Math.min(4, Math.min(box.width / width, box.height / height) * 0.95)), x: 0, y: 0 };
 }
@@ -363,8 +378,8 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   const exportAs = async (format: string) => {
     const file = slug(name, "map");
     try {
-      if (format === "png-players") downloadBlob(`${file}-players.png`, (await mapPng(map, true)).blob);
-      if (format === "png-dm") downloadBlob(`${file}-dm.png`, (await mapPng(map, false)).blob);
+      if (format === "png-players") download(`${file}-players.png`, (await mapPng(map, true)).blob);
+      if (format === "png-dm") download(`${file}-dm.png`, (await mapPng(map, false)).blob);
       if (format === "uvtt") {
         if (map.grid.type === "hex") toast("Universal VTT grids are square: the image is exported, but walls and doors only exist on square grids");
         download(`${file}.dd2vtt`, JSON.stringify(await universalVtt(map)), "application/json");
@@ -554,15 +569,15 @@ export function PlayersMap({ handoutId, map, view }: { handoutId: string; map: M
       if (at) setTokens((ts) => ts.map((t) => (t.id === moving.current ? { ...t, ...at } : t)));
     },
     up: () => {
-      if (moving.current) void api.moveTokens(handoutId, tokens).catch(() => {});
+      const moved = tokens.find((t) => t.id === moving.current);
+      if (moved) void api.moveTokens(handoutId, [{ id: moved.id, c: moved.c, r: moved.r }]).catch(() => {});
       moving.current = null;
     },
   } : undefined;
   return <MapStage map={shown} view={view} players tool={tool} />;
 }
 
-/** The styles a downloaded SVG needs (the same as dm.css's map rules). */
-const MAP_CSS = `.map-grid{fill:none;stroke:rgba(0,0,0,.18);stroke-width:1}.map-edge{stroke-width:5;stroke-linecap:round}.map-edge.wall{stroke:#2a241e}.map-edge.door{stroke:#8a5a2b;stroke-dasharray:10 6}.map-edge.secret{stroke:#7a6cf0;stroke-dasharray:3 5}.fog{fill:rgba(20,20,30,.35)}.fog.solid{fill:#0b0e13}.map-label{font-family:Georgia,serif;text-anchor:middle;dominant-baseline:middle;paint-order:stroke;stroke:rgba(255,255,255,.7);stroke-width:3}.map-marker text,.map-token text{text-anchor:middle;dominant-baseline:central}.map-token circle{stroke:#fff;stroke-width:2}.map-token text{fill:#fff;font-weight:700;font-family:sans-serif}.map-marker-label{font-family:sans-serif;paint-order:stroke;stroke:rgba(255,255,255,.8);stroke-width:3}`;
+
 
 /**
  * While the DM has a map open that players may move tokens on, pick up their moves (made on
@@ -594,19 +609,19 @@ export function MapTokensFromPlayers({ id, map, onTokens, children }: { id: stri
 // ------------------------------------------------------------------ export
 
 /** The map drawn as a standalone SVG file, styles included. */
-export function mapSvgText(map: MapData, players: boolean): string {
+function mapSvgText(map: MapData, players: boolean): string {
   const holder = document.createElement("div");
   const root = createRoot(holder);
   flushSync(() => root.render(<MapSvg map={map} players={players} />));
   const svg = holder.querySelector("svg")!;
   svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  const text = svg.outerHTML.replace(/^<svg([^>]*)>/, `<svg$1><style>${MAP_CSS}</style>`);
+  const text = svg.outerHTML;
   root.unmount();
   return text;
 }
 
 /** The map as a PNG: twice the on-screen size, as long as that stays within what browsers can draw. */
-export async function mapPng(map: MapData, players: boolean): Promise<{ blob: Blob; scale: number }> {
+async function mapPng(map: MapData, players: boolean): Promise<{ blob: Blob; scale: number }> {
   const { width, height } = mapSize(map);
   const scale = Math.max(0.25, Math.min(2, 8192 / Math.max(width, height)));
   const url = URL.createObjectURL(new Blob([mapSvgText(map, players)], { type: "image/svg+xml" }));
@@ -630,25 +645,13 @@ export async function mapPng(map: MapData, players: boolean): Promise<{ blob: Bl
   }
 }
 
-function downloadBlob(filename: string, blob: Blob) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.append(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 500);
-}
-
 /**
  * The map as a Universal VTT file (.dd2vtt), the format Dungeondraft exports and Foundry's
  * Universal Battlemap Importer, Arkenforge and others read: the picture, plus walls and doors
  * that block line of sight. Positions are in grid squares. The picture is what the players
  * see, without fog or tokens (the VTT has its own); secret doors go out as walls.
  */
-export async function universalVtt(map: MapData) {
+async function universalVtt(map: MapData) {
   const picture = { ...map, fog: { ...map.fog, on: false }, tokens: [] };
   const { blob, scale } = await mapPng(picture, true);
   const { width, height } = mapSize(map);

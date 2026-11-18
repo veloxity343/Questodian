@@ -259,13 +259,13 @@ export const needsLineage = (p: Parts) => (p.species?.choices?.length ?? 0) > 1;
 
 // ------------------------------------------------------------------ ability scores
 
-export function pointCost(rules: Rules, score: number): number | null {
+function pointCost(rules: Rules, score: number): number | null {
   const cost = rules.point_buy.costs[String(score)];
   return cost === undefined ? null : cost;
 }
 
 /** Points spent, or null if a base score is outside point buy's range. */
-export function pointsSpent(b: Build, rules: Rules): number | null {
+function pointsSpent(b: Build, rules: Rules): number | null {
   let total = 0;
   for (const a of ABILITIES) {
     const cost = pointCost(rules, b.base[a]);
@@ -282,7 +282,7 @@ export function standardArrayOK(b: Build, rules: Rules) {
 
 /** Level 20 capstones that raise two scores by 4, to a maximum of 25 (Primal Champion, Body and Mind). */
 const CAPSTONES: Record<string, Ability[]> = { Barbarian: ["str", "con"], Monk: ["dex", "wis"] };
-export const capstone = (b: Build, a: Ability) => b.level >= 20 && !!CAPSTONES[b.class]?.includes(a);
+const capstone = (b: Build, a: Ability) => b.level >= 20 && !!CAPSTONES[b.class]?.includes(a);
 
 export function scores(b: Build, rules: Rules): Record<Ability, number> {
   return Object.fromEntries(

@@ -184,8 +184,8 @@ export function floodFill(m: MapData, c: number, r: number): string[] {
     const key = bc > ac ? `${bc},${br},w` : bc < ac ? `${ac},${ar},w` : br > ar ? `${bc},${br},n` : `${ac},${ar},n`;
     return !!m.walls[key];
   };
-  while (queue.length && seen.size < 20000) {
-    const here = queue.shift()!;
+  for (let i = 0; i < queue.length && seen.size < 20000; i++) {
+    const here = queue[i];
     for (const next of neighbours(m, here[0], here[1])) {
       const [nc, nr] = next;
       const key = cellKey(nc, nr);

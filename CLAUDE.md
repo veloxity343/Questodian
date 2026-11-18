@@ -18,7 +18,7 @@ The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it wa
 
 - `make install`: frontend and Tauri CLI dependencies (Rust crates download on the first build).
 - `make dev`: API and UI dev servers with hot reload.
-- `make check`: Rust format check, lint and tests, and the frontend typecheck. Run this before committing.
+- `make check`: Rust format check, lint and tests; the frontend typecheck and tests. Run this before committing.
 - `make run` builds the UI and serves the app in the browser; `make app` opens the desktop app.
 - `make desktop` builds the desktop app and its installers for this OS.
 - Releases: push a `v*` tag matching the version in `src-tauri/tauri.conf.json` (see the README).

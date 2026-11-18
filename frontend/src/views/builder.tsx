@@ -10,12 +10,11 @@ import {
   METHODS, canStep, extraSpell, spellCounts, standardArrayOK, fightingStyleAllowed, highestSpellLevel, levelUp, needsLineage, ordinal, parts, pickBackground, resetScores,
   resetText, skillKey, spellGuide, startingGear, step, type Build, type BuiltWeapon, type Method, type Rules, type Sheet,
 } from "../lib/builder";
-import { ABILITIES, ABILITY_NAMES, signed } from "../lib/util";
+import { ABILITIES, ABILITY_NAMES, signed, d20 } from "../lib/util";
 import type { Ability, Campaign, Character, Resource } from "../types";
+import type { Edit, Roll } from "./sheet-panels";
 
 export type EditBuild = (fn: (b: Build) => Build) => void;
-type Roll = (expr: string, label: string) => void;
-const d20 = (bonus: number) => `d20${signed(bonus)}`;
 
 // ------------------------------------------------------------------ the rules data, shared
 
@@ -67,7 +66,7 @@ export function BuilderHeader({ ch, b, s, rules, edit, editBuild, campaigns, onL
   b: Build;
   s: Sheet;
   rules: Rules;
-  edit: (fn: (d: Character) => void) => void;
+  edit: Edit;
   editBuild: EditBuild;
   campaigns: Campaign[];
   onLevelUp: () => void;
@@ -362,7 +361,7 @@ export function BuilderWeapons({ b, s, rules, editBuild, roll }: { b: Build; s: 
 
 // ------------------------------------------------------------------ resources
 
-export function BuilderResources({ ch, s, edit }: { ch: Character; s: Sheet; edit: (fn: (d: Character) => void) => void }) {
+export function BuilderResources({ ch, s, edit }: { ch: Character; s: Sheet; edit: Edit }) {
   if (!s.resources.length) return null;
   const setCurrent = (name: string, current: number) =>
     edit((x) => {

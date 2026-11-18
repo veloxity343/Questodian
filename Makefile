@@ -39,8 +39,9 @@ test: ## Rust: format check, lint and tests
 	cargo clippy -p questodian-core -p questodian-cli --all-targets -- -D warnings
 	cargo test -p questodian-core -p questodian-cli
 
-typecheck: ## Typecheck the frontend
+typecheck: ## Typecheck and test the frontend
 	$(NPM) run typecheck
+	$(NPM) test
 
 check: test typecheck ## Run everything CI runs
 

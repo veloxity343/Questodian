@@ -7,8 +7,9 @@ import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
 import { useDebounced, useDraft } from "../lib/hooks";
+import { openPlayersWindow, togglePlayersFullscreen } from "../lib/desktop";
 import { blankMap, isMap, mapOf, type MapData } from "../lib/map";
-import { fmtDate, titleCase } from "../lib/util";
+import { fmtDate, titleCase, zoomAround } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
 import { TrackerWidget } from "./docs";
 import { MapEditor, MapTokensFromPlayers, PlayersMap } from "./map";
@@ -291,17 +292,6 @@ export function CampaignDoc() {
 const PROJECT_CHANNEL = "questodian-project";
 interface ViewState { id: string; zoom: number; x: number; y: number }
 
-/** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
-export function projectHandout() {
-  const url = "/project";
-  // The desktop app answers this address itself; in a browser it doesn't exist.
-  if (location.protocol === "questodian:" || location.hostname === "questodian.localhost") {
-    void fetch("/desktop/players", { method: "POST", body: url });
-    return;
-  }
-  window.open(url, "questodian-players", "popup,width=1280,height=800");
-}
-
 export function HandoutDoc({ initial }: { initial: Handout }) {
   const dm = useDM();
   const toast = useToast();
@@ -349,7 +339,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
         extra={doc.filename || drawn ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
-              onClick={() => { setCasting(true); void api.project(view).then(() => projectHandout()); }}>
+              onClick={() => { setCasting(true); void api.project(view).then(() => openPlayersWindow()); }}>
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>
@@ -382,7 +372,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
 }
 
 /** Image viewer: wheel to zoom around the cursor, drag to pan. */
-export function PanZoom({ src, alt, view, onView, interactive = true }: {
+function PanZoom({ src, alt, view, onView, interactive = true }: {
   src: string;
   alt: string;
   view: ViewState;
@@ -391,13 +381,7 @@ export function PanZoom({ src, alt, view, onView, interactive = true }: {
 }) {
   const drag = useRef<{ x: number; y: number } | null>(null);
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-    if (!onView) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const cx = e.clientX - rect.left - rect.width / 2;
-    const cy = e.clientY - rect.top - rect.height / 2;
-    const zoom = Math.max(0.2, Math.min(8, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-    const k = zoom / view.zoom;
-    onView({ ...view, zoom, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k });
+    onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), [0.2, 8]));
   };
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
@@ -450,24 +434,10 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   }, [view.id, handout]);
   return (
     <div className="projection">
-      <FullscreenButton />
+      <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>
       {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
         : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
         : <p className="muted">Waiting for the DM…</p>}
     </div>
   );
-}
-
-/** Full screen for a projector or TV: the desktop app's own window, or the browser's Fullscreen API. */
-function FullscreenButton() {
-  const toggle = async () => {
-    const desktop = location.protocol === "questodian:" || location.hostname === "questodian.localhost";
-    if (desktop) {
-      const res = await fetch("/desktop/players/fullscreen", { method: "POST" }).catch(() => null);
-      if (res?.ok) return;
-    }
-    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-    else await document.documentElement.requestFullscreen?.().catch(() => {});
-  };
-  return <button type="button" className="fullscreen-btn" onClick={() => void toggle()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>;
 }

@@ -1,8 +1,9 @@
 // The DM screen's right-hand panel: Reference / View / Notes, with the dice dock below.
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { Splitter } from "../components/splitter";
 import { HpBar, Markdown, NumInput, Select, type Option } from "../components/ui";
 import { Breakdown, HistoryItem, useDice } from "../context/dice";
 import { useToast } from "../context/ui";
@@ -265,32 +266,6 @@ function NotesTab() {
 const REFERENCE_MIN = 180;
 const DICE_FOLD = 70;
 
-/** The divider above the dice: drag it down to fold them away, up as far as leaves the reference room. */
-function DiceSplitter({ panel, height, onHeight, onFold }: {
-  panel: React.RefObject<HTMLElement | null>;
-  height: number;
-  onHeight: (h: number) => void;
-  onFold: () => void;
-}) {
-  const start = useRef<{ y: number; h: number } | null>(null);
-  const latest = useRef(height);
-  return (
-    <div className="resizer horizontal" role="separator" aria-orientation="horizontal" aria-label="Resize the dice" title="Drag to resize the dice; drag to the bottom to fold them away"
-      onPointerDown={(e: ReactPointerEvent) => { start.current = { y: e.clientY, h: height }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
-      onPointerMove={(e: ReactPointerEvent) => {
-        if (!start.current) return;
-        const room = (panel.current?.clientHeight ?? 800) - REFERENCE_MIN;
-        latest.current = Math.max(0, Math.min(room, start.current.h - (e.clientY - start.current.y)));
-        onHeight(latest.current);
-      }}
-      onPointerUp={() => {
-        if (start.current && latest.current < DICE_FOLD) onFold();
-        start.current = null;
-      }}
-      onDoubleClick={() => onHeight(320)} />
-  );
-}
-
 function DiceDock({ panel }: { panel: React.RefObject<HTMLElement | null> }) {
   const { roll, history, clearHistory } = useDice();
   const [height, setHeight] = usePref("dm.dice.height", 320);
@@ -309,7 +284,11 @@ function DiceDock({ panel }: { panel: React.RefObject<HTMLElement | null> }) {
   }
   return (
     <>
-    <DiceSplitter panel={panel} height={height} onHeight={setHeight} onFold={() => { setFolded(true); setHeight(320); }} />
+    {/* Drag down to fold the dice away, up as far as leaves the reference room. */}
+    <Splitter className="resizer horizontal" axis="y" invert start={() => height} onChange={setHeight}
+      max={() => (panel.current?.clientHeight ?? 800) - REFERENCE_MIN}
+      onRelease={(h) => h < DICE_FOLD && (setFolded(true), setHeight(320))} onReset={() => setHeight(320)}
+      label="Resize the dice" title="Drag to resize the dice; drag to the bottom to fold them away" />
     <section className="dice-dock" aria-label="Dice" style={{ height }}>
       <div className="row gap">
         <div className="eyebrow grow">Dice</div>

@@ -4,6 +4,7 @@
 // there's no desktop app, so none of this shows.
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { desktopUpdates } from "../lib/desktop";
 import { Modal } from "./ui";
 
 export interface UpdateState {
@@ -41,18 +42,7 @@ const UpdatesContext = createContext<Updates>({
 });
 export const useUpdates = () => useContext(UpdatesContext);
 
-async function call(method: string, path = "", body?: unknown): Promise<UpdateState | null> {
-  try {
-    const res = await fetch(`/desktop/updates${path}`, {
-      method,
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    return res.ok ? ((await res.json()) as UpdateState) : null;
-  } catch {
-    return null;
-  }
-}
+const call = (method: string, path = "", body?: unknown) => desktopUpdates<UpdateState>(method, path, body);
 
 export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<UpdateState | null>(null);

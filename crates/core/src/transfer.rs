@@ -18,8 +18,10 @@ use crate::rules::{self, ABILITIES, ABILITY_NAMES};
 use crate::schemas::{Character, Edition, Session};
 
 pub const FORMAT: &str = "questodian";
-/// 2: DM screen records; sessions no longer hold an encounter.
-pub const VERSION: i64 = 2;
+/// The bundle format. 1: a session holds its encounter. 2: DM screen records, encounters on
+/// their own. 3: characters' builder choices, rules data edits and drawn maps (older versions
+/// refuse these files rather than import them without those).
+pub const VERSION: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -380,6 +382,10 @@ fn remap_ids(docs: &mut Checked) {
                             swap(&mut c[field]);
                         }
                     }
+                }
+                Kind::Handouts => {
+                    let tokens = doc.get_mut("map").and_then(|m| m.get_mut("tokens")).and_then(Value::as_array_mut);
+                    tokens.into_iter().flatten().for_each(|t| swap(&mut t["character_id"]));
                 }
                 Kind::Npcs => {
                     if let Some(id) = text(doc, "stat_ref").strip_prefix("monster:") {

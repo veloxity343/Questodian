@@ -10,7 +10,7 @@ import type { Campaign, Character, Edition, Kind, KindMap } from "../types";
 /** Record kinds that open as workspace tabs. */
 export type DocKind = "campaigns" | "sessions" | "scenes" | "npcs" | "monsters" | "notes" | "encounters" | "handouts" | "trackers";
 export type ListKind = Exclude<Kind, "campaigns" | "handbook">;
-export const LIST_KINDS: ListKind[] = [
+const LIST_KINDS: ListKind[] = [
   "sessions", "scenes", "npcs", "monsters", "notes", "encounters", "trackers", "handouts", "characters",
 ];
 

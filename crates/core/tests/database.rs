@@ -139,7 +139,7 @@ async fn upgraded_schema_matches_a_new_database() {
     Database::open(fresh.path()).await.unwrap().close().await;
     let fresh = schema_shape(&fresh.path().join(DB_FILENAME)).await;
     assert!(fresh.iter().any(|line| line.starts_with("rule_overrides table_info")));
-    for name in ["v0001", "v0002", "v0003"] {
+    for name in ["pre_alembic", "v0001", "v0002", "v0003"] {
         let upgraded = tempfile::tempdir().unwrap();
         open_fixture(name, upgraded.path()).await.close().await;
         assert_eq!(schema_shape(&upgraded.path().join(DB_FILENAME)).await, fresh, "{name}");

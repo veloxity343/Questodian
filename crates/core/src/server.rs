@@ -561,29 +561,44 @@ async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(Stri
     Ok(Json(json!({"deleted": id})))
 }
 
-/// The players' screen moving tokens on a map: only the tokens change, so a DM editing the
-/// rest of the map at the same time doesn't lose anything.
+/// The players' screen moving tokens on a map: `{"moves": [{"id", "c", "r"}]}`. Only the
+/// positions of tokens that exist change, to cells inside the grid, so a stale list on the
+/// players' screen can't remove, add or rename anything the DM has done since.
 async fn move_tokens(
     State(app): State<Shared>,
     UrlPath((id,)): UrlPath<(String,)>,
     JsonBody(body): JsonBody,
 ) -> Result<Json<Value>> {
-    let tokens = body.as_ref().and_then(|b| b.get("tokens")).cloned();
-    let Some(Value::Array(tokens)) = tokens else { return Err(body_error("send {\"tokens\": [...]}")) };
-    if !tokens.iter().all(Value::is_object) {
-        return Err(body_error("each token is an object"));
-    }
+    let moves = body.as_ref().and_then(|b| b.get("moves")).and_then(Value::as_array).cloned();
+    let Some(moves) = moves else { return Err(body_error("send {\"moves\": [{\"id\", \"c\", \"r\"}]}")) };
     let mut repo = app.db.write().await?;
     let mut doc = repo.get(Kind::Handouts, &id).await?;
-    match doc.get_mut("map") {
-        Some(Value::Object(map)) if map.contains_key("grid") => {
-            if map.get("players_move") != Some(&Value::Bool(true)) {
-                return Err(invalid("the DM hasn't let players move tokens on this map"));
-            }
-            map.insert("tokens".into(), Value::Array(tokens));
-        }
-        _ => return Err(invalid("this handout isn't a map")),
+    let Some(Value::Object(map)) = doc.get_mut("map").filter(|m| m.get("grid").is_some()) else {
+        return Err(invalid("this handout isn't a map"));
+    };
+    if map.get("players_move") != Some(&Value::Bool(true)) {
+        return Err(invalid("the DM hasn't let players move tokens on this map"));
     }
+    let size = |key: &str| map["grid"].get(key).and_then(Value::as_i64).unwrap_or(0);
+    let (cols, rows) = (size("cols"), size("rows"));
+    let mut tokens = map.get("tokens").and_then(Value::as_array).cloned().unwrap_or_default();
+    for step in &moves {
+        let (Some(token_id), Some(c), Some(r)) = (
+            step.get("id").and_then(Value::as_str),
+            step.get("c").and_then(Value::as_i64),
+            step.get("r").and_then(Value::as_i64),
+        ) else {
+            return Err(body_error("each move is {\"id\": text, \"c\": whole number, \"r\": whole number}"));
+        };
+        if !(0..cols).contains(&c) || !(0..rows).contains(&r) {
+            return Err(body_error(format!("cell {c},{r} is outside the map")));
+        }
+        if let Some(token) = tokens.iter_mut().find(|t| t.get("id").and_then(Value::as_str) == Some(token_id)) {
+            token["c"] = json!(c);
+            token["r"] = json!(r);
+        }
+    }
+    map.insert("tokens".into(), Value::Array(tokens));
     let saved = repo.update(Kind::Handouts, &id, doc).await?;
     repo.commit().await?;
     Ok(Json(saved))
