@@ -24,6 +24,7 @@ jobs:
       contents: write
     outputs:
       id: ${{ steps.create.outputs.id }}
+      tag: ${{ steps.create.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
       - name: Create it
@@ -40,6 +41,7 @@ jobs:
             -f tag_name="v$version" -f target_commitish="$GITHUB_SHA" -f name="Questodian v$version" \
             -f body="Download the installer for your system below." -F draft=true --jq .id)
           echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
   desktop:
     name: Desktop app (${{ matrix.name }})
@@ -76,12 +78,19 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - run: npm ci
       - run: npm ci --prefix frontend
+      # Built with the updater and signed with the updater key (docs/updates.md), so installed
+      # copies can update in place; tauri-action adds this build to the release's latest.json.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.id }}
-          args: ${{ matrix.args }}
+          # So latest.json points at this release's files, not whichever release is newest.
+          tagName: ${{ needs.create-release.outputs.tag }}
+          releaseDraft: true
+          args: ${{ matrix.args }} --features updater --config src-tauri/tauri.release.conf.json
       # The draft release already has the installers at this point; if this fails, don't publish it.
       - name: Start the Linux app and check the UI reaches the API
         if: startsWith(matrix.platform, 'ubuntu')
@@ -95,3 +104,29 @@ jobs:
             timeout 60 xvfb-run -a target/release/questodian-app > smoke.log 2>&1 || true
           cat smoke.log
           grep -q "GET /api/meta -> 200" smoke.log
+
+  # The four builds each add themselves to latest.json at the same time, with nothing to stop one
+  # overwriting another. Check all four made it before anyone publishes the release.
+  updater-json:
+    name: Check latest.json lists every platform
+    needs: [create-release, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.create-release.outputs.id }}
+        run: |
+          asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE/assets" --paginate --jq '.[] | select(.name == "latest.json") | .id')
+          if [ -z "$asset" ]; then echo "::error::The release has no latest.json"; exit 1; fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset" -H "Accept: application/octet-stream" > latest.json
+          cat latest.json
+          missing=""
+          for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            jq -e --arg p "$platform" '.platforms[$p].signature and .platforms[$p].url' latest.json > /dev/null || missing="$missing $platform"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::latest.json is missing:$missing. Re-run the failed or overwritten build job before publishing."
+            exit 1
+          fi

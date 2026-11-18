@@ -18,32 +18,27 @@ Code: `src-tauri/src/updates.rs` (the check and its schedule), `src-tauri/src/ma
 
 ## Installing updates in place
 
-Without more setup, **Update** opens the release page and you download the new version
-yourself. To have the app download, verify and install it, then restart, releases must be
-signed with an updater key (Tauri's updater plugin checks every download against it). This is
-set up once:
+Release builds include Tauri's updater (the `updater` cargo feature) and are signed with the
+updater key, so **Update** downloads the new version, checks its signature against the public key
+in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`), installs it and restarts. Builds made
+without the feature (`make app`, `make desktop`) open the release page instead.
 
-1. Make the key pair on your own computer, and keep the private key safe. Losing it (or its
-   password) means installed copies can't update in place any more.
+- **The key.** The private key and its password are the repository's Actions secrets
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the owner keeps a copy.
+  Losing it (or its password) means installed copies can't update in place any more: they'd need
+  a new key in `tauri.conf.json` and one more download by hand.
+- **The release.** The Release workflow builds with `--features updater` and
+  `--config src-tauri/tauri.release.conf.json`, which turns on `createUpdaterArtifacts` (kept out
+  of the main config so local builds don't need the private key). Each build adds its platform to
+  the release's `latest.json`; the last job checks all four are there, since the builds write it
+  at the same time. If that check fails, re-run the build job for the missing platform before
+  publishing.
+- **Finding updates.** The app reads
+  `https://github.com/veloxity343/Questodian/releases/latest/download/latest.json`, which only
+  points at a published release, so a draft is never offered.
 
-   ```bash
-   npm run tauri signer generate -- -w ~/.tauri/questodian.key
-   ```
-
-2. In the repository's settings on GitHub, add two Actions secrets:
-   `TAURI_SIGNING_PRIVATE_KEY` (the contents of `~/.tauri/questodian.key`) and
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (its password).
-
-3. Then the code changes, which need the public key (`~/.tauri/questodian.key.pub`):
-   - `src-tauri/tauri.conf.json`: `"bundle": { "createUpdaterArtifacts": true }` and
-     `"plugins": { "updater": { "pubkey": "<contents of the .pub file>", "endpoints":
-     ["https://github.com/veloxity343/Questodian/releases/latest/download/latest.json"] } }`
-   - build the desktop app with `--features updater` (the release workflow's tauri-action
-     `args`), with the two secrets in that step's `env`, and `tagName` set so `latest.json`
-     points at this release's files.
-
-   After the first release made this way, check that its `latest.json` lists all four
-   platforms. Copies from before that release still update by downloading by hand.
+The first release built this way is the first that can update itself; copies from before it
+update by downloading by hand once.
 
 Notes from the Tauri docs: on Linux the updater replaces an AppImage (a `.deb` or `.rpm` install
 updates by downloading by hand); on Windows the installer closes the app itself. Whether an
