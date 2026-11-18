@@ -446,7 +446,7 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   }, [view.id, showingMap]);
   return (
     <div className="projection">
-      <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>
+      <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)">Full screen</button>
       {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
         : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
         : <p className="muted">Waiting for the DM…</p>}

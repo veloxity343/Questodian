@@ -5,6 +5,8 @@ a DM screen for running sessions, campaign prep, encounters, maps, character she
 character builder, the System Reference Document for both rule sets, your own handbook, and a dice
 roller. Fully offline: one local database file, no account, nothing to connect.
 
+![The DM screen: the navigator on the left, an encounter running in the middle, a stat block on the right](docs/images/dm-screen.webp)
+
 - **Rules:** each campaign uses either the 2014 rules (SRD 5.1) or the 2024 rules (SRD 5.2.1)
 - **Desktop app:** Windows, macOS and Linux, built with [Tauri 2](https://v2.tauri.app/), and it
   updates itself; it can also run as a local web server for any browser

@@ -34,6 +34,8 @@ Markdown. Importing a `.md` file on the Data page makes a handbook entry.
 
 Every page is made of panels, and you can lay each page out the way you like:
 
+![Arrange mode on the Tools page: each panel has its controls, and the panel being dragged outlines where it will go](../images/arrange.webp)
+
 - **▾** on a panel folds it to its title; **▸** opens it again.
 - **Arrange** (top right of the page) turns on the controls:
   - drag a panel by **⠿** onto another to move it there (Escape cancels), or use **↑ ↓**;

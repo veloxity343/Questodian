@@ -19,6 +19,8 @@ goes back to the start.
 
 ## Drawing a map
 
+![The map editor: the toolbar, the legend's colours, and a map with walls, doors, labels, markers, party tokens and fog](../images/map-editor.webp)
+
 The toolbar along the top:
 
 | Tool | What it does |
@@ -52,11 +54,13 @@ Wherever you are, the mouse wheel zooms and the middle or right mouse button pan
 
 **📽 Show to players** opens the players' view:
 
-- A second window opens (a pop-up window in a browser). Drag it onto the projector or TV; its ⛶
-  button makes it full screen.
+- A second window opens (a pop-up window in a browser). Drag it onto the projector or TV; its
+  **Full screen** button (top right, faint until you point at it) fills the screen.
 - Or, when Questodian runs as a server on your network, open `/project` on another device, such as
   `http://192.168.1.20:8765/project` (see
   [Getting started](getting-started.md#in-a-browser-instead)).
+
+![The players' view of the same map: the fogged scriptorium is dark, the DM-only markers don't show, and the secret door looks like a wall](../images/players-view.webp)
 
 The players' view follows what you show and how you zoom and pan. On a map, fogged cells stay
 covered, along with any tokens, markers, text or walls in them; DM-only text and markers don't

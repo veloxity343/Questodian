@@ -6,6 +6,8 @@ The **Characters** page lists every character, with HP, AC, passive Perception, 
 campaign. **+ New character** makes one in the open campaign; **Show all campaigns** lists the
 others too. A sheet can be made with the character builder, or filled in by hand.
 
+![The Characters page: one card per character, with the campaign, species and class, HP, AC, passive Perception and the player](../images/characters.webp)
+
 ## The character builder (2024 rules)
 
 New characters start in the builder, which works the sheet out from your choices. (A sheet made
@@ -21,14 +23,18 @@ by hand or imported shows **Use the builder** at the top.)
 3. Choose skills, Expertise and the like where your class or background offers them. Expertise is
    limited to what your class and level allow.
 
+![The builder: class, species and background at the top, a "nothing to fix" check, the ability scores with the background's +2 and +1, and the worked-out combat numbers](../images/builder.webp)
+
 From those choices it works out saves, skills, AC, HP, speed, initiative, attacks, weapon
 masteries, class resources, spell slots and features. Each number has a note on how it was worked
 out, and **warnings** list anything still to choose.
 
+![Further down the same sheet: skills with the class's picks and the background's, hit dice and death saves, and attacks worked out from the weapon](../images/builder-sheet.webp)
+
 - **Level up** walks through the new level: hit points (roll, or take the fixed value), new
   features and choices. Each level is kept in the **level log** at the bottom of the sheet.
-- **Starting equipment** fills the inventory with the class and background's starting gear and
-  gold.
+- **Fill starting gear** (in the Inventory panel) fills the inventory with the class and
+  background's starting equipment and gold.
 - **Spells:** choose and prepare spells only up to what your level can cast. **+ From SRD** adds
   spells from the class's list; **+ From a feature** adds ones a feat or feature grants, such as
   Magic Initiate.
@@ -67,9 +73,12 @@ The sheet follows the rules edition of the character's campaign.
 
 ## Rules data
 
-**Rules data** (on the Characters page) lists everything the builder works from:
-- classes, species, backgrounds and feats;
-- their tables, such as costs and what each level gives.
+**Rules data** (on the Characters page) lists everything the builder works from, in tabs:
+**Classes** (with what each level gives), **Species**, **Backgrounds**, **Feats**, **Armor**,
+**Weapons**, **Masteries**, **Items**, and **Settings** (such as point-buy costs, the standard
+array and the highest score).
+
+![Rules data: the tabs along the top, the list of classes, and one class's details](../images/rules-data.webp)
 
 You can change any entry:
 - **Edit** an entry, change it, then **Done** to save. It asks first, because the builder uses the

@@ -3,6 +3,10 @@
 Questodian is a campaign manager and DM screen for 5e, for the 2014 rules (SRD 5.1) and the 2024
 rules (SRD 5.2.1). It runs on your own computer, offline, as a desktop app or in a browser.
 
+![The DM screen with an encounter running](images/dm-screen.webp)
+
+The screenshots in these pages show an invented demo campaign, *The Drowned Abbey*.
+
 ## Using Questodian
 
 | Page | What's in it |

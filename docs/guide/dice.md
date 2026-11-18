@@ -8,6 +8,8 @@ The 🎲 button at the bottom right of every page (except Tools, which has the f
 quick roll. Press **R** to open or close it, when you're not typing in a field; **Escape** closes
 it.
 
+![The quick roll, open over a character sheet: the last roll with advantage shown large, and the history below it](../images/quick-roll.webp)
+
 - Type an expression and press **Enter** or **Roll**, or click a die: d4 to d100, **ADV** or
   **DIS**.
 - The last result shows large, with how it was rolled. It's green on a natural 20 and red on a

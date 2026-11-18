@@ -6,6 +6,8 @@ The DM screen is the home page while a campaign is open. It has three columns. D
 between them to resize them (double-click a border to reset it). **☰** in the top bar hides or
 shows the left column.
 
+![The DM screen: scenes grouped by status on the left, a scene open in the middle, the rules reference on the right](../images/dm-scene.webp)
+
 ## Left: the navigator
 
 Two lists:
@@ -49,6 +51,8 @@ What each kind of record holds:
 | **Handouts** | An image or a map: see [Maps and handouts](maps-and-handouts.md) |
 
 ### Encounters
+
+![An encounter in its first round: the initiative order with HP pills and conditions, and a monster's stat block in the View tab](../images/dm-screen.webp)
 
 - **Difficulty:** set the party's size and level to see how hard the encounter is, from the 2024
   rules' low / moderate / high XP budget.
