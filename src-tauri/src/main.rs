@@ -5,11 +5,9 @@
 //! router `questodian serve` uses, inside this process: the UI from files compiled
 //! into the binary, and the API under `/api`. Nothing listens on the network.
 //!
-//! Set `QUESTODIAN_LOG=1` to print every request. A few addresses belong to the desktop
-//! shell itself: `POST /desktop/players` opens (or brings back) the players' window, for
-//! showing a handout on a second screen (`/desktop/players/fullscreen` toggles it full
-//! screen), and `/desktop/updates` is the update check
-//! (see `updates.rs`).
+//! Addresses under `/desktop/` belong to the desktop app itself (see [`desktop`]): the
+//! players' window for a second screen, and the update check (`updates.rs`).
+//! Set `QUESTODIAN_LOG=1` to print every request.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -86,46 +84,54 @@ fn main() {
         .expect("Questodian failed to start");
 }
 
-/// Answer one request from the app's windows.
+/// Answer one request from the app's windows: the desktop app's own addresses, else the API and UI.
 async fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
-    if request.method() == Method::POST && request.uri().path() == "/desktop/players" {
-        let path = String::from_utf8_lossy(request.body()).into_owned();
-        return match open_players(app, &path) {
-            Ok(()) => status(StatusCode::NO_CONTENT),
-            Err(e) => {
-                eprintln!("questodian: couldn't open the players' window: {e}");
-                status(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        };
+    let (method, path) = (request.method().clone(), request.uri().path().to_string());
+    let response = match path.strip_prefix("/desktop/") {
+        Some(rest) => desktop(app, &method, rest, request.body()).await,
+        None => api(app, request).await,
+    };
+    if std::env::var_os("QUESTODIAN_LOG").is_some() {
+        eprintln!("{method} {path} -> {}", response.status().as_u16());
     }
-    if request.method() == Method::POST && request.uri().path() == "/desktop/players/fullscreen" {
-        // The players' window full screen, or back: for a projector or a TV.
-        let toggled = app.get_webview_window("players").map(|w| {
-            let on = w.is_fullscreen().unwrap_or(false);
-            w.set_fullscreen(!on)
-        });
-        return match toggled {
-            Some(Ok(())) => status(StatusCode::NO_CONTENT),
-            _ => status(StatusCode::NOT_FOUND),
-        };
-    }
-    if let Some(rest) = request.uri().path().strip_prefix("/desktop/updates") {
-        let (method, rest) = (request.method().clone(), rest.to_string());
-        return updates_route(app, &method, &rest, request.body()).await;
-    }
+    response
+}
+
+/// The router `questodian serve` uses, called directly.
+async fn api(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let (mut parts, body) = request.into_parts();
-    let (method, path) = (parts.method.clone(), parts.uri.path().to_string());
     // Only this app's own windows can reach this scheme, so the API's guard against
     // other websites doesn't apply (and their Origin wouldn't match a Host anyway).
     parts.headers.remove(header::ORIGIN);
     let router = app.state::<axum::Router>().inner().clone();
     let response = router.oneshot(Request::from_parts(parts, Body::from(body))).await.expect("the router never fails");
     let (parts, body) = response.into_parts();
-    if std::env::var_os("QUESTODIAN_LOG").is_some() {
-        eprintln!("{method} {path} -> {}", parts.status.as_u16());
-    }
     let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
     Response::from_parts(parts, bytes.to_vec())
+}
+
+/// `POST players` (the players' window at the path in the body), `POST players/fullscreen`,
+/// and `updates...` (the update check).
+async fn desktop(app: &AppHandle, method: &Method, rest: &str, body: &[u8]) -> Response<Vec<u8>> {
+    match (method.as_str(), rest) {
+        ("POST", "players") => match open_players(app, &String::from_utf8_lossy(body)) {
+            Ok(()) => status(StatusCode::NO_CONTENT),
+            Err(e) => {
+                eprintln!("questodian: couldn't open the players' window: {e}");
+                status(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        },
+        // For a projector or a TV.
+        ("POST", "players/fullscreen") => {
+            let toggled =
+                app.get_webview_window("players").map(|w| w.set_fullscreen(!w.is_fullscreen().unwrap_or(false)));
+            status(if matches!(toggled, Some(Ok(()))) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND })
+        }
+        (_, updates) if updates == "updates" || updates.starts_with("updates/") => {
+            updates_route(app, method, &updates["updates".len()..], body).await
+        }
+        _ => status(StatusCode::NOT_FOUND),
+    }
 }
 
 /// `GET` the state; `PUT {check, announced}`; `POST /check`, `/install` or `/page`.
