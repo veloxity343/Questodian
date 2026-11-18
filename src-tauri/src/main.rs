@@ -77,8 +77,8 @@ fn main() {
                 .title(format!("Questodian {}", env!("CARGO_PKG_VERSION")))
                 .inner_size(1600.0, 960.0)
                 .min_inner_size(900.0, 600.0)
-                // The page uses HTML drag and drop (moving panels, dropping a handout image),
-                // which Tauri's own file-drop handler would take over on Windows.
+                // The page takes files by HTML drag and drop (a handout's image), which Tauri's
+                // own file-drop handler would take over on Windows.
                 .disable_drag_drop_handler()
                 .build()?;
             Ok(())

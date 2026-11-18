@@ -70,8 +70,8 @@ interface DM {
   active: DocRef | null;
   open: (ref: DocRef) => void;
   close: (ref: DocRef) => void;
-  /** Move tab `ref` to where `target` is (after it when moving right, before it when moving left). */
-  moveTab: (ref: DocRef, target: DocRef) => void;
+  /** Put the open tabs in this order (the same tabs, rearranged). */
+  orderTabs: (order: DocRef[]) => void;
   create: <K extends DocKind & ListKind>(kind: K, data?: Partial<KindMap[K]>) => Promise<KindMap[K]>;
 
   view: ViewRef | null;
@@ -189,16 +189,9 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
     [setTabs, setActive],
   );
 
-  const moveTab = useCallback(
-    (ref: DocRef, target: DocRef) => {
-      setTabs((t) => {
-        const from = t.findIndex((x) => same(x, ref));
-        const to = t.findIndex((x) => same(x, target));
-        if (from < 0 || to < 0 || from === to) return t;
-        const next = [...t];
-        next.splice(to, 0, ...next.splice(from, 1));
-        return next;
-      });
+  const orderTabs = useCallback(
+    (order: DocRef[]) => {
+      setTabs((t) => (order.length === t.length && t.every((x) => order.some((y) => same(x, y))) ? order : t));
     },
     [setTabs],
   );
@@ -255,7 +248,7 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
 
   const value: DM = {
     campaign, edition: campaign.edition, lists, loaded, reload, upsert, remove, get,
-    tabs, active, open, close, moveTab, create, view, show, rightTab, setRightTab, encounterId, followLink,
+    tabs, active, open, close, orderTabs, create, view, show, rightTab, setRightTab, encounterId, followLink,
   };
   return <DMContext.Provider value={value}>{children}</DMContext.Provider>;
 }

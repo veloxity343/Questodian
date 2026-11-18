@@ -1,15 +1,15 @@
 // Workspace documents: sessions, the campaign overview, and handouts.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { EmptyState, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
-import { useDebounced, useDraft } from "../lib/hooks";
+import { useDebounced, useDraft, usePanZoom } from "../lib/hooks";
 import { openPlayersWindow, togglePlayersFullscreen } from "../lib/desktop";
 import { blankMap, isMap, mapOf, type MapData } from "../lib/map";
-import { fmtDate, titleCase, zoomAround } from "../lib/util";
+import { fmtDate, titleCase } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
 import { TrackerWidget } from "./docs";
 import { MapEditor, MapTokensFromPlayers, PlayersMap } from "./map";
@@ -379,21 +379,11 @@ function PanZoom({ src, alt, view, onView, interactive = true }: {
   onView?: (v: ViewState) => void;
   interactive?: boolean;
 }) {
-  const drag = useRef<{ x: number; y: number } | null>(null);
-  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-    onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), [0.2, 8]));
-  };
-  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.current && onView) onView({ ...view, x: e.clientX - drag.current.x, y: e.clientY - drag.current.y });
-  };
+  const pan = usePanZoom(view, onView, [0.2, 8]);
   return (
-    <div className={`panzoom ${interactive ? "interactive" : ""}`} onWheel={interactive ? onWheel : undefined}
-      onPointerDown={interactive ? onDown : undefined} onPointerMove={interactive ? onMove : undefined}
-      onPointerUp={() => (drag.current = null)}>
+    <div className={`panzoom ${interactive ? "interactive" : ""}`} onWheel={interactive ? pan.onWheel : undefined}
+      onPointerDown={interactive ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); pan.start(e); } : undefined}
+      onPointerMove={interactive ? pan.move : undefined} onPointerUp={pan.end} onPointerCancel={pan.end}>
       <img src={src} alt={alt} draggable={false} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }} />
     </div>
   );

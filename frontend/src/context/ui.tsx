@@ -61,7 +61,11 @@ export function Modal({ title, children, actions = [], onClose }: {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dlg = ref.current;
-    if (dlg && !dlg.open) dlg.showModal();
+    if (!dlg || dlg.open) return;
+    dlg.showModal();
+    // showModal focuses the first button (the ✕); a field marked `data-autofocus` should have it.
+    // (React's autoFocus runs before the dialog opens, so it can't be used here.)
+    dlg.querySelector<HTMLElement>("[data-autofocus]")?.focus();
   }, []);
   return (
     <dialog
@@ -157,7 +161,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             <input
               type="text"
               className="wide"
-              autoFocus
+              data-autofocus
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && close(text)}

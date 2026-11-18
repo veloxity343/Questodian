@@ -140,7 +140,8 @@ export function HistoryItem({ r }: { r: RollEntry }) {
   );
 }
 
-const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100];
+/** The dice on every roller. */
+export const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100];
 
 /** The floating quick roll, on every screen but the Tools page (which has the full roller). */
 function DiceTray({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean) => boolean) => void }) {

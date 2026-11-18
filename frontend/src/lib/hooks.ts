@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readPref, writePref } from "./util";
+import { readPref, writePref, zoomAround } from "./util";
 
 /** The latest value of each pref, in case localStorage is unavailable. */
 const prefs = new Map<string, unknown>();
@@ -139,19 +139,25 @@ export function useDraft<T>(
  * With `lane` (items of one size in a row, like tabs), `onMove(id, target)` runs live as the
  * pointer comes over each item; the pointer only counts across, and near either end the lane
  * scrolls along. Without it (items of mixed sizes, which reflow as they move), `over` names the
- * item under the pointer and `onMove` runs once, on release. Escape cancels.
+ * item under the pointer and `onMove` runs once, on release. Escape cancels; with a lane, the
+ * live moves are undone by `onCancel`.
  */
-export function useDragReorder(onMove: (id: string, target: string) => void, lane?: { current: HTMLElement | null }) {
+export function useDragReorder(
+  onMove: (id: string, target: string) => void,
+  { lane, onCancel }: { lane?: { current: HTMLElement | null }; onCancel?: () => void } = {},
+) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const press = useRef<{ id: string; x: number; y: number; moved: boolean; over: string } | null>(null);
+  const press = useRef<{ id: string; x: number; y: number; moved: boolean; over: string; cancelled?: boolean } | null>(null);
   const moveRef = useRef(onMove);
   moveRef.current = onMove;
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
 
   useEffect(() => {
     const onPointerMove = (e: PointerEvent) => {
       const p = press.current;
-      if (!p) return;
+      if (!p || p.cancelled) return;
       if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
       if (!p.moved) {
         p.moved = true;
@@ -178,16 +184,20 @@ export function useDragReorder(onMove: (id: string, target: string) => void, lan
       if (!p?.moved) return;
       setDragging(null);
       setOver(null);
-      if (!lane?.current && e.type === "pointerup" && p.over && p.over !== p.id) moveRef.current(p.id, p.over);
+      if (!p.cancelled && !lane?.current && e.type === "pointerup" && p.over && p.over !== p.id) moveRef.current(p.id, p.over);
+      // The release would also click what's under it; swallow that one click.
       const swallow = (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
       window.addEventListener("click", swallow, { capture: true, once: true });
       setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !press.current) return;
-      press.current = null;
+      const p = press.current;
+      if (e.key !== "Escape" || !p?.moved || p.cancelled) return;
+      // Stay pressed until release, so that release's click is still swallowed.
+      p.cancelled = true;
       setDragging(null);
       setOver(null);
+      if (lane?.current) cancelRef.current?.();
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onUp);
@@ -205,4 +215,24 @@ export function useDragReorder(onMove: (id: string, target: string) => void, lan
     if (e.button === 0) press.current = { id, x: e.clientX, y: e.clientY, moved: false, over: id };
   }, []);
   return { dragging, over, start };
+}
+
+/**
+ * Wheel to zoom around the cursor and drag to pan, for anything drawn with
+ * `translate(x, y) scale(zoom)`: handout images and maps. `start` begins a pan from a pointerdown,
+ * `move` follows it (false when not panning), `end` stops it.
+ */
+export function usePanZoom<V extends { zoom: number; x: number; y: number }>(view: V, onView: ((v: V) => void) | undefined, limits: [number, number]) {
+  const from = useRef<{ x: number; y: number } | null>(null);
+  return {
+    onWheel: (e: { clientX: number; clientY: number; deltaY: number; currentTarget: Element }) =>
+      onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), limits)),
+    start: (e: { clientX: number; clientY: number }) => { from.current = { x: e.clientX - view.x, y: e.clientY - view.y }; },
+    move: (e: { clientX: number; clientY: number }) => {
+      if (!from.current) return false;
+      onView?.({ ...view, x: e.clientX - from.current.x, y: e.clientY - from.current.y });
+      return true;
+    },
+    end: () => { from.current = null; },
+  };
 }

@@ -96,6 +96,7 @@ a.card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .char-cards { align-items: stretch; }
 .char-card > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .char-card-campaign { min-height: 1.6rem; margin-bottom: 4px; }
+.char-card > p { min-height: 1.5em; }
 .char-card-campaign .tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .char-card .card-meta { flex-wrap: nowrap; }
 .char-card .card-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -188,9 +189,6 @@ textarea.mono { font-family: var(--mono); font-size: 0.88rem; }
 /* ---------------------------------------------------------------- session */
 .page-head > div:first-child { flex: 1 1 320px; min-width: 0; }
 .toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.hp-cell { min-width: 110px; }
-.hp-text { font-size: 0.9rem; display: flex; gap: 4px; align-items: center; }
-.hp-amt { width: 64px; }
 .hp-bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 4px; }
 .hp-fill { height: 100%; background: var(--ok); transition: width 0.25s; }
 .hp-fill[data-level="warn"] { background: var(--warn); }

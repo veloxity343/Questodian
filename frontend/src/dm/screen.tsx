@@ -7,6 +7,7 @@ import { EmptyState, HpBar, Loading } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
 import { useDragReorder, usePref } from "../lib/hooks";
+import { placed } from "../lib/util";
 import { blankMap } from "../lib/map";
 import type { Campaign, KindMap, Scene, SceneStatus } from "../types";
 import { MonsterDoc, NoteDoc, NpcDoc, SceneDoc, TrackerDoc } from "./docs";
@@ -241,8 +242,8 @@ function EncounterList() {
 
 /** Tabs share the strip's width like a browser's, shrinking to a minimum (and dropping the kind
  *  badge when narrow). Past that the strip pages with ‹ › instead of scrolling, so the mouse
- *  wheel stays free for the page, and the open tab is always brought into view. */
-/** `active` is compared by identity: opening a tab, even the open one, makes a new ref and brings it into view. */
+ *  wheel stays free for the page, and the open tab is always brought into view: `active` is
+ *  compared by identity, so opening a tab, even the open one, brings it back. */
 function useTabStrip(count: number, active: DocRef | null) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -261,6 +262,8 @@ function useTabStrip(count: number, active: DocRef | null) {
     el.addEventListener("scroll", update);
     return () => { observer.disconnect(); el.removeEventListener("scroll", update); };
   }, []);
+  const overflow = !(ends.start && ends.end);
+  // Also when the ‹ › appear or go, which changes the room the tabs have.
   useEffect(() => {
     const el = ref.current?.querySelector<HTMLElement>(".doc-tab.on");
     const strip = ref.current;
@@ -270,9 +273,9 @@ function useTabStrip(count: number, active: DocRef | null) {
       else if (left + el.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + el.offsetWidth - strip.clientWidth;
     }
     update();
-  }, [active, count]);
+  }, [active, count, overflow]);
   const page = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
-  return { ref, narrow: count > 0 && width / count < 160, overflow: !(ends.start && ends.end), ends, page };
+  return { ref, narrow: count > 0 && width / count < 160, overflow, ends, page };
 }
 
 function Workspace({ campaign }: { campaign: Campaign }) {
@@ -281,11 +284,12 @@ function Workspace({ campaign }: { campaign: Campaign }) {
   const label = (r: DocRef) => r.kind === "campaigns" ? campaign.name : titleOf(r.kind as ListKind, dm.get(r.kind as ListKind, r.id));
   const strip = useTabStrip(dm.tabs.length, dm.active);
   const key = (t: DocRef) => `${t.kind}:${t.id}`;
+  const before = useRef<DocRef[]>([]);
   const drag = useDragReorder((id, target) => {
-    const find = (k: string) => dm.tabs.find((t) => key(t) === k);
-    const [a, b] = [find(id), find(target)];
-    if (a && b) dm.moveTab(a, b);
-  }, strip.ref);
+    const keys = dm.tabs.map(key);
+    const order = placed(keys, id, target, keys.indexOf(id) < keys.indexOf(target));
+    dm.orderTabs(order.map((k) => dm.tabs.find((t) => key(t) === k)!));
+  }, { lane: strip.ref, onCancel: () => dm.orderTabs(before.current) });
   return (
     <section className="workspace">
       <div className="doc-tab-bar">
@@ -298,7 +302,11 @@ function Workspace({ campaign }: { campaign: Campaign }) {
           return (
             <div key={key(t)} data-reorder={key(t)} className={`doc-tab ${on ? "on" : ""} ${drag.dragging === key(t) ? "dragging" : ""}`}
               role="tab" aria-selected={on} title={label(t)}
-              onPointerDown={(e) => !(e.target as HTMLElement).closest(".doc-tab-x") && drag.start(key(t), e)}
+              onPointerDown={(e) => {
+                if ((e.target as HTMLElement).closest(".doc-tab-x")) return;
+                before.current = dm.tabs;
+                drag.start(key(t), e);
+              }}
               onMouseDown={(e) => e.button === 1 && dm.close(t)}>
               <button type="button" className="doc-tab-main" onClick={() => dm.open(t)}>
                 <span className="kind-badge">{KIND_LABEL[t.kind]}</span><span className="doc-tab-title">{label(t)}</span>

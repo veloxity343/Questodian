@@ -2,7 +2,7 @@
 // text, markers, party tokens and fog. The same drawing shows on the players' screen, where
 // fogged cells, secret doors and secret notes stay hidden.
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "../api";
@@ -13,7 +13,8 @@ import {
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
 import { emptyHistory, redo, remember, undo } from "../lib/history";
-import { download, slug, zoomAround } from "../lib/util";
+import { usePanZoom } from "../lib/hooks";
+import { download, slug } from "../lib/util";
 import type { Character } from "../types";
 
 export interface MapViewState { zoom: number; x: number; y: number }
@@ -158,7 +159,7 @@ function MapStage({ map, view, onView, players = false, children, tool }: {
   children?: ReactNode;
 }) {
   const svg = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ x: number; y: number } | null>(null);
+  const pan = usePanZoom(view, onView, [0.15, 6]);
   const { width, height } = mapSize(map);
   // A point on the page, in the map's own px, and what's drawn there (found by position: while
   // a drag holds the pointer, events name the map rather than the token or marker under it).
@@ -170,25 +171,21 @@ function MapStage({ map, view, onView, players = false, children, tool }: {
       target: document.elementFromPoint(e.clientX, e.clientY) ?? undefined,
     };
   };
-  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-    onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), [0.15, 6]));
-  };
   // The middle and right buttons always pan; the left one does whatever the tool does, or pans.
   const panning = (e: ReactPointerEvent) => !tool || e.button !== 0 || !tool.down(toMap(e), e);
   return (
-    <div className="map-stage" onWheel={onWheel} onContextMenu={(e) => e.preventDefault()}>
+    <div className="map-stage" onWheel={pan.onWheel} onContextMenu={(e) => e.preventDefault()}>
       <MapSvg map={map} players={players} svgRef={svg}
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
-          if (panning(e)) drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
+          if (panning(e)) pan.start(e);
         }}
         onPointerMove={(e) => {
-          if (drag.current) onView?.({ ...view, x: e.clientX - drag.current.x, y: e.clientY - drag.current.y });
-          else if (e.buttons) tool?.move(toMap(e), e);
+          if (!pan.move(e) && e.buttons) tool?.move(toMap(e), e);
         }}
         onPointerUp={() => {
-          drag.current = null;
+          pan.end();
           tool?.up();
         }}
         onDoubleClick={(e) => tool?.double?.(toMap(e))} />

@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { useDragReorder, usePref } from "../lib/hooks";
+import { placed } from "../lib/util";
 import { Splitter } from "./splitter";
 
 export type Width = "third" | "half" | "two-thirds" | "full";
@@ -28,15 +29,6 @@ interface Layout {
 const EMPTY: Layout = { order: [], hidden: [], collapsed: [], width: {}, height: {} };
 /** The grid's row unit; each card spans as many as its height needs. */
 const ROW = 4;
-
-/** `order` with `x` moved next to `target`: after it, or before it. Hidden panels keep their places. */
-export function placed(order: string[], x: string, target: string, after: boolean): string[] {
-  const next = order.filter((y) => y !== x);
-  const at = next.indexOf(target);
-  if (at < 0) return order;
-  next.splice(after ? at + 1 : at, 0, x);
-  return next;
-}
 
 export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const [stored, setLayout] = usePref<Layout>(`layout.${id}`, EMPTY);

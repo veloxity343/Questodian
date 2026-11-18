@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placed } from "./board";
+import { placed } from "./util";
 
 describe("arranging panels", () => {
   it("moves a panel past its visible neighbour, wherever hidden ones sit", () => {

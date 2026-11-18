@@ -104,3 +104,13 @@ export function writePref(key: string, value: unknown) {
     /* storage unavailable: preferences just won't persist */
   }
 }
+
+/** `order` with `x` moved next to `target`: after it, or before it. Others keep their places
+ *  (a page's hidden panels too). Used to rearrange panels and the DM screen's tabs. */
+export function placed<T>(order: T[], x: T, target: T, after: boolean): T[] {
+  const next = order.filter((y) => y !== x);
+  const at = next.indexOf(target);
+  if (at < 0) return order;
+  next.splice(after ? at + 1 : at, 0, x);
+  return next;
+}

@@ -59,7 +59,7 @@ export function SrdPicker({ category, className = "", onPick, onClose, maxLevel,
   return (
     <Modal title="Add from SRD" onClose={onClose} actions={[{ label: "Done", primary: true }]}>
       <div className="stack">
-        <input type="search" className="wide" autoFocus placeholder={`Search ${category.replace("-", " ")}…`} value={q} onChange={(e) => setQ(e.target.value)} />
+        <input type="search" className="wide" data-autofocus placeholder={`Search ${category.replace("-", " ")}…`} value={q} onChange={(e) => setQ(e.target.value)} />
         {category === "spells" && className && (
           <label className="check small"><Checkbox checked={onlyClass} onChange={setOnlyClass} /> Only {className} spells</label>
         )}

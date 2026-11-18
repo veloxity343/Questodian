@@ -3,11 +3,9 @@ import { api } from "../api";
 import { Board } from "../components/board";
 import { NumInput, Select } from "../components/ui";
 import { useApp } from "../context/app";
-import { HistoryItem, useDice } from "../context/dice";
+import { DIE_SIDES, HistoryItem, useDice } from "../context/dice";
 import { useDialogs } from "../context/ui";
 import { modOf, profBonus, signed } from "../lib/util";
-
-const DICE = [4, 6, 8, 10, 12, 20, 100];
 
 export function Tools() {
   return (
@@ -33,7 +31,7 @@ export function Tools() {
 
 function buildExpression(pool: Record<number, number>, mod: number, mode: string) {
   const parts: string[] = [];
-  for (const sides of [...DICE].reverse()) {
+  for (const sides of [...DIE_SIDES].reverse()) {
     const n = pool[sides];
     if (!n) continue;
     if (sides === 20 && mode !== "normal") {
@@ -75,7 +73,7 @@ function Roller() {
     <section className="panel">
       <h2>Dice roller</h2>
       <div className="die-row big">
-        {DICE.map((s) => (
+        {DIE_SIDES.map((s) => (
           <button
             type="button" key={s} className="die-btn" title={`Add a d${s} (right-click removes)`}
             onClick={() => change({ ...pool, [s]: (pool[s] || 0) + 1 }, mod, mode)}
