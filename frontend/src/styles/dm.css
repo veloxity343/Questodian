@@ -95,7 +95,9 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 /* Tabs share the width as a browser's do; past their minimum the ‹ › buttons page through them. */
 .doc-tabs { display: flex; flex: 1; min-width: 0; overflow: hidden; }
 .doc-tab { display: flex; align-items: center; border-right: 1px solid var(--border); flex: 0 1 240px; min-width: 110px; }
-.doc-tab.dragging { opacity: 0.5; }
+.doc-tab { user-select: none; touch-action: pan-y; }
+.doc-tab.dragging { opacity: 0.6; cursor: grabbing; }
+.doc-tab.dragging .doc-tab-main { cursor: grabbing; }
 .doc-tab-main { display: flex; align-items: center; gap: 6px; flex: 1; background: none; border: 0; color: var(--muted); padding: 8px 4px 8px 10px; cursor: pointer; min-width: 0; }
 .doc-tab-main .kind-badge { flex: none; }
 .doc-tabs.narrow .kind-badge { display: none; }
