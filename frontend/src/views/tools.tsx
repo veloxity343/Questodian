@@ -108,7 +108,7 @@ function Roller() {
           <li><code>3d6!</code> exploding dice · <code>2d6ro2</code> reroll 1–2 once (Great Weapon Fighting) · <code>r1</code> reroll 1s until not 1</li>
           <li><code>d%</code> percentile · <code>4dF</code> Fate dice</li>
           <li>Math: <code>+ − × / // % ^ ( )</code> and <code>floor ceil round abs min max sqrt mod(score) prof(level)</code></li>
-          <li>Press <kbd>R</kbd> anywhere to open the quick roller.</li>
+          <li>On every other page, press <kbd>R</kbd> (or click 🎲) for the quick roll.</li>
         </ul>
       </details>
     </section>
