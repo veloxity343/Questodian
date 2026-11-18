@@ -74,13 +74,14 @@ export function CharacterList() {
         </div>
       </header>
       {list.length ? (
-        <div className="cards">
+        <div className="cards char-cards">
           {list.map((ch) => {
             const camp = campaigns.find((c) => c.id === ch.campaign_id);
             const d = derive(ch, meta, camp?.edition);
             return (
               <Link key={ch.id} className="card char-card" to={`/characters/${ch.id}`}>
                 <h3>{ch.name}</h3>
+                <div className="char-card-campaign">{camp && <span className="tag">{camp.name}</span>}</div>
                 <p className="muted">{[ch.race, ch.classes.map((c) => `${c.name} ${c.level}`).join(" / ")].filter(Boolean).join(" · ")}</p>
                 <HpBar current={ch.hp.current} max={ch.hp.max} />
                 <div className="card-meta">
@@ -88,7 +89,6 @@ export function CharacterList() {
                   <span>AC {ch.ac}</span>
                   <span>PP {d.passive.perception}</span>
                   {ch.player && <span>🎮 {ch.player}</span>}
-                  {camp && <span className="tag">{camp.name}</span>}
                 </div>
               </Link>
             );
