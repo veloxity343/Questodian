@@ -493,7 +493,9 @@ pub async fn add_log(repo: &mut Repo<'_>, session_id: &str, body: LogIn) -> Resu
 /// A short or long rest, by the character's campaign edition.
 pub async fn rest(repo: &mut Repo<'_>, character_id: &str, kind: RestKind) -> Result<Value> {
     let mut ch: Character = repo.get_as(Kind::Characters, character_id).await?;
-    let edition = edition_of(repo, &ch.campaign_id).await?;
+    // The character builder uses the 2024 rules, whatever the campaign's edition.
+    let built = crate::builder::builds(&ch.build, &repo.rule_overrides().await?);
+    let edition = if built { Edition::E2024 } else { edition_of(repo, &ch.campaign_id).await? };
     let long = kind == RestKind::Long;
     // 2014: a long rest needs 1 HP at the start (rules/resting). 2024: both rests do.
     if ch.hp.current < 1 && (long || edition == Edition::E2024) {
@@ -518,14 +520,13 @@ pub async fn rest(repo: &mut Repo<'_>, character_id: &str, kind: RestKind) -> Re
         }
     }
     for resource in &mut ch.resources {
-        let resets = match resource.reset {
-            crate::schemas::Reset::Short => true,
-            crate::schemas::Reset::Long => long,
-            crate::schemas::Reset::Never => false,
+        use crate::schemas::Reset;
+        resource.current = match resource.reset {
+            Reset::Short => resource.max,
+            Reset::Long | Reset::ShortOne if long => resource.max,
+            Reset::ShortOne => (resource.current + 1).min(resource.max).max(resource.current),
+            Reset::Long | Reset::Never => resource.current,
         };
-        if resets {
-            resource.current = resource.max;
-        }
     }
     repo.save_as(Kind::Characters, &ch).await
 }

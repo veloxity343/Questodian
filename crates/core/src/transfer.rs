@@ -10,6 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 
+use crate::builder;
 use crate::error::{Error, Result, invalid};
 use crate::kinds::{Kind, LINKS};
 use crate::repo::{Repo, new_id, now, valid_id};
@@ -17,8 +18,10 @@ use crate::rules::{self, ABILITIES, ABILITY_NAMES};
 use crate::schemas::{Character, Edition, Session};
 
 pub const FORMAT: &str = "questodian";
-/// 2: DM screen records; sessions no longer hold an encounter.
-pub const VERSION: i64 = 2;
+/// The bundle format. 1: a session holds its encounter. 2: DM screen records, encounters on
+/// their own. 3: characters' builder choices, rules data edits and drawn maps (older versions
+/// refuse these files rather than import them without those).
+pub const VERSION: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -55,6 +58,9 @@ fn text<'a>(doc: &'a Value, key: &str) -> &'a str {
 
 // --------------------------------------------------------------------------- export
 
+/// The collection holding edits to the character builder's rules data (full exports only).
+const RULE_EDITS: &str = "rule_overrides";
+
 /// Everything, or one campaign together with the records linked to it. Handout images
 /// are embedded (base64) so the bundle is self-contained.
 pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Result<Value> {
@@ -86,6 +92,12 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
             for kind in Kind::ALL {
                 collections.insert(kind.plural().into(), Value::Array(repo.list(kind, &[]).await?));
             }
+            let edits = repo.rule_overrides().await?;
+            let edits = edits
+                .into_iter()
+                .map(|o| json!({"kind": o.kind, "key": o.key, "data": o.data, "updated": o.updated}))
+                .collect();
+            collections.insert(RULE_EDITS.into(), Value::Array(edits));
         }
     }
     if let Some(Value::Array(handouts)) = collections.get_mut("handouts") {
@@ -156,6 +168,38 @@ fn collections_from(payload: &Value) -> Result<HashMap<Kind, Vec<Value>>> {
     Ok(out)
 }
 
+/// One rules data edit from a full export.
+struct RuleEdit {
+    kind: String,
+    key: String,
+    data: Option<Value>,
+    updated: Option<String>,
+}
+
+/// Edits to the rules data in a full export, checked like edits made in the app. An edit that
+/// doesn't fit this version's rules data (hiding an entry that's no longer bundled, a kind it
+/// doesn't know) is left out and counted, rather than refusing the whole file.
+fn rule_edits_from(payload: &Value) -> Result<(Vec<RuleEdit>, usize)> {
+    let Some(edits) = payload.get("collections").and_then(|c| c.get(RULE_EDITS)) else { return Ok((Vec::new(), 0)) };
+    let Value::Array(edits) = edits else { return Err(invalid(format!("'{RULE_EDITS}' must be a list"))) };
+    let mut out = Vec::new();
+    let mut unusable = 0;
+    for edit in edits {
+        let (kind, key) = (text(edit, "kind"), text(edit, "key").trim());
+        let data = edit.get("data").filter(|d| !d.is_null()).cloned();
+        match builder::check(kind, key, data) {
+            Ok(data) => out.push(RuleEdit {
+                kind: kind.to_string(),
+                key: key.to_string(),
+                data,
+                updated: Some(text(edit, "updated").to_string()).filter(|u| !u.is_empty()),
+            }),
+            Err(_) => unusable += 1,
+        }
+    }
+    Ok((out, unusable))
+}
+
 /// Version 1 sessions carried one `encounter`; turn those into encounter records.
 fn upgrade_v1(collections: &mut HashMap<Kind, Vec<Value>>) {
     let mut found = Vec::new();
@@ -188,6 +232,7 @@ type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
 /// written, and the caller's unit of work makes it all-or-nothing.
 pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Result<Value> {
     let collections = collections_from(payload)?;
+    let (rule_edits, unusable_edits) = rule_edits_from(payload)?;
     let mut docs: Checked = HashMap::new();
     for kind in Kind::ALL {
         let mut checked = Vec::new();
@@ -232,6 +277,13 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
                     }
                 }
                 if kind == Kind::Handouts {
+                    // Overwriting a handout replaces its image; the old file goes once the import is saved.
+                    if mode == Mode::Overwrite && repo.exists(kind, &id).await? {
+                        let old = repo.get(kind, &id).await?;
+                        if let Some(path) = handout_file(&repo.files_dir, text(&old, "filename")) {
+                            repo.remove_on_commit(path);
+                        }
+                    }
                     let name = match image {
                         Some(bytes) => store_image(&repo.files_dir, &doc, &bytes)?,
                         None => String::new(),
@@ -249,6 +301,25 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
             }
             if passed > 0 {
                 skipped.insert(kind.plural().into(), json!(passed));
+            }
+        }
+        if !rule_edits.is_empty() || unusable_edits > 0 {
+            let existing = repo.rule_overrides().await?;
+            let (mut done, mut passed) = (0, unusable_edits);
+            for edit in &rule_edits {
+                let exists = existing.iter().any(|o| o.kind == edit.kind && o.key == edit.key);
+                if exists && mode != Mode::Overwrite {
+                    passed += 1;
+                    continue;
+                }
+                repo.save_rule_override(&edit.kind, &edit.key, edit.data.as_ref(), edit.updated.as_deref()).await?;
+                done += 1;
+            }
+            if done > 0 {
+                imported.insert(RULE_EDITS.into(), json!(done));
+            }
+            if passed > 0 {
+                skipped.insert(RULE_EDITS.into(), json!(passed));
             }
         }
         Ok::<(), Error>(())
@@ -310,6 +381,12 @@ fn remap_ids(docs: &mut Checked) {
                         for field in ["character_id", "monster_id", "npc_id"] {
                             swap(&mut c[field]);
                         }
+                    }
+                }
+                Kind::Handouts => {
+                    let tokens = doc.get_mut("map").and_then(|m| m.get_mut("tokens")).and_then(Value::as_array_mut);
+                    for link in tokens.into_iter().flatten().filter_map(|t| t.get_mut("character_id")) {
+                        swap(link);
                     }
                 }
                 Kind::Npcs => {

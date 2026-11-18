@@ -1,10 +1,9 @@
-// The DM screen's right-hand panel: Reference / View / Notes, with the dice dock below.
+// The DM screen's side panel: Reference / View / Notes. Dice are in the quick roll, as on every screen.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { HpBar, Markdown, NumInput, Select, type Option } from "../components/ui";
-import { Breakdown, HistoryItem, useDice } from "../context/dice";
 import { useToast } from "../context/ui";
 import { derive } from "../lib/derive";
 import { useDebounced, usePref } from "../lib/hooks";
@@ -30,7 +29,6 @@ export function RightPanel() {
         {dm.rightTab === "view" && <ViewTab />}
         {dm.rightTab === "notes" && <NotesTab />}
       </div>
-      <DiceDock />
     </aside>
   );
 }
@@ -255,44 +253,5 @@ function NotesTab() {
         </ul>
       ) : <p className="muted pad">No notes yet.</p>}
     </div>
-  );
-}
-
-// ------------------------------------------------------------------ dice
-
-function DiceDock() {
-  const { roll, history, clearHistory } = useDice();
-  const [expr, setExpr] = useState("");
-  const [open, setOpen] = usePref("dm.dice.history", true);
-  const last = history[0];
-  const recent = useMemo(() => history.slice(1, 30), [history]);
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <section className="dice-dock" aria-label="Dice">
-      <div className="eyebrow">Dice</div>
-      <div className="row gap">
-        <input ref={input} type="text" className="grow mono" placeholder="2d6+4" value={expr} aria-label="Dice expression"
-          onChange={(e) => setExpr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && expr.trim() && roll(expr.trim())} />
-        <button type="button" className="btn primary" onClick={() => expr.trim() && roll(expr.trim())}>Roll</button>
-      </div>
-      <div className="die-row">
-        {[4, 6, 8, 10, 12, 20, 100].map((s) => <button type="button" key={s} className="die-chip" onClick={() => roll(`1d${s}`)}>d{s}</button>)}
-      </div>
-      <div className={`dice-result ${last?.critical ? "crit" : last?.fumble ? "fumble" : ""}`}>
-        {last ? (
-          <>
-            {last.label && <div className="muted small">{last.label}</div>}
-            <div className="dice-total">{last.total}</div>
-            <div className="muted small mono"><Breakdown result={last} /></div>
-          </>
-        ) : <span className="muted small">Click any dice in the text, or roll here.</span>}
-      </div>
-      <div className="row gap history-head">
-        <button type="button" className="link small muted" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} History</button>
-        <span className="grow" />
-        <button type="button" className="link small muted" onClick={clearHistory}>clear</button>
-      </div>
-      {open && <ul className="roll-list">{recent.map((r) => <HistoryItem key={r.time + r.expression} r={r} />)}</ul>}
-    </section>
   );
 }

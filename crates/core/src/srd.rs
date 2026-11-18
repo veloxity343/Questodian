@@ -147,7 +147,8 @@ pub struct SearchResults {
 ///
 /// `filters` match an entry's structured `data`, e.g. `level=3` for spells or
 /// `cr_label=1/4` for monsters. Comparison ignores case, and a list field matches if
-/// any item does.
+/// any item does. A key ending in `_max` is an upper limit on a number: `level_max=3` is
+/// spells of level 3 or lower.
 pub fn search(
     edition: Edition,
     query: &str,
@@ -193,6 +194,11 @@ pub fn search(
 
 fn matches_filters(data: &Map<String, Value>, filters: &[(String, String)]) -> bool {
     filters.iter().filter(|(_, want)| !want.is_empty()).all(|(key, want)| {
+        if let Some(field) = key.strip_suffix("_max")
+            && let Ok(limit) = want.trim().parse::<f64>()
+        {
+            return data.get(field).and_then(Value::as_f64).is_some_and(|n| n <= limit);
+        }
         let want = want.to_lowercase();
         match data.get(key) {
             Some(Value::Array(items)) => items.iter().any(|item| python_str(item).to_lowercase() == want),
@@ -247,6 +253,12 @@ mod tests {
         let found = search(Edition::E2014, "", "spells", &filters, 500, 0);
         assert!(found.total > 10);
         assert!(found.results.iter().all(|e| e.data["level"] == 3));
+
+        let up_to_two = [("level_max".to_string(), "2".to_string()), ("classes".to_string(), "Wizard".to_string())];
+        let found = search(Edition::E2024, "", "spells", &up_to_two, 500, 0);
+        assert!(found.total > 20, "{}", found.total);
+        assert!(found.results.iter().all(|e| e.data["level"].as_i64().is_some_and(|l| l <= 2)));
+        assert!(found.results.iter().any(|e| e.data["level"] == 0), "cantrips count as level 0");
     }
 
     #[test]

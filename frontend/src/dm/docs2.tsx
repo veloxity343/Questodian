@@ -1,15 +1,18 @@
 // Workspace documents: sessions, the campaign overview, and handouts.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { EmptyState, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
-import { useDebounced, useDraft } from "../lib/hooks";
+import { useDebounced, useDraft, usePanZoom } from "../lib/hooks";
+import { openPlayersWindow, togglePlayersFullscreen } from "../lib/desktop";
+import { blankMap, isMap, mapOf, type MapData } from "../lib/map";
 import { fmtDate, titleCase } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
 import { TrackerWidget } from "./docs";
+import { MapEditor, MapTokensFromPlayers, PlayersMap } from "./map";
 import { DocHeader, Pills, Section, useDeleteRecord, useRecordDraft } from "./parts";
 import { useDM, useParty } from "./store";
 
@@ -289,24 +292,15 @@ export function CampaignDoc() {
 const PROJECT_CHANNEL = "questodian-project";
 interface ViewState { id: string; zoom: number; x: number; y: number }
 
-/** Open (or retarget) the players' window. Desktop builds route this through the native shell. */
-export function projectHandout() {
-  const url = "/project";
-  // The desktop app answers this address itself; in a browser it doesn't exist.
-  if (location.protocol === "questodian:" || location.hostname === "questodian.localhost") {
-    void fetch("/desktop/players", { method: "POST", body: url });
-    return;
-  }
-  window.open(url, "questodian-players", "popup,width=1280,height=800");
-}
-
 export function HandoutDoc({ initial }: { initial: Handout }) {
   const dm = useDM();
   const toast = useToast();
+  const { confirm } = useDialogs();
   const { doc, edit, setDoc, discard, status } = useRecordDraft("handouts", initial);
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<ViewState>({ id: initial.id, zoom: 1, x: 0, y: 0 });
   const [casting, setCasting] = useState(false);
+  const party = useParty();
   const onDelete = useDeleteRecord("handouts", initial.id, initial.title, discard);
   const channel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
@@ -333,26 +327,55 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
       toast((e as Error).message, "error");
     }
   };
+  // A handout is an image or a map; switching removes the other, after asking.
+  const drawInstead = async () => {
+    if (!(await confirm("This removes the image from this handout. Draw a map instead?", { label: "Remove the image" }))) return;
+    try {
+      await api.removeHandoutImage(doc.id);
+      edit((d) => { d.filename = ""; d.mime = ""; d.map = blankMap() as unknown as Record<string, unknown>; });
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const imageInstead = async () => {
+    if (await confirm("This removes the drawn map from this handout. Use an image instead?", { label: "Remove the map" })) {
+      edit((d) => void (d.map = {}));
+    }
+  };
   const folders = [...new Set(dm.lists.handouts.map((h) => h.folder).filter(Boolean))];
+  const drawn = isMap(doc.map) ? mapOf(doc.map) : null;
   return (
-    <article className="doc" onPaste={(e) => upload(e.clipboardData.files[0])}>
+    <article className="doc" onPaste={(e) => !drawn && upload(e.clipboardData.files[0])}>
       <DocHeader kind="handouts" status={status} editing={editing} setEditing={setEditing} onDelete={onDelete} linkName={doc.title}
         title={editing ? <TextInput className="title-input" value={doc.title} onChange={set("title")} aria-label="Title" /> : doc.title}
         subtitle={editing ? (
           <><TextInput list="handout-folders" value={doc.folder} onChange={set("folder")} placeholder="Folder (e.g. Maps / Session 1)" aria-label="Folder" />
             <datalist id="handout-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist></>
         ) : <span className="muted">{doc.folder}</span>}
-        extra={doc.filename ? (
+        extra={doc.filename || drawn ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
-              onClick={() => { setCasting(true); void api.project(view).then(() => projectHandout()); }}>
+              onClick={() => { setCasting(true); void api.project(view).then(() => openPlayersWindow()); }}>
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>
+            {drawn ? (
+              <button type="button" className="btn small ghost" onClick={imageInstead}>Use an image instead…</button>
+            ) : (
+              <>
+                <label className="btn small ghost upload-btn"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
+                <button type="button" className="btn small ghost" onClick={drawInstead}>Draw a map instead…</button>
+              </>
+            )}
           </>
         ) : undefined}
       />
-      {doc.filename ? (
+      {drawn ? (
+        <MapTokensFromPlayers id={doc.id} map={drawn} onTokens={(tokens) => edit((d) => void ((d.map as unknown as MapData).tokens = tokens))}>
+          <MapEditor name={doc.title} map={drawn} onChange={(next) => edit((d) => void (d.map = next as unknown as Record<string, unknown>))}
+            view={view} onView={(v) => setView((s) => ({ ...s, ...v }))} characters={party} />
+        </MapTokensFromPlayers>
+      ) : doc.filename ? (
         <PanZoom src={api.handoutUrl(doc)} alt={doc.title} view={view} onView={setView} />
       ) : (
         <label className="dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void upload(e.dataTransfer.files[0]); }}>
@@ -360,44 +383,28 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
           <strong>Add an image</strong><span className="muted small">Drop a file here, paste one, or click to choose (PNG, JPG, WebP, GIF, SVG).</span>
         </label>
       )}
-      {doc.filename && editing && (
-        <label className="btn small ghost upload-btn"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
-      )}
       <Section label="Notes and key" value={doc.body} editing={editing} onChange={set("body")} rows={8}
         placeholder="Map key, what the players see, secrets…" />
+      {!drawn && !doc.filename && (
+        <p className="muted small">Or <button type="button" className="link" onClick={() => edit((d) => void (d.map = blankMap() as unknown as Record<string, unknown>))}>draw a map instead</button>.</p>
+      )}
     </article>
   );
 }
 
 /** Image viewer: wheel to zoom around the cursor, drag to pan. */
-export function PanZoom({ src, alt, view, onView, interactive = true }: {
+function PanZoom({ src, alt, view, onView, interactive = true }: {
   src: string;
   alt: string;
   view: ViewState;
   onView?: (v: ViewState) => void;
   interactive?: boolean;
 }) {
-  const drag = useRef<{ x: number; y: number } | null>(null);
-  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-    if (!onView) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const cx = e.clientX - rect.left - rect.width / 2;
-    const cy = e.clientY - rect.top - rect.height / 2;
-    const zoom = Math.max(0.2, Math.min(8, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-    const k = zoom / view.zoom;
-    onView({ ...view, zoom, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k });
-  };
-  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.current && onView) onView({ ...view, x: e.clientX - drag.current.x, y: e.clientY - drag.current.y });
-  };
+  const pan = usePanZoom(view, onView, [0.2, 8]);
   return (
-    <div className={`panzoom ${interactive ? "interactive" : ""}`} onWheel={interactive ? onWheel : undefined}
-      onPointerDown={interactive ? onDown : undefined} onPointerMove={interactive ? onMove : undefined}
-      onPointerUp={() => (drag.current = null)}>
+    <div ref={interactive ? pan.wheelRef : undefined} className={`panzoom ${interactive ? "interactive" : ""}`}
+      onPointerDown={interactive ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); pan.start(e); } : undefined}
+      onPointerMove={interactive ? pan.move : undefined} onPointerUp={pan.end} onPointerCancel={pan.end}>
       <img src={src} alt={alt} draggable={false} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }} />
     </div>
   );
@@ -430,9 +437,18 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   useEffect(() => {
     if (handout) document.title = handout.title;
   }, [handout]);
+  // A map changes as the DM draws and the party moves: keep it fresh (one timer per map shown).
+  const showingMap = !!handout && isMap(handout.map);
+  useEffect(() => {
+    if (!view.id || !showingMap) return;
+    const timer = setInterval(() => api.get("handouts", view.id).then(setHandout, () => {}), 1500);
+    return () => clearInterval(timer);
+  }, [view.id, showingMap]);
   return (
     <div className="projection">
-      {handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
+      <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>
+      {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
+        : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
         : <p className="muted">Waiting for the DM…</p>}
     </div>
   );

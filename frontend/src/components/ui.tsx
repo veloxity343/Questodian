@@ -49,8 +49,18 @@ export function NumInput({ value, onChange, commit = false, className = "num-inp
         setText(e.target.value);
         if (!commit) report(e.target.value);
       }}
-      onBlur={() => commit && report(text)}
-      onKeyDown={(e) => commit && e.key === "Enter" && e.currentTarget.blur()}
+      onBlur={() => {
+        if (!commit) return;
+        report(text);
+        // Show the stored value again; if the change goes through, it arrives as the new value.
+        setText(String(value ?? 0));
+      }}
+      onKeyDown={(e) => {
+        if (!commit || e.key !== "Enter") return;
+        // Enter saves like leaving the box; it mustn't also press a button a confirmation opens.
+        e.preventDefault();
+        e.currentTarget.blur();
+      }}
     />
   );
 }
@@ -139,20 +149,6 @@ export function Conditions({ value, onChange }: { value: string[]; onChange: (v:
         onChange={(v) => v && onChange([...value, v])}
       />
     </div>
-  );
-}
-
-/** A Markdown text area with an edit / preview toggle. */
-export function MdEditor({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  const [preview, setPreview] = useState(false);
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <h2>{label}</h2>
-        <button type="button" className="btn small" onClick={() => setPreview((p) => !p)}>{preview ? "Edit" : "Preview"}</button>
-      </div>
-      {preview ? <Markdown source={value || "*Nothing here yet.*"} /> : <TextArea rows={14} value={value} onChange={onChange} placeholder={placeholder} />}
-    </section>
   );
 }
 

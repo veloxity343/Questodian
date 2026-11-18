@@ -4,6 +4,7 @@ import type {
   Character, ClassLevel, Edition, Encounter, EncounterAction, Handout, ImportSummary, Kind, KindMap, Meta, RollResult,
   Session, SrdCategory, SrdEntry, SrdMeta, HandbookEntry,
 } from "./types";
+import type { Rules } from "./lib/builder";
 
 type Params = Record<string, string | number | boolean | undefined | null>;
 
@@ -35,7 +36,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
-export const qs = (params: Params = {}) => {
+const qs = (params: Params = {}) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
   const s = p.toString();
@@ -75,8 +76,12 @@ export const api = {
     if (!res.ok) throw new Error(errorMessage(data, res));
     return data as Handout;
   },
+  /** Take a handout's image away; the server deletes the file. */
+  removeHandoutImage: (id: string) => request<Handout>("DELETE", `handouts/${id}/file`),
   projection: () => request<Projection>("GET", "projection"),
   project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
+  /** Move tokens on a map handout (the players' screen): positions only, the rest of the map is left alone. */
+  moveTokens: (id: string, moves: { id: string; c: number; r: number }[]) => request<Handout>("POST", `handouts/${id}/tokens`, { moves }),
   handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),
@@ -86,6 +91,10 @@ export const api = {
     request<{ categories: SrdCategory[]; meta: SrdMeta }>("GET", `srd/categories${qs({ edition })}`),
   srdSearch: (params: Params & { edition?: Edition }) => request<SrdSearchResult>("GET", `srd/search${qs(params)}`),
   srdEntry: (id: string, edition?: Edition) => request<SrdEntry>("GET", `srd/entry${qs({ id, edition })}`),
+  rules: () => request<Rules>("GET", "rules"),
+  /** Replace or add a rules data entry; `null` hides a bundled one. */
+  editRule: (kind: string, key: string, data: unknown) => request<Rules>("PUT", `rules/${kind}/${encodeURIComponent(key)}`, data),
+  resetRule: (kind: string, key: string) => request<Rules>("DELETE", `rules/${kind}/${encodeURIComponent(key)}`),
   exportAll: (campaign_id?: string) => request<unknown>("GET", `export${qs({ campaign_id })}`),
   exportOne: (kind: Kind, id: string) => request<unknown>("GET", `export/${kind}/${id}`),
   exportMarkdown: async (kind: Kind, id: string) => {

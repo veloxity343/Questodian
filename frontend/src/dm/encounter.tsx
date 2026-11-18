@@ -20,7 +20,7 @@ const DIFFICULTY_LABEL: Record<string, string> = {
  * either SRD, so 2014 campaigns use it too. The SRD has Low, Moderate and High; "under half of
  * Low" and "above High" are the app's own bands around them.
  */
-export function difficulty(xp: number, size: number, level: number, table: [number, number, number][] | undefined) {
+function difficulty(xp: number, size: number, level: number, table: [number, number, number][] | undefined) {
   const row = table?.[Math.max(1, Math.min(level, 20)) - 1] ?? [50, 75, 100];
   const budget = { low: row[0] * size, moderate: row[1] * size, high: row[2] * size };
   let rating = "deadly";

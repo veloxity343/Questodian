@@ -122,7 +122,8 @@
    },
    "appearance": "",
    "backstory": "",
-   "notes": ""
+   "notes": "",
+   "build": {}
   }
  ],
  "handbook": [
@@ -280,7 +281,8 @@
    "title": "Map",
    "filename": "",
    "mime": "",
-   "body": ""
+   "body": "",
+   "map": {}
   }
  ]
 }

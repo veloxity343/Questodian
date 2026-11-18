@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite, Transaction, TypeInfo, ValueRef};
 
+use crate::builder::Override;
 use crate::error::{Error, Result, invalid, not_found};
 use crate::kinds::{Column, ColumnKind, FILTERS, Kind, LINKS};
 
@@ -43,6 +44,8 @@ pub struct Repo<'a> {
     columns: &'a HashMap<Kind, Vec<Column>>,
     /// Where handout images live.
     pub files_dir: PathBuf,
+    /// Files no record uses once this unit of work is saved (images of replaced handouts).
+    remove_on_commit: Vec<PathBuf>,
 }
 
 impl<'a> Repo<'a> {
@@ -51,13 +54,21 @@ impl<'a> Repo<'a> {
         columns: &'a HashMap<Kind, Vec<Column>>,
         files_dir: PathBuf,
     ) -> Self {
-        Repo { tx, columns, files_dir }
+        Repo { tx, columns, files_dir, remove_on_commit: Vec::new() }
     }
 
-    /// Save everything done in this unit of work.
+    /// Save everything done in this unit of work, then remove the files it no longer uses.
     pub async fn commit(self) -> Result<()> {
         self.tx.commit().await?;
+        for path in self.remove_on_commit {
+            let _ = std::fs::remove_file(path); // already gone is fine
+        }
         Ok(())
+    }
+
+    /// Remove a file once this unit of work is saved (kept if it's rolled back).
+    pub fn remove_on_commit(&mut self, path: PathBuf) {
+        self.remove_on_commit.push(path);
     }
 
     fn columns(&self, kind: Kind) -> &'a [Column] {
@@ -226,6 +237,59 @@ impl<'a> Repo<'a> {
         let sql = format!("DELETE FROM {} WHERE id = ?", kind.table());
         sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).execute(&mut *self.tx).await?;
         Ok(())
+    }
+}
+
+impl Repo<'_> {
+    // ------------------------------------------------------------------ rules data edits
+
+    /// Every edit to the character builder's rules data.
+    pub async fn rule_overrides(&mut self) -> Result<Vec<Override>> {
+        let rows: Vec<(String, String, Option<String>, String)> =
+            sqlx::query_as(r#"SELECT kind, "key", data, updated FROM rule_overrides ORDER BY kind, "key""#)
+                .fetch_all(&mut *self.tx)
+                .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(kind, key, data, updated)| Override {
+                kind,
+                key,
+                data: data.map(parse_stored_json).filter(|v| !v.is_null()),
+                updated,
+            })
+            .collect())
+    }
+
+    /// Store an edit (`data: None` hides a bundled entry), replacing any earlier one. `updated`
+    /// defaults to now (imports keep the time the edit was made).
+    pub async fn save_rule_override(
+        &mut self,
+        kind: &str,
+        key: &str,
+        data: Option<&Value>,
+        updated: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"INSERT INTO rule_overrides (kind, "key", data, updated) VALUES (?, ?, ?, ?)
+               ON CONFLICT (kind, "key") DO UPDATE SET data = excluded.data, updated = excluded.updated"#,
+        )
+        .bind(kind)
+        .bind(key)
+        .bind(data.map(Value::to_string))
+        .bind(updated.map_or_else(now, str::to_string))
+        .execute(&mut *self.tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Drop an edit, bringing back the bundled entry. False if there was none.
+    pub async fn delete_rule_override(&mut self, kind: &str, key: &str) -> Result<bool> {
+        let done = sqlx::query(r#"DELETE FROM rule_overrides WHERE kind = ? AND "key" = ?"#)
+            .bind(kind)
+            .bind(key)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(done.rows_affected() > 0)
     }
 }
 

@@ -1,6 +1,7 @@
 //! Questodian's core: rules, dice, the SRD reference, records and the HTTP API.
 //! Shared by the desktop app and the command line; knows nothing about windows.
 
+pub mod builder;
 pub mod db;
 pub mod dice;
 pub mod error;

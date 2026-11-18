@@ -24,12 +24,17 @@ pub const DB_FILENAME: &str = "questodian.db";
 const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
-pub const HEAD: &str = "0002";
+pub const HEAD: &str = "0004";
 /// What a database made before migrations existed contains.
 const BASELINE: &str = "0001";
 
 const SCHEMA_0002: &str = include_str!("migrations/0002_schema.sql");
 const UPGRADE_0001_TO_0002: &str = include_str!("migrations/0001_to_0002.sql");
+/// The upgrades written in SQL, in order: from, and what takes it to the next revision.
+const STEPS: [(&str, &str); 2] =
+    [("0002", include_str!("migrations/0002_to_0003.sql")), ("0003", include_str!("migrations/0003_to_0004.sql"))];
+/// Every revision this app can upgrade from, oldest first.
+const KNOWN: [&str; 4] = [BASELINE, "0002", "0003", HEAD];
 
 /// `$QUESTODIAN_DATA`, else the usual per-user data folder for this OS.
 pub fn default_data_dir() -> PathBuf {
@@ -237,40 +242,74 @@ async fn upgrade(path: &Path, alone: bool) -> Result<Option<PathBuf>> {
 
 async fn upgrade_with(conn: &mut SqliteConnection, path: &Path, alone: bool) -> Result<Option<PathBuf>> {
     let state = read_state(conn, path).await?;
+    let version = match &state {
+        State::Empty => {
+            run_locked(conn, path, &state, |tx| Box::pin(async move { create_schema(tx).await })).await?;
+            return Ok(None);
+        }
+        State::At(version) => version.clone(),
+    };
+    if version == HEAD {
+        return Ok(None);
+    }
+    if !KNOWN.contains(&version.as_str()) {
+        return Err(refused(
+            path,
+            &format!("it was made by a newer version of Questodian (schema {version}), or isn't a Questodian database"),
+        ));
+    }
     // Only an older version this app would upgrade needs the folder to itself.
-    let upgradeable = matches!(&state, State::At(version) if version == BASELINE);
-    if !alone && upgradeable {
+    if !alone {
         return Err(refused(
             path,
             "it needs upgrading to this version of Questodian, but another copy of Questodian has it open. \
              Close the other copy and try again",
         ));
     }
-    match &state {
-        State::Empty => {
-            run_locked(conn, path, &state, |tx| Box::pin(async move { create_schema(tx).await })).await?;
-            Ok(None)
-        }
-        State::At(version) if version == HEAD => Ok(None),
-        State::At(version) if version == BASELINE => {
-            // Check every session encounter can be moved before touching anything.
-            let moves = encounters_to_move(conn, path).await?;
-            let backup = backup_database(conn, path, BASELINE).await?;
-            let upgraded = run_locked(conn, path, &state, move |tx| Box::pin(upgrade_0001_to_0002(tx, moves))).await;
-            upgraded.map_err(|e| {
-                Error::Internal(format!(
-                    "Upgrading {} failed: {e}. Nothing was changed; a copy made before the upgrade is at {}.",
-                    path.display(),
-                    backup.display()
-                ))
-            })?;
-            Ok(Some(backup))
-        }
-        State::At(other) => Err(refused(
-            path,
-            &format!("it was made by a newer version of Questodian (schema {other}), or isn't a Questodian database"),
-        )),
+    // Check everything that can be checked before touching anything.
+    let moves = if version == BASELINE { encounters_to_move(conn, path).await? } else { Vec::new() };
+    let backup = backup_database(conn, path, &version).await?;
+    let from = version.clone();
+    let upgraded = run_locked(conn, path, &state, move |tx| Box::pin(upgrade_from(tx, from, moves))).await;
+    upgraded.map_err(|e| {
+        Error::Internal(format!(
+            "Upgrading {} failed: {e}. Nothing was changed; a copy made before the upgrade is at {}.",
+            path.display(),
+            backup.display()
+        ))
+    })?;
+    Ok(Some(backup))
+}
+
+/// Run every upgrade from `version` to [`HEAD`], in one transaction.
+async fn upgrade_from(conn: &mut SqliteConnection, version: String, moves: Vec<EncounterMove>) -> Result<()> {
+    let mut at = version.as_str();
+    if at == BASELINE {
+        upgrade_0001_to_0002(conn, moves).await?;
+        at = "0002";
     }
+    let first = STEPS
+        .iter()
+        .position(|(from, _)| *from == at)
+        .ok_or_else(|| Error::Internal(format!("no upgrade from revision {at}")))?;
+    for (_, sql) in &STEPS[first..] {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(*sql)).execute(&mut *conn).await?;
+    }
+    set_version(conn, HEAD).await
+}
+
+/// Record the schema revision (in Alembic's table, so every version of the app agrees).
+async fn set_version(conn: &mut SqliteConnection, version: &str) -> Result<()> {
+    // A database from before migrations has no version table yet.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, \
+         CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))",
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query("DELETE FROM alembic_version").execute(&mut *conn).await?;
+    sqlx::query("INSERT INTO alembic_version (version_num) VALUES (?)").bind(version).execute(&mut *conn).await?;
+    Ok(())
 }
 
 type Step<'c> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'c>>;
@@ -302,8 +341,11 @@ where
 }
 
 async fn create_schema(conn: &mut SqliteConnection) -> Result<()> {
-    sqlx::raw_sql(sqlx::AssertSqlSafe(SCHEMA_0002)).execute(conn).await?;
-    Ok(())
+    sqlx::raw_sql(sqlx::AssertSqlSafe(SCHEMA_0002)).execute(&mut *conn).await?;
+    for (_, sql) in STEPS {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(&mut *conn).await?;
+    }
+    set_version(conn, HEAD).await
 }
 
 /// A session's encounter, checked and ready to become an encounters row.
@@ -406,15 +448,6 @@ async fn upgrade_0001_to_0002(conn: &mut SqliteConnection, moves: Vec<EncounterM
         .await?;
     }
     sqlx::query("ALTER TABLE sessions DROP COLUMN encounter").execute(&mut *conn).await?;
-    // A database from before migrations has no version table yet.
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, \
-         CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))",
-    )
-    .execute(&mut *conn)
-    .await?;
-    sqlx::query("DELETE FROM alembic_version").execute(&mut *conn).await?;
-    sqlx::query("INSERT INTO alembic_version (version_num) VALUES (?)").bind(HEAD).execute(&mut *conn).await?;
     Ok(())
 }
 
@@ -431,8 +464,10 @@ fn truthy(value: &Value) -> bool {
 }
 
 /// Copy a live database safely (WAL included) to `<name>.backup-<label>-<time>`, and make
-/// sure the copy is on disk before anything changes. If a backup of this revision already
-/// exists (an earlier attempt that failed), that one is kept instead of making another.
+/// sure the copy is on disk before anything changes. If a backup of this revision was made
+/// after the database last changed (an earlier attempt that failed), it's kept instead of
+/// making another; an older one (say, from before going back to an earlier version and
+/// carrying on there) isn't a copy of the current data, so a new one is made.
 async fn backup_database(conn: &mut SqliteConnection, path: &Path, label: &str) -> Result<PathBuf> {
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let prefix = format!("{name}.backup-{label}-");
@@ -442,7 +477,12 @@ async fn backup_database(conn: &mut SqliteConnection, path: &Path, label: &str) 
         .map(|e| e.path())
         .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix)))
         .max();
-    if let Some(existing) = existing {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let wal = folder.join(format!("{name}-wal"));
+    let changed = [modified(path), modified(&wal)].into_iter().flatten().max();
+    if let Some(existing) = existing
+        && modified(&existing).zip(changed).is_some_and(|(backup, data)| backup >= data)
+    {
         return Ok(existing);
     }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");

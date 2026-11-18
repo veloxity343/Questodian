@@ -403,8 +403,9 @@ schema! {
 }
 
 choice! {
-    /// When a class resource comes back.
-    pub enum Reset { Long = "long", Short = "short", Never = "none" }
+    /// When a class resource comes back. `ShortOne`: one use on a short rest, all on a long rest
+    /// (Second Wind, Channel Divinity, Rage, Wild Shape in the 2024 rules).
+    pub enum Reset { Long = "long", Short = "short", ShortOne = "short_one", Never = "none" }
 }
 
 schema! {
@@ -496,6 +497,10 @@ schema! {
         appearance: String = String::new(),
         backstory: String = String::new(),
         notes: String = String::new(),
+        /// The character builder's choices (ability method, base scores, background bonuses,
+        /// species and lineage, skill picks...), kept as the UI writes them. Empty for
+        /// characters made without the builder.
+        build: IndexMap<String, Value> = IndexMap::new(),
     }
 }
 
@@ -659,6 +664,9 @@ schema! {
         filename: String = String::new(),
         mime: String = String::new(),
         body: String = String::new(),
+        /// A map drawn in the app (grid, legend, cells, walls, labels, markers, tokens, fog),
+        /// as the map editor writes it; empty for image handouts.
+        map: IndexMap<String, Value> = IndexMap::new(),
     }
 }
 

@@ -23,7 +23,7 @@ use crate::kinds::Kind;
 use crate::schemas::{
     self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
 };
-use crate::{dice, game, rules, srd, transfer};
+use crate::{builder, dice, game, rules, srd, transfer};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -66,11 +66,14 @@ pub fn router(app: Shared) -> Router {
         .route("/srd/search", get(srd_search))
         .route("/srd/entry", get(srd_entry))
         .route("/projection", get(get_projection).put(set_projection))
+        .route("/rules", get(get_rules))
+        .route("/rules/{kind}/{key}", axum::routing::put(edit_rule).delete(reset_rule))
         .route("/encounters/{id}/action", post(encounter_action))
         .route("/sessions/{id}/award", post(award))
         .route("/sessions/{id}/log", post(add_log))
         .route("/characters/{id}/rest", post(rest))
-        .route("/handouts/{id}/file", get(handout_file).put(upload_handout))
+        .route("/handouts/{id}/file", get(handout_file).put(upload_handout).delete(remove_handout_image))
+        .route("/handouts/{id}/tokens", post(move_tokens))
         .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
         .route("/export", get(export_bundle))
         .route("/export/{kind}/{id}", get(export_one))
@@ -304,6 +307,40 @@ async fn set_projection(State(app): State<Shared>, Valid(mut body): Valid<Projec
     Json(body)
 }
 
+// --------------------------------------------------------------------------- rules data
+
+async fn get_rules(State(app): State<Shared>) -> Result<Json<Value>> {
+    let mut repo = app.db.read().await?;
+    Ok(Json(builder::merged(&repo.rule_overrides().await?)))
+}
+
+/// Replace, add or (with a `null` body) hide an entry; returns the rules data as it now is.
+async fn edit_rule(
+    State(app): State<Shared>,
+    UrlPath((kind, key)): UrlPath<(String, String)>,
+    JsonBody(body): JsonBody,
+) -> Result<Json<Value>> {
+    let body = body.ok_or_else(|| body_error("send the entry, or null to hide it"))?;
+    let data = builder::check(&kind, &key, Some(body).filter(|b| !b.is_null()))?;
+    let mut repo = app.db.write().await?;
+    repo.save_rule_override(&kind, key.trim(), data.as_ref(), None).await?;
+    let merged = builder::merged(&repo.rule_overrides().await?);
+    repo.commit().await?;
+    Ok(Json(merged))
+}
+
+/// Undo an edit: back to the bundled entry (or gone, for one the user added).
+async fn reset_rule(State(app): State<Shared>, UrlPath((kind, key)): UrlPath<(String, String)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let key = key.trim();
+    if !repo.delete_rule_override(&kind, key).await? {
+        return Err(not_found(format!("no edit to {kind}/{key}")));
+    }
+    let merged = builder::merged(&repo.rule_overrides().await?);
+    repo.commit().await?;
+    Ok(Json(merged))
+}
+
 // --------------------------------------------------------------------------- records
 
 fn kind_from_path(name: &str) -> Result<Kind> {
@@ -512,6 +549,18 @@ async fn handout_file(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String
         .into_response())
 }
 
+/// Take a handout's image away (to draw a map instead): the record forgets it and the file goes.
+async fn remove_handout_image(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let doc = repo.get(Kind::Handouts, &id).await?;
+    let saved = repo.update(Kind::Handouts, &id, json!({"filename": "", "mime": ""})).await?;
+    repo.commit().await?;
+    if let Some(path) = handout_path(&app.db.files_dir(), doc["filename"].as_str().unwrap_or("")) {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    Ok(Json(saved))
+}
+
 /// Deleting a handout also removes its image file.
 async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {
     let mut repo = app.db.write().await?;
@@ -522,6 +571,53 @@ async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(Stri
         let _ = tokio::fs::remove_file(path).await;
     }
     Ok(Json(json!({"deleted": id})))
+}
+
+/// The players' screen moving their tokens on a map: `{"moves": [{"id", "c", "r"}]}`. Only
+/// the positions of existing tokens that stand for a character change, to cells inside the
+/// grid, so a stale list on the players' screen can't remove, add or rename anything.
+async fn move_tokens(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    JsonBody(body): JsonBody,
+) -> Result<Json<Value>> {
+    let moves = body.as_ref().and_then(|b| b.get("moves")).and_then(Value::as_array).cloned();
+    let Some(moves) = moves else { return Err(body_error("send {\"moves\": [{\"id\", \"c\", \"r\"}]}")) };
+    let mut repo = app.db.write().await?;
+    let mut doc = repo.get(Kind::Handouts, &id).await?;
+    let Some(Value::Object(map)) = doc.get_mut("map").filter(|m| m.get("grid").is_some()) else {
+        return Err(invalid("this handout isn't a map"));
+    };
+    if map.get("players_move") != Some(&Value::Bool(true)) {
+        return Err(invalid("the DM hasn't let players move tokens on this map"));
+    }
+    let size = |key: &str| map["grid"].get(key).and_then(Value::as_i64).unwrap_or(0);
+    let (cols, rows) = (size("cols"), size("rows"));
+    let mut tokens = map.get("tokens").and_then(Value::as_array).cloned().unwrap_or_default();
+    for step in &moves {
+        let (Some(token_id), Some(c), Some(r)) = (
+            step.get("id").and_then(Value::as_str),
+            step.get("c").and_then(Value::as_i64),
+            step.get("r").and_then(Value::as_i64),
+        ) else {
+            return Err(body_error("each move is {\"id\": text, \"c\": whole number, \"r\": whole number}"));
+        };
+        if !(0..cols).contains(&c) || !(0..rows).contains(&r) {
+            return Err(body_error(format!("cell {c},{r} is outside the map")));
+        }
+        let theirs = |t: &&mut Value| {
+            t.get("id").and_then(Value::as_str) == Some(token_id)
+                && t.get("character_id").and_then(Value::as_str).is_some_and(|c| !c.is_empty())
+        };
+        if let Some(token) = tokens.iter_mut().find(theirs) {
+            token["c"] = json!(c);
+            token["r"] = json!(r);
+        }
+    }
+    map.insert("tokens".into(), Value::Array(tokens));
+    let saved = repo.update(Kind::Handouts, &id, doc).await?;
+    repo.commit().await?;
+    Ok(Json(saved))
 }
 
 async fn read_handout(state: State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {

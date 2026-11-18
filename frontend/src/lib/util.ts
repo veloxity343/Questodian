@@ -26,8 +26,40 @@ export function hpLevel(pct: number) {
   return pct > 50 ? "ok" : pct > 25 ? "warn" : "bad";
 }
 
-export function download(filename: string, text: string, type = "application/json") {
-  const blob = new Blob([text], { type });
+export const d20 = (bonus: number) => `d20${signed(bonus)}`;
+
+/** How far one wheel event scrolled, in pixels: Firefox counts some mice in lines. */
+function wheelPixels(wheel: { deltaY: number; deltaMode?: number }) {
+  return wheel.deltaMode === 1 ? wheel.deltaY * 33 : wheel.deltaMode === 2 ? wheel.deltaY * 800 : wheel.deltaY;
+}
+
+/** One mouse-wheel notch (about 100px) zooms 15%; a touchpad's small scrolls zoom a little each. */
+const ZOOM_PER_PIXEL = Math.log(1.15) / 100;
+
+/**
+ * Zoom a pan-and-zoom view by a wheel event, keeping the point under the pointer still. The zoom
+ * follows how far the wheel scrolled, capped at one mouse notch, so a touchpad's stream of small
+ * scrolls is as gentle as a wheel. A touchpad pinch comes as a scroll with Ctrl held, in much
+ * smaller steps, so it counts for more. `x`/`y` are offsets from the centre of `box`, so the
+ * same view looks the same in a window of another size (the players' screen mirrors the DM's).
+ */
+export function zoomAround<V extends { zoom: number; x: number; y: number }>(
+  view: V,
+  wheel: { clientX: number; clientY: number; deltaY: number; deltaMode?: number; ctrlKey?: boolean },
+  box: DOMRect,
+  [min, max]: [number, number],
+): V {
+  const cx = wheel.clientX - box.left - box.width / 2;
+  const cy = wheel.clientY - box.top - box.height / 2;
+  const scrolled = Math.max(-100, Math.min(100, wheelPixels(wheel) * (wheel.ctrlKey ? 8 : 1)));
+  const zoom = Math.max(min, Math.min(max, view.zoom * Math.exp(-scrolled * ZOOM_PER_PIXEL)));
+  const k = zoom / view.zoom;
+  return { ...view, zoom, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k };
+}
+
+/** Save text or a file the browser already has (a PNG, say) as a download. */
+export function download(filename: string, content: string | Blob, type = "application/json") {
+  const blob = typeof content === "string" ? new Blob([content], { type }) : content;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -82,4 +114,14 @@ export function writePref(key: string, value: unknown) {
   } catch {
     /* storage unavailable: preferences just won't persist */
   }
+}
+
+/** `order` with `x` moved next to `target`: after it, or before it. Others keep their places
+ *  (a page's hidden panels too). Used to rearrange panels and the DM screen's tabs. */
+export function placed<T>(order: T[], x: T, target: T, after: boolean): T[] {
+  const next = order.filter((y) => y !== x);
+  const at = next.indexOf(target);
+  if (at < 0) return order;
+  next.splice(after ? at + 1 : at, 0, x);
+  return next;
 }

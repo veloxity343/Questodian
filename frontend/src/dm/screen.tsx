@@ -1,11 +1,14 @@
 // The DM screen: navigator on the left, tabbed workspace in the middle, reference on the right.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Splitter } from "../components/splitter";
 import { EmptyState, HpBar, Loading } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
-import { usePref } from "../lib/hooks";
+import { useDragReorder, usePref } from "../lib/hooks";
+import { placed } from "../lib/util";
+import { blankMap, isMap } from "../lib/map";
 import type { Campaign, KindMap, Scene, SceneStatus } from "../types";
 import { MonsterDoc, NoteDoc, NpcDoc, SceneDoc, TrackerDoc } from "./docs";
 import { CampaignDoc, HandoutDoc, SessionDoc } from "./docs2";
@@ -57,27 +60,12 @@ function Screen({ campaign }: { campaign: Campaign }) {
   return (
     <div className="dm" style={{ gridTemplateColumns: cols }}>
       {navOpen && <Navigator />}
-      {navOpen && <Resizer value={left} onChange={setLeft} min={220} max={480} />}
+      {navOpen && <Splitter className="resizer" axis="x" start={() => left} onChange={setLeft} min={220} max={480} onReset={() => setLeft(300)} label="Resize the navigator" />}
       <Workspace campaign={campaign} />
-      <Resizer value={right} onChange={setRight} min={300} max={720} invert />
+      <Splitter className="resizer" axis="x" start={() => right} onChange={setRight} min={300} max={720} invert onReset={() => setRight(420)} label="Resize the reference panel" />
       <RightPanel />
       <CommandPalette />
     </div>
-  );
-}
-
-function Resizer({ value, onChange, min, max, invert = false }: { value: number; onChange: (v: number) => void; min: number; max: number; invert?: boolean }) {
-  const start = useRef<{ x: number; v: number } | null>(null);
-  return (
-    <div className="resizer" role="separator" aria-orientation="vertical"
-      onPointerDown={(e: ReactPointerEvent) => { start.current = { x: e.clientX, v: value }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
-      onPointerMove={(e: ReactPointerEvent) => {
-        if (!start.current) return;
-        const dx = (e.clientX - start.current.x) * (invert ? -1 : 1);
-        onChange(Math.max(min, Math.min(max, start.current.v + dx)));
-      }}
-      onPointerUp={() => (start.current = null)}
-      onDoubleClick={() => onChange(invert ? 420 : 300)} />
   );
 }
 
@@ -114,6 +102,13 @@ function Navigator() {
     await dm.create(kind, { [field]: name || `New ${label}` } as Partial<KindMap[typeof kind]>);
   };
 
+  // A map is a handout drawn in the app (dm/map.tsx), in the Maps folder.
+  const createMap = async () => {
+    const name = await prompt("New map", { label: "Name", value: "" });
+    if (name === null) return;
+    await dm.create("handouts", { title: name || "New map", folder: "Maps", map: blankMap() as unknown as Record<string, unknown> });
+  };
+
   return (
     <nav className="navigator" aria-label="Campaign">
       <div className="nav-top">
@@ -129,6 +124,7 @@ function Navigator() {
           <div className="nav-head">
             <span className="eyebrow">{SECTIONS.find(([s]) => s === section)?.[1]} <span className="count">{section === "party" ? "" : (dm.lists[section as ListKind] as unknown[]).length}</span></span>
             {NEW_LABEL[section] && <button type="button" className="link small" onClick={() => create(section)}>+ {NEW_LABEL[section]}</button>}
+            {section === "handouts" && <button type="button" className="link small" onClick={createMap}>+ Map</button>}
           </div>
           {section !== "party" && section !== "sessions" && (
             <input type="search" className="nav-filter" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter" />
@@ -203,7 +199,7 @@ function SectionList({ section, q }: { section: Section; q: string }) {
         <>{folders.map((f) => (
           <div key={f} className="nav-group">
             <div className="eyebrow">{f || "Unfiled"}</div>
-            {items.filter((h) => h.folder === f).map((h) => <Card key={h.id} kind="handouts" id={h.id} title={h.title} extra={h.filename ? "" : "no image"} />)}
+            {items.filter((h) => h.folder === f).map((h) => <Card key={h.id} kind="handouts" id={h.id} title={h.title} extra={isMap(h.map) ? "map" : h.filename ? "" : "no image"} />)}
           </div>
         ))}</>
       );
@@ -244,17 +240,73 @@ function EncounterList() {
 
 // ------------------------------------------------------------------ workspace (middle)
 
+/** Tabs share the strip's width like a browser's, shrinking to a minimum (and dropping the kind
+ *  badge when narrow). Past that the strip pages with ‹ › instead of scrolling, so the mouse
+ *  wheel stays free for the page, and the open tab is always brought into view: `active` is
+ *  compared by identity, so opening a tab, even the open one, brings it back. */
+function useTabStrip(count: number, active: DocRef | null) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const [ends, setEnds] = useState({ start: true, end: true });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    setEnds({ start: el.scrollLeft <= 1, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 });
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    el.addEventListener("scroll", update);
+    return () => { observer.disconnect(); el.removeEventListener("scroll", update); };
+  }, []);
+  const overflow = !(ends.start && ends.end);
+  // Also when the ‹ › appear or go, which changes the room the tabs have.
+  useEffect(() => {
+    const el = ref.current?.querySelector<HTMLElement>(".doc-tab.on");
+    const strip = ref.current;
+    if (el && strip) {
+      const left = el.offsetLeft - strip.offsetLeft;
+      if (left < strip.scrollLeft) strip.scrollLeft = left;
+      else if (left + el.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + el.offsetWidth - strip.clientWidth;
+    }
+    update();
+  }, [active, count, overflow]);
+  const page = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
+  return { ref, narrow: count > 0 && width / count < 160, overflow, ends, page };
+}
+
 function Workspace({ campaign }: { campaign: Campaign }) {
   const dm = useDM();
   const navigate = useNavigate();
   const label = (r: DocRef) => r.kind === "campaigns" ? campaign.name : titleOf(r.kind as ListKind, dm.get(r.kind as ListKind, r.id));
+  const strip = useTabStrip(dm.tabs.length, dm.active);
+  const key = (t: DocRef) => `${t.kind}:${t.id}`;
+  const before = useRef<DocRef[]>([]);
+  const drag = useDragReorder((id, target) => {
+    const keys = dm.tabs.map(key);
+    const order = placed(keys, id, target, keys.indexOf(id) < keys.indexOf(target));
+    dm.orderTabs(order.map((k) => dm.tabs.find((t) => key(t) === k)!));
+  }, { lane: strip.ref, onCancel: () => dm.orderTabs(before.current) });
   return (
     <section className="workspace">
-      <div className="doc-tabs" role="tablist">
+      <div className="doc-tab-bar">
+      {strip.overflow && (
+        <button type="button" className="doc-tab-page" aria-label="Earlier tabs" title="Earlier tabs" disabled={strip.ends.start} onClick={() => strip.page(-1)}>‹</button>
+      )}
+      <div ref={strip.ref} className={`doc-tabs ${strip.narrow ? "narrow" : ""}`} role="tablist">
         {dm.tabs.map((t) => {
           const on = dm.active?.kind === t.kind && dm.active.id === t.id;
           return (
-            <div key={`${t.kind}:${t.id}`} className={`doc-tab ${on ? "on" : ""}`} role="tab" aria-selected={on}
+            <div key={key(t)} data-reorder={key(t)} className={`doc-tab ${on ? "on" : ""} ${drag.dragging === key(t) ? "dragging" : ""}`}
+              role="tab" aria-selected={on} title={label(t)}
+              onPointerDown={(e) => {
+                if ((e.target as HTMLElement).closest(".doc-tab-x")) return;
+                before.current = dm.tabs;
+                drag.start(key(t), e);
+              }}
               onMouseDown={(e) => e.button === 1 && dm.close(t)}>
               <button type="button" className="doc-tab-main" onClick={() => dm.open(t)}>
                 <span className="kind-badge">{KIND_LABEL[t.kind]}</span><span className="doc-tab-title">{label(t)}</span>
@@ -263,6 +315,10 @@ function Workspace({ campaign }: { campaign: Campaign }) {
             </div>
           );
         })}
+      </div>
+      {strip.overflow && (
+        <button type="button" className="doc-tab-page" aria-label="Later tabs" title="Later tabs" disabled={strip.ends.end} onClick={() => strip.page(1)}>›</button>
+      )}
       </div>
       <div className="doc-scroll">
         {dm.active ? <DocView key={`${dm.active.kind}:${dm.active.id}`} doc={dm.active} /> : (

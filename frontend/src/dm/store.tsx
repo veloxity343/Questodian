@@ -10,7 +10,7 @@ import type { Campaign, Character, Edition, Kind, KindMap } from "../types";
 /** Record kinds that open as workspace tabs. */
 export type DocKind = "campaigns" | "sessions" | "scenes" | "npcs" | "monsters" | "notes" | "encounters" | "handouts" | "trackers";
 export type ListKind = Exclude<Kind, "campaigns" | "handbook">;
-export const LIST_KINDS: ListKind[] = [
+const LIST_KINDS: ListKind[] = [
   "sessions", "scenes", "npcs", "monsters", "notes", "encounters", "trackers", "handouts", "characters",
 ];
 
@@ -70,6 +70,8 @@ interface DM {
   active: DocRef | null;
   open: (ref: DocRef) => void;
   close: (ref: DocRef) => void;
+  /** Put the open tabs in this order (the same tabs, rearranged). */
+  orderTabs: (order: DocRef[]) => void;
   create: <K extends DocKind & ListKind>(kind: K, data?: Partial<KindMap[K]>) => Promise<KindMap[K]>;
 
   view: ViewRef | null;
@@ -187,6 +189,13 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
     [setTabs, setActive],
   );
 
+  const orderTabs = useCallback(
+    (order: DocRef[]) => {
+      setTabs((t) => (order.length === t.length && t.every((x) => order.some((y) => same(x, y))) ? order : t));
+    },
+    [setTabs],
+  );
+
   const create = useCallback(
     async <K extends DocKind & ListKind>(kind: K, data: Partial<KindMap[K]> = {}) => {
       const doc = await api.create(kind, { campaign_id: cid, ...data } as Partial<KindMap[K]>);
@@ -239,7 +248,7 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
 
   const value: DM = {
     campaign, edition: campaign.edition, lists, loaded, reload, upsert, remove, get,
-    tabs, active, open, close, create, view, show, rightTab, setRightTab, encounterId, followLink,
+    tabs, active, open, close, orderTabs, create, view, show, rightTab, setRightTab, encounterId, followLink,
   };
   return <DMContext.Provider value={value}>{children}</DMContext.Provider>;
 }

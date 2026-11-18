@@ -31,7 +31,7 @@ const EXHAUSTION_2014 = [
   "Death",
 ];
 
-export function totalLevel(ch: Character) {
+function totalLevel(ch: Character) {
   return ch.classes.reduce((a, c) => a + (Number(c.level) || 0), 0) || 1;
 }
 
