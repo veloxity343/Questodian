@@ -1,4 +1,4 @@
-// A handle you drag to change a size: the DM screen's columns, the dice dock, a panel's height.
+// A handle you drag to change a size: the DM screen's columns or a panel's height.
 
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 

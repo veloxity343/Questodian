@@ -333,10 +333,19 @@ input.big-num { width: 80px; padding: 2px; font-size: 1.4rem; }
 .tray { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .tray-fab { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 1.6rem; cursor: pointer; box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
 .tray-fab:hover { background: var(--accent-2); }
-.tray-panel { width: min(360px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.2); }
+.tray-panel { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.2); }
 .tray-panel input { flex: 1; font-family: var(--mono); }
-.tray-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.tray-panel .die-btn { min-width: 0; flex: 1; padding: 6px 4px; font-size: 0.85rem; }
+.tray-head { display: flex; justify-content: space-between; align-items: center; }
+.tray-panel .die-row { margin: 0; gap: 0; flex-wrap: nowrap; }
+.tray-panel .die-chip { flex: 1; padding: 4px 0; }
+.tray-panel .roll-list { margin: 0; flex: 1; min-height: 0; max-height: none; }
+.die-chip { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; font-family: var(--serif); font-weight: 700; }
+.die-chip:hover { color: var(--accent); }
+.dice-result { border: 1px solid var(--border); border-radius: 6px; padding: 10px; text-align: center; background: var(--bg); min-height: 80px; display: flex; flex-direction: column; justify-content: center; }
+.dice-total { font-family: var(--serif); font-size: 2.2rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.dice-result.crit .dice-total { color: var(--ok); }
+.dice-result.fumble .dice-total { color: var(--bad); }
+.history-head { margin-top: 2px; }
 @media (max-width: 860px) { .tray { right: 16px; bottom: 16px; } }
 
 #toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; width: min(420px, calc(100vw - 32px)); }

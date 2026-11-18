@@ -51,7 +51,6 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
   .dm { display: flex; flex-direction: column; height: auto; }
   .resizer { display: none; }
   .navigator, .right-panel { max-height: none; }
-  .dice-dock { height: auto !important; max-height: none !important; }
 }
 
 .sub-tabs { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
@@ -282,20 +281,6 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 .note-list button:hover { border-color: var(--accent); }
 .note-list li.done strong { text-decoration: line-through; color: var(--muted); }
 .quick-add { justify-content: flex-end; }
-
-.dice-dock { flex: none; max-height: calc(100% - 180px); padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; background: var(--bg); overflow-y: auto; min-height: 0; }
-.resizer.horizontal { flex: none; height: 6px; cursor: row-resize; border-left: 0; border-top: 1px solid var(--border); }
-.dice-unfold { flex: none; border: 0; border-top: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 8px 14px; text-align: left; cursor: pointer; font: inherit; }
-.dice-unfold:hover { background: var(--accent-soft); }
-.die-chip { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; font-family: var(--serif); font-weight: 700; }
-.die-chip:hover { color: var(--accent); }
-.dice-dock .die-row { margin: 0; justify-content: space-between; }
-.dice-result { border: 1px solid var(--border); border-radius: 6px; padding: 10px; text-align: center; background: var(--surface); min-height: 80px; display: flex; flex-direction: column; justify-content: center; }
-.dice-total { font-family: var(--serif); font-size: 2.2rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
-.dice-result.crit .dice-total { color: var(--ok); }
-.dice-result.fumble .dice-total { color: var(--bad); }
-.history-head { margin-top: 2px; }
-.dice-dock .roll-list { margin: 0; flex: 1; min-height: 0; overflow-y: auto; }
 
 /* ---------------------------------------------------------------- command palette */
 .palette-backdrop { position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / 0.5); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }

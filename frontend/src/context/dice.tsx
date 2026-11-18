@@ -1,7 +1,7 @@
 // Dice rolling shared by every screen: roll history, macros, the floating
 // quick-roll tray, and click-to-roll on any rendered `.dice-link`.
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { usePref } from "../lib/hooks";
@@ -55,10 +55,10 @@ export function Breakdown({ result }: { result: RollResult }) {
 export function DiceProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const { sessionId } = useApp();
-  // The DM screen has its own dice dock, so rolls there don't pop up a toast.
-  const quiet = useLocation().pathname === "/";
-  const quietRef = useRef(quiet);
-  quietRef.current = quiet;
+  // While the quick roll is open it shows each result itself, so rolls don't pop up a toast.
+  const [trayOpen, setTrayOpen] = useState(false);
+  const quietRef = useRef(trayOpen);
+  quietRef.current = trayOpen;
   const [history, setHistory] = usePref<RollEntry[]>("rolls", []);
   const [macros, setMacros] = usePref<Macro[]>("macros", DEFAULT_MACROS);
 
@@ -117,7 +117,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   return (
     <DiceContext.Provider value={{ roll, history, clearHistory: () => setHistory([]), macros, setMacros, logRoll }}>
       {children}
-      <DiceTray />
+      <DiceTray open={trayOpen} setOpen={setTrayOpen} />
     </DiceContext.Provider>
   );
 }
@@ -140,16 +140,24 @@ export function HistoryItem({ r }: { r: RollEntry }) {
   );
 }
 
-function DiceTray() {
-  const onDm = useLocation().pathname === "/";
-  return onDm ? null : <Tray />;
+const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100];
+
+/** The floating quick roll, on every screen but the Tools page (which has the full roller). */
+function DiceTray({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean) => boolean) => void }) {
+  const onTools = useLocation().pathname === "/tools";
+  useEffect(() => {
+    if (onTools) setOpen(() => false);
+  }, [onTools, setOpen]);
+  return onTools ? null : <Tray open={open} setOpen={setOpen} />;
 }
 
-function Tray() {
-  const { roll, history } = useDice();
-  const [open, setOpen] = useState(false);
+function Tray({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean) => boolean) => void }) {
+  const { roll, history, clearHistory } = useDice();
   const [expr, setExpr] = useState("");
+  const [showHistory, setShowHistory] = usePref("dice.tray.history", true);
   const input = useRef<HTMLInputElement>(null);
+  const last = history[0];
+  const recent = useMemo(() => history.slice(1, 30), [history]);
 
   useEffect(() => {
     if (open) input.current?.focus();
@@ -164,48 +172,50 @@ function Tray() {
         e.preventDefault();
         setOpen((o) => !o);
       }
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") setOpen(() => false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setOpen]);
 
   const go = () => expr.trim() && roll(expr.trim());
 
   return (
     <div className="tray">
       {open && (
-        <div className="tray-panel">
+        <section className="tray-panel" aria-label="Quick roll">
           <div className="tray-head">
             <strong>Quick roll</strong>
             <Link to="/tools" className="small">Full roller →</Link>
           </div>
           <div className="row gap">
-            <input
-              ref={input}
-              type="text"
-              placeholder="e.g. 2d20kh1+5"
-              aria-label="Dice expression"
-              autoComplete="off"
-              value={expr}
-              onChange={(e) => setExpr(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && go()}
-            />
+            <input ref={input} type="text" placeholder="e.g. 2d20kh1+5" aria-label="Dice expression" autoComplete="off"
+              value={expr} onChange={(e) => setExpr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} />
             <button type="button" className="btn primary" onClick={go}>Roll</button>
           </div>
           <div className="die-row">
-            {[4, 6, 8, 10, 12, 20, 100].map((s) => (
-              <button type="button" key={s} className="die-btn" onClick={() => roll(`d${s}`)}>d{s}</button>
-            ))}
-            <button type="button" className="die-btn" onClick={() => roll("2d20kh1", "Advantage")}>ADV</button>
-            <button type="button" className="die-btn" onClick={() => roll("2d20kl1", "Disadvantage")}>DIS</button>
+            {DIE_SIDES.map((s) => <button type="button" key={s} className="die-chip" onClick={() => roll(`1d${s}`)}>d{s}</button>)}
+            <button type="button" className="die-chip" title="Advantage" onClick={() => roll("2d20kh1", "Advantage")}>ADV</button>
+            <button type="button" className="die-chip" title="Disadvantage" onClick={() => roll("2d20kl1", "Disadvantage")}>DIS</button>
           </div>
-          <ul className="roll-list">
-            {history.slice(0, 20).map((r) => <HistoryItem key={r.time + r.expression} r={r} />)}
-          </ul>
-        </div>
+          <div className={`dice-result ${last?.critical ? "crit" : last?.fumble ? "fumble" : ""}`}>
+            {last ? (
+              <>
+                {last.label && <div className="muted small">{last.label}</div>}
+                <div className="dice-total">{last.total}</div>
+                <div className="muted small mono"><Breakdown result={last} /></div>
+              </>
+            ) : <span className="muted small">Click any dice in the text, or roll here.</span>}
+          </div>
+          <div className="row gap history-head">
+            <button type="button" className="link small muted" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? "▾" : "▸"} History</button>
+            <span className="grow" />
+            {history.length > 0 && <button type="button" className="link small muted" onClick={clearHistory}>clear</button>}
+          </div>
+          {showHistory && <ul className="roll-list">{recent.map((r) => <HistoryItem key={r.time + r.expression} r={r} />)}</ul>}
+        </section>
       )}
-      <button type="button" className="tray-fab" aria-label="Dice roller" title="Dice roller (press R)" onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="tray-fab" aria-label="Dice roller" aria-expanded={open} title="Dice roller (press R)" onClick={() => setOpen((o) => !o)}>
         <span aria-hidden="true">🎲</span>
       </button>
     </div>
