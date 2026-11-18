@@ -36,6 +36,10 @@ export interface ClassRules {
   saves: Ability[];
   skill_picks: number;
   skill_options: string[] | "any";
+  /** How many skills get Expertise, from each class level on ({"2": 2, "9": 4} for the Bard). */
+  expertise?: Record<string, number>;
+  /** The skills Expertise can go on, when the class limits it (the Wizard's Scholar). */
+  expertise_options?: string[] | null;
   weapon_rule: "All" | "Simple" | "Monk" | "Rogue";
   /** Martial weapons it's trained with beyond its rule (the Rogue's Longsword). */
   extra_weapons?: string[];
@@ -379,6 +383,8 @@ export interface Sheet {
   /** Proficiency for every skill (by key), and where it comes from. */
   skills: Record<string, { prof: SkillProficiency; from: string; bonus: number }>;
   skillPicks: { used: number; allowed: number; text: string; ok: boolean };
+  /** Expertise: how many are allowed at this level, and on which skills (null: any proficient one). */
+  expertise: { used: number; allowed: number; options: string[] | null; text: string; ok: boolean };
   jack: boolean;
   ac: Explained<number>;
   initiative: Explained<number>;
@@ -510,6 +516,17 @@ export function work(b: Build, rules: Rules): Sheet {
   const speciesOptions = species?.extra_skill_options?.map(skillKey);
   const neither = options && speciesOptions && !skilled ? picks.filter((k) => !options.includes(k) && !speciesOptions.includes(k)).length : 0;
   const pickOK = picks.length === allowed && outsideClass <= freePicks && neither === 0;
+
+  // Expertise: Rogue (2 at 1, 4 at 6), Bard (2 at 2, 4 at 9), Ranger (1 at 2, 3 at 9), Wizard (1 at 2).
+  let expertiseAllowed = 0;
+  for (const [lvl, n] of Object.entries(cls?.expertise ?? {})) if (b.level >= Number(lvl)) expertiseAllowed = Math.max(expertiseAllowed, n);
+  const expertiseOptions = cls?.expertise_options?.map(skillKey) ?? null;
+  const expertiseUsed = Object.values(skills).filter((k) => k.prof === "expertise").length;
+  const badExpertise = Object.entries(skills).filter(([k, v]) => v.prof === "expertise" && expertiseOptions && !expertiseOptions.includes(k)).length;
+  const expertiseOK = expertiseUsed <= expertiseAllowed && badExpertise === 0;
+  const expertiseText = expertiseAllowed
+    ? `Expertise ${expertiseUsed} of ${expertiseAllowed}${expertiseOptions ? ` (${cls!.expertise_options!.join(", ")})` : " (on skills you're proficient in)"}.`
+    : expertiseUsed ? `${b.class || "This class"} gets no Expertise${b.level < 20 && cls?.expertise && Object.keys(cls.expertise).length ? " yet" : ""}: remove it.` : "";
   const pickText = `Used ${picks.length} of ${allowed} (class ${cls?.skill_picks ?? 0}`
     + (species?.extra_skill_picks ? `, ${species.name} ${species.extra_skill_picks}` : "") + (skilled ? ", Skilled feat 3" : "") + ")."
     + (options && outsideClass > freePicks ? ` ${outsideClass - freePicks} of your picks aren't on the ${cls?.name} list.` : options ? ` Class picks come from the ${cls?.name} list.` : "")
@@ -679,6 +696,11 @@ export function work(b: Build, rules: Rules): Sheet {
   if (abilitiesCheck !== "OK") warnings.push(`Ability scores: ${abilitiesCheck}.`);
   if (backgroundCheck !== "OK") warnings.push(`Background bonuses: ${backgroundCheck}.`);
   if (!pickOK) warnings.push(`Skill picks: ${pickText}`);
+  if (!expertiseOK) {
+    warnings.push(!expertiseAllowed ? expertiseText
+      : expertiseUsed > expertiseAllowed ? `Too much Expertise: ${expertiseUsed} of ${expertiseAllowed} at level ${b.level}.`
+      : `Expertise can only go on ${cls!.expertise_options!.join(", ")}.`);
+  }
   for (const w of weapons) if (!w.proficient) warnings.push(`Not proficient with the ${w.name}: no Proficiency Bonus on its attack.`);
 
   return {
@@ -689,6 +711,7 @@ export function work(b: Build, rules: Rules): Sheet {
     saves: cls?.saves ?? [],
     skills,
     skillPicks: { used: picks.length, allowed, text: pickText, ok: pickOK },
+    expertise: { used: expertiseUsed, allowed: expertiseAllowed, options: expertiseOptions, text: expertiseText, ok: expertiseOK },
     jack,
     ac: { value: acValue, how: `AC ${acValue} = ${acHow}` },
     initiative: { value: initiative, how: initHow },

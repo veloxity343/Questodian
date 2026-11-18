@@ -103,8 +103,8 @@ fn type_of(value: &Value) -> &'static str {
 }
 
 /// Fields whose keys are data (point costs by score, uses by level, gear options, skill
-/// names): any keys will do, as long as the values have the right shape.
-const LOOKUPS: [&str; 4] = ["costs", "by_level", "starting_gear", "skills"];
+/// names, Expertise by level): any keys will do, as long as the values have the right shape.
+const LOOKUPS: [&str; 5] = ["costs", "by_level", "starting_gear", "skills", "expertise"];
 /// Fields an entry may leave out.
 const OPTIONAL: [&str; 2] = ["srd", "source"];
 

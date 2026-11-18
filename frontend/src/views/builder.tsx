@@ -51,9 +51,9 @@ export function useRules() {
   return { rules, error };
 }
 
-/** "Farmer (not SRD)" for content from outside the SRD. */
-const label = (e: { name: string; srd?: boolean; source?: string }) =>
-  `${e.name}${e.srd === false ? " (not SRD)" : ""}${e.source === "added" ? " (yours)" : e.source === "edited" ? " (edited)" : ""}`;
+/** "Farmer", or "Farmer (edited)" / "Gunslinger (yours)" for entries changed on the Rules data page. */
+const label = (e: { name: string; source?: string }) =>
+  `${e.name}${e.source === "added" ? " (yours)" : e.source === "edited" ? " (edited)" : ""}`;
 
 /** A number with its explanation on hover and tap. */
 function How({ how, children }: { how: string; children: ReactNode }) {
@@ -236,7 +236,13 @@ export function BuilderSkills({ b, s, rules, editBuild, roll }: { b: Build; s: S
     });
   return (
     <section className="panel">
-      <div className="panel-head"><h2>Skills</h2><span className={`check-result ${s.skillPicks.ok ? "ok" : "bad"}`}>{s.skillPicks.ok ? "✓" : "✗"} {s.skillPicks.text}</span></div>
+      <div className="panel-head">
+        <h2>Skills</h2>
+        <div className="stack">
+          <span className={`check-result ${s.skillPicks.ok ? "ok" : "bad"}`}>{s.skillPicks.ok ? "✓" : "✗"} {s.skillPicks.text}</span>
+          {s.expertise.text && <span className={`check-result ${s.expertise.ok ? "ok" : "bad"}`}>{s.expertise.ok ? "✓" : "✗"} {s.expertise.text}</span>}
+        </div>
+      </div>
       <div className="table-wrap">
         <table className="table compact">
           <thead><tr><th>Skill</th><th title="Your class can pick it">Class</th><th>Given by</th><th>Pick</th><th title="Only when a feature (e.g. Bard, Rogue) grants it">Expertise</th><th>Bonus</th></tr></thead>
@@ -252,7 +258,11 @@ export function BuilderSkills({ b, s, rules, editBuild, roll }: { b: Build; s: S
                   <td>{!options || options.has(key) ? "✓" : ""}</td>
                   <td className="small">{fromBg ? "Background" : ""}</td>
                   <td><Checkbox aria-label={`Pick ${name}`} disabled={fromBg} checked={fromBg || b.skill_picks.includes(key)} onChange={(v) => toggle(key, "skill_picks", v)} /></td>
-                  <td><Checkbox aria-label={`${name} expertise`} disabled={!proficient} checked={b.expertise.includes(key)} onChange={(v) => toggle(key, "expertise", v)} /></td>
+                  <td>
+                    {/* Only as many as the class gives at this level, and only on skills it allows. */}
+                    <Checkbox aria-label={`${name} expertise`} checked={b.expertise.includes(key)} onChange={(v) => toggle(key, "expertise", v)}
+                      disabled={!b.expertise.includes(key) && (!proficient || s.expertise.used >= s.expertise.allowed || (!!s.expertise.options && !s.expertise.options.includes(key)))} />
+                  </td>
                   <td><button type="button" className="link" onClick={() => roll(d20(sk.bonus), name)}>{signed(sk.bonus)}</button>{sk.prof === "half" && <span className="muted small" title="Jack of All Trades: half Proficiency Bonus"> ½</span>}</td>
                 </tr>
               );

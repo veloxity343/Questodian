@@ -190,4 +190,4 @@ available at https://creativecommons.org/licenses/by/4.0/legalcode.
 The SRD data was converted from [5e-bits/5e-database](https://github.com/5e-bits/5e-database) (MIT).
 
 The character builder's rules data also has 16 backgrounds and 6 origin feats that aren't in
-the SRD. They're marked "not SRD" in the app, and the licence above doesn't cover them.
+the SRD. They're tagged "not SRD" on the Rules data page, and the licence above doesn't cover them.

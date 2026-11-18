@@ -53,6 +53,10 @@ CLASSES = [
 WEAPON_TEXT = {"All": "Simple and Martial weapons", "Simple": "Simple weapons",
                "Monk": "Simple weapons and Martial weapons with the Light property",
                "Rogue": "Simple weapons, Martial weapons with the Finesse or Light property, and Longswords"}
+# Expertise: how many skills by class level (SRD 5.2.1: Rogue and Bard Expertise, Ranger Deft
+# Explorer and Expertise, Wizard Scholar), and which skills, when it's limited.
+EXPERTISE = {"Bard": {"2": 2, "9": 4}, "Ranger": {"2": 1, "9": 3}, "Rogue": {"1": 2, "6": 4}, "Wizard": {"2": 1}}
+EXPERTISE_OPTIONS = {"Wizard": ["Arcana", "History", "Investigation", "Medicine", "Nature", "Religion"]}
 # Martial weapons a class is trained with beyond its weapon rule.
 EXTRA_WEAPONS = {"Rogue": ["Longsword"]}
 TOOLS = {"Bard": "3 Musical Instruments", "Druid": "Herbalism Kit", "Monk": "1 Artisan's Tools or Musical Instrument", "Rogue": "Thieves' Tools"}
@@ -227,6 +231,7 @@ def main(tools: Path) -> None:
         "classes": [
             {"name": c[0], "hit_die": c[1], "saves": [FULL[c[2]], FULL[c[3]]], "skill_picks": c[4],
              "skill_options": "any" if c[5] == "Any" else [s.strip() for s in c[5].split(",")],
+             "expertise": EXPERTISE.get(c[0], {}), "expertise_options": EXPERTISE_OPTIONS.get(c[0]),
              "weapon_rule": c[6], "weapons_text": WEAPON_TEXT[c[6]], "extra_weapons": EXTRA_WEAPONS.get(c[0], []), "armor_text": c[7],
              "armor_training": {"light": bool(c[8]), "medium": bool(c[9]), "heavy": bool(c[10]), "shield": bool(c[11])},
              "spell_ability": FULL[c[12]] if c[12] else None, "unarmored_defense": c[13], "tools_text": TOOLS.get(c[0], ""),
