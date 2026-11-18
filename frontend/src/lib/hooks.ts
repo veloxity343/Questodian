@@ -225,7 +225,7 @@ export function useDragReorder(
 export function usePanZoom<V extends { zoom: number; x: number; y: number }>(view: V, onView: ((v: V) => void) | undefined, limits: [number, number]) {
   const from = useRef<{ x: number; y: number } | null>(null);
   return {
-    onWheel: (e: { clientX: number; clientY: number; deltaY: number; currentTarget: Element }) =>
+    onWheel: (e: { clientX: number; clientY: number; deltaY: number; deltaMode: number; ctrlKey: boolean; currentTarget: Element }) =>
       onView?.(zoomAround(view, e, e.currentTarget.getBoundingClientRect(), limits)),
     start: (e: { clientX: number; clientY: number }) => { from.current = { x: e.clientX - view.x, y: e.clientY - view.y }; },
     move: (e: { clientX: number; clientY: number }) => {
