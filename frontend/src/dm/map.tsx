@@ -3,6 +3,8 @@
 // fogged cells, secret doors and secret notes stay hidden.
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { api } from "../api";
 import { Checkbox, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useDialogs, useToast } from "../context/ui";
@@ -10,7 +12,7 @@ import {
   MARKER_ICONS, TOKEN_COLORS, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
-import { download } from "../lib/util";
+import { download, slug } from "../lib/util";
 import type { Character } from "../types";
 
 export interface MapViewState { zoom: number; x: number; y: number }
@@ -198,7 +200,9 @@ const TOOLS: [Tool, string, string][] = [
   ["fog", "☁", "Fog: reveal or hide cells for the players"],
 ];
 
-export function MapEditor({ map, onChange, view, onView, characters }: {
+export function MapEditor({ name, map, onChange, view, onView, characters }: {
+  /** The map's title, for exported file names. */
+  name: string;
   map: MapData;
   onChange: (next: MapData) => void;
   view: MapViewState;
@@ -356,14 +360,15 @@ export function MapEditor({ map, onChange, view, onView, characters }: {
     const box = stage.current?.getBoundingClientRect();
     if (box) onView(fitView(map, box));
   };
-  const downloadSvg = () => {
-    const svg = stage.current?.querySelector("svg");
-    if (!svg) return;
-    const copy = svg.cloneNode(true) as SVGSVGElement;
-    copy.removeAttribute("style");
-    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const css = `<style>${MAP_CSS}</style>`;
-    download("map.svg", copy.outerHTML.replace(/^<svg([^>]*)>/, `<svg$1>${css}`), "image/svg+xml");
+  const exportAs = async (format: string) => {
+    const file = slug(name, "map");
+    try {
+      if (format === "png-players") downloadBlob(`${file}-players.png`, await mapPng(map, true));
+      if (format === "png-dm") downloadBlob(`${file}-dm.png`, await mapPng(map, false));
+      if (format === "svg") download(`${file}.svg`, mapSvgText(map, false), "image/svg+xml");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
   };
 
   // A map opens fitted to the space, unless it's already been zoomed or moved.
@@ -383,7 +388,12 @@ export function MapEditor({ map, onChange, view, onView, characters }: {
         <span className="grow" />
         <button type="button" className="btn small" onClick={fit}>Fit</button>
         <button type="button" className={`btn small ${showGrid ? "primary" : ""}`} onClick={() => setShowGrid(!showGrid)}>Grid…</button>
-        <button type="button" className="btn small" onClick={downloadSvg} title="Download the map as an image (SVG)">⬇ Image</button>
+        <Select className="small-select" aria-label="Export the map" value="" onChange={(v) => v && void exportAs(v)} options={[
+          ["", "⬇ Export…"],
+          ["png-players", "PNG: what the players see (fog, no DM notes)"],
+          ["png-dm", "PNG: the DM's view"],
+          ["svg", "SVG (the DM's view)"],
+        ]} />
       </div>
 
       <div className="map-options row gap wrap">
@@ -574,4 +584,54 @@ export function MapTokensFromPlayers({ id, map, onTokens, children }: { id: stri
     return () => clearInterval(timer);
   }, [id, map.players_move]);
   return <>{children}</>;
+}
+
+// ------------------------------------------------------------------ export
+
+/** The map drawn as a standalone SVG file, styles included. */
+export function mapSvgText(map: MapData, players: boolean): string {
+  const holder = document.createElement("div");
+  const root = createRoot(holder);
+  flushSync(() => root.render(<MapSvg map={map} players={players} />));
+  const svg = holder.querySelector("svg")!;
+  svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const text = svg.outerHTML.replace(/^<svg([^>]*)>/, `<svg$1><style>${MAP_CSS}</style>`);
+  root.unmount();
+  return text;
+}
+
+/** The map as a PNG: twice the on-screen size, as long as that stays within what browsers can draw. */
+export async function mapPng(map: MapData, players: boolean): Promise<Blob> {
+  const { width, height } = mapSize(map);
+  const scale = Math.max(0.25, Math.min(2, 8192 / Math.max(width, height)));
+  const url = URL.createObjectURL(new Blob([mapSvgText(map, players)], { type: "image/svg+xml" }));
+  try {
+    const image = new Image();
+    await new Promise<void>((done, fail) => {
+      image.onload = () => done();
+      image.onerror = () => fail(new Error("The map couldn't be drawn as an image"));
+      image.src = url;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("This browser can't draw images");
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((done, fail) => canvas.toBlob((b) => (b ? done(b) : fail(new Error("The map couldn't be saved as a PNG"))), "image/png"));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 500);
 }

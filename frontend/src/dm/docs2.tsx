@@ -358,7 +358,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
       />
       {drawn ? (
         <MapTokensFromPlayers id={doc.id} map={drawn} onTokens={(tokens) => edit((d) => void ((d.map as unknown as MapData).tokens = tokens))}>
-          <MapEditor map={drawn} onChange={(next) => edit((d) => void (d.map = next as unknown as Record<string, unknown>))}
+          <MapEditor name={doc.title} map={drawn} onChange={(next) => edit((d) => void (d.map = next as unknown as Record<string, unknown>))}
             view={view} onView={(v) => setView((s) => ({ ...s, ...v }))} characters={party} />
         </MapTokensFromPlayers>
       ) : doc.filename ? (
@@ -450,9 +450,24 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   }, [view.id, handout]);
   return (
     <div className="projection">
+      <FullscreenButton />
       {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
         : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
         : <p className="muted">Waiting for the DM…</p>}
     </div>
   );
+}
+
+/** Full screen for a projector or TV: the desktop app's own window, or the browser's Fullscreen API. */
+function FullscreenButton() {
+  const toggle = async () => {
+    const desktop = location.protocol === "questodian:" || location.hostname === "questodian.localhost";
+    if (desktop) {
+      const res = await fetch("/desktop/players/fullscreen", { method: "POST" }).catch(() => null);
+      if (res?.ok) return;
+    }
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    else await document.documentElement.requestFullscreen?.().catch(() => {});
+  };
+  return <button type="button" className="fullscreen-btn" onClick={() => void toggle()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>;
 }

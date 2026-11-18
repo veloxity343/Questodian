@@ -7,7 +7,8 @@
 //!
 //! Set `QUESTODIAN_LOG=1` to print every request. A few addresses belong to the desktop
 //! shell itself: `POST /desktop/players` opens (or brings back) the players' window, for
-//! showing a handout on a second screen, and `/desktop/updates` is the update check
+//! showing a handout on a second screen (`/desktop/players/fullscreen` toggles it full
+//! screen), and `/desktop/updates` is the update check
 //! (see `updates.rs`).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -95,6 +96,17 @@ async fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>>
                 eprintln!("questodian: couldn't open the players' window: {e}");
                 status(StatusCode::INTERNAL_SERVER_ERROR)
             }
+        };
+    }
+    if request.method() == Method::POST && request.uri().path() == "/desktop/players/fullscreen" {
+        // The players' window full screen, or back: for a projector or a TV.
+        let toggled = app.get_webview_window("players").map(|w| {
+            let on = w.is_fullscreen().unwrap_or(false);
+            w.set_fullscreen(!on)
+        });
+        return match toggled {
+            Some(Ok(())) => status(StatusCode::NO_CONTENT),
+            _ => status(StatusCode::NOT_FOUND),
         };
     }
     if let Some(rest) = request.uri().path().strip_prefix("/desktop/updates") {
