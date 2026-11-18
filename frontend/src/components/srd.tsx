@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useApp } from "../context/app";
 import { Modal, useDrawer, useToast } from "../context/ui";
 import { useDebounced } from "../lib/hooks";
-import type { SrdEntry } from "../types";
+import type { Edition, SrdEntry } from "../types";
 import { Checkbox, Markdown } from "./ui";
 
 /** Opens an SRD entry (statblock, spell...) in the side drawer. */
@@ -30,20 +30,28 @@ export function useStatblock() {
 }
 
 /** Search an SRD category in a modal; each click hands an entry back. */
-export function SrdPicker({ category, className = "", onPick, onClose }: {
+export function SrdPicker({ category, className = "", onPick, onClose, maxLevel, edition: forEdition, refuse, note }: {
   category: string;
   className?: string;
   onPick: (e: SrdEntry) => void;
   onClose: () => void;
+  /** Spells: only up to this level (0 for cantrips only). */
+  maxLevel?: number;
+  /** The rules to search, when not the open campaign's (the character builder is 2024). */
+  edition?: Edition;
+  /** Why an entry can't be added right now, or null if it can. */
+  refuse?: (e: SrdEntry) => string | null;
+  note?: string;
 }) {
   const toast = useToast();
-  const { edition } = useApp();
+  const app = useApp();
+  const edition = forEdition ?? app.edition;
   const [q, setQ] = useState("");
   const [onlyClass, setOnlyClass] = useState(category === "spells" && !!className);
   const [results, setResults] = useState<SrdEntry[]>([]);
   const search = useDebounced((text: string, cls: boolean) => {
     api
-      .srdSearch({ q: text.trim(), category, limit: 60, classes: cls ? className : undefined, edition })
+      .srdSearch({ q: text.trim(), category, limit: 60, classes: cls ? className : undefined, edition, level_max: maxLevel })
       .then((r) => setResults(r.results), (e: Error) => toast(e.message, "error"));
   }, 200);
   useEffect(() => search(q, onlyClass), [q, onlyClass, search]);
@@ -58,14 +66,19 @@ export function SrdPicker({ category, className = "", onPick, onClose }: {
         <ul className="list pick-list">
           {results.map((e) => (
             <li key={e.id}>
-              <button type="button" className="list-link" onClick={() => { onPick(e); toast(`Added ${e.name}`); }}>
+              <button type="button" className="list-link" onClick={() => {
+                const reason = refuse?.(e);
+                if (reason) return toast(reason, "error");
+                onPick(e);
+                toast(`Added ${e.name}`);
+              }}>
                 <span className="grow">{e.name}</span>
                 <span className="muted small">{e.summary}</span>
               </button>
             </li>
           ))}
         </ul>
-        <p className="muted small">Click to add; add as many as you like.</p>
+        <p className="muted small">{note ?? "Click to add; add as many as you like."}</p>
       </div>
     </Modal>
   );

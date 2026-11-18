@@ -13,7 +13,7 @@ import { derive, type Derived } from "../lib/derive";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, download, downloadJson, pickFiles, signed, slug, titleCase } from "../lib/util";
 import { targetEncounter } from "../lib/encounters";
-import { apply, buildOf, isBuilt, itemWeight, madeBy, parts, resetText, startBuild, startNotes, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
+import { apply, buildOf, extraSpell, highestSpellLevel, isBuilt, itemWeight, madeBy, parts, resetText, spellCounts, startBuild, startNotes, work, type Build, type GearFill, type Rules, type Sheet as Built } from "../lib/builder";
 import {
   BuilderAbilities, BuilderBanner, BuilderGuard, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderSpellNotes, BuilderTiles, BuilderWarnings,
   BuilderWeapons, LevelLog, LevelUpDialog, RulesDataLink, StartingGearDialog, loadRules, useRules, type EditBuild,
@@ -814,6 +814,23 @@ function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d: Derive
   const [picking, setPicking] = useState(false);
   const sc = ch.spellcasting;
   const slot = (lvl: number) => sc.slots[lvl] || { max: 0, used: 0 };
+  // With the builder: only spells you can cast, and only as many as the class lets you know or prepare.
+  // (A class without spells can still take Magic Initiate: cantrips and level 1.)
+  const highest = built ? (built.spell ? highestSpellLevel(built) : 1) : 9;
+  const counts = spellCounts(sc.spells);
+  const refuseSpell = (e: SrdEntry) => {
+    if (!built || !built.spell) return null;
+    if (sc.spells.some((sp) => sp.srd_id === e.id)) return `${e.name} is already on your list`;
+    if (e.data.level === 0 && counts.cantrips >= built.cantrips) return `You know ${built.cantrips} cantrips already: remove one first (or note a feat's as "Magic Initiate")`;
+    return null;
+  };
+  const prepareLimit = (sp: Character["spellcasting"]["spells"][number]) => {
+    if (!built || sp.prepared || extraSpell(sp)) return {};
+    if (sp.level === 0) return { disabled: true, title: "Cantrips are always ready: no need to prepare them" };
+    if (sp.level > highest) return { disabled: true, title: `You can cast up to level ${highest} spells` };
+    if (built.spell && counts.prepared >= built.prepared) return { disabled: true, title: `You've prepared ${built.prepared}, your limit: unprepare one first` };
+    return {};
+  };
   const setSlot = (lvl: number, next: { max: number; used: number }) => edit((x) => void (x.spellcasting.slots[lvl] = next));
   const autoFill = async () => {
     try {
@@ -882,13 +899,17 @@ function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d: Derive
             <TextInput value={sp.name} onChange={(v) => set({ name: v })} placeholder="Spell name" aria-label="Spell name" />
             {sp.srd_id && <button type="button" className="btn small" title="Read spell" onClick={() => showStatblock(sp.srd_id, sp.name)}>📖</button>}
           </div>,
-          <Checkbox aria-label="Prepared" checked={sp.prepared} onChange={(v) => set({ prepared: v })} />,
+          <Checkbox aria-label="Prepared" checked={sp.prepared} onChange={(v) => set({ prepared: v })} {...prepareLimit(sp)} />,
           <TextInput value={sp.notes} onChange={(v) => set({ notes: v })} aria-label="Notes" />,
         ]}
       />
       {picking && (
-        <SrdPicker category="spells" className={b?.class ?? ch.classes[0]?.name} onClose={() => setPicking(false)} onPick={(e) =>
-          edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: false, notes: e.summary, srd_id: e.id }))} />
+        <SrdPicker category="spells" className={b?.class ?? ch.classes[0]?.name} onClose={() => setPicking(false)}
+          maxLevel={built ? highest : undefined} edition={built ? "2024" : undefined} refuse={built ? refuseSpell : undefined}
+          note={built ? (built.spell
+            ? `Showing cantrips${highest ? ` and spells up to level ${highest}` : ""}: what you can cast at level ${b?.level}. Cantrips ${counts.cantrips} of ${built.cantrips}; prepare up to ${built.prepared}.`
+            : "Your class doesn't cast spells; this is for spells from a feat such as Magic Initiate (cantrips and level 1).") : undefined}
+          onPick={(e) => edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: false, notes: e.summary, srd_id: e.id }))} />
       )}
     </section>
   );

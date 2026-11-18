@@ -1,6 +1,6 @@
 // The DM screen's right-hand panel: Reference / View / Notes, with the dice dock below.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { HpBar, Markdown, NumInput, Select, type Option } from "../components/ui";
@@ -18,8 +18,9 @@ const TABS: [RightTab, string][] = [["reference", "Reference"], ["view", "View"]
 
 export function RightPanel() {
   const dm = useDM();
+  const aside = useRef<HTMLElement>(null);
   return (
-    <aside className="right-panel" aria-label="Reference panel">
+    <aside ref={aside} className="right-panel" aria-label="Reference panel">
       <nav className="panel-tabs" role="tablist">
         {TABS.map(([t, label]) => (
           <button type="button" key={t} role="tab" aria-selected={dm.rightTab === t} className={dm.rightTab === t ? "on" : ""} onClick={() => dm.setRightTab(t)}>{label}</button>
@@ -30,7 +31,7 @@ export function RightPanel() {
         {dm.rightTab === "view" && <ViewTab />}
         {dm.rightTab === "notes" && <NotesTab />}
       </div>
-      <DiceDock />
+      <DiceDock panel={aside} />
     </aside>
   );
 }
@@ -260,16 +261,60 @@ function NotesTab() {
 
 // ------------------------------------------------------------------ dice
 
-function DiceDock() {
+/** Room the reference keeps above the dice, and below this the dice fold away. */
+const REFERENCE_MIN = 180;
+const DICE_FOLD = 70;
+
+/** The divider above the dice: drag it down to fold them away, up as far as leaves the reference room. */
+function DiceSplitter({ panel, height, onHeight, onFold }: {
+  panel: React.RefObject<HTMLElement | null>;
+  height: number;
+  onHeight: (h: number) => void;
+  onFold: () => void;
+}) {
+  const start = useRef<{ y: number; h: number } | null>(null);
+  const latest = useRef(height);
+  return (
+    <div className="resizer horizontal" role="separator" aria-orientation="horizontal" aria-label="Resize the dice" title="Drag to resize the dice; drag to the bottom to fold them away"
+      onPointerDown={(e: ReactPointerEvent) => { start.current = { y: e.clientY, h: height }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+      onPointerMove={(e: ReactPointerEvent) => {
+        if (!start.current) return;
+        const room = (panel.current?.clientHeight ?? 800) - REFERENCE_MIN;
+        latest.current = Math.max(0, Math.min(room, start.current.h - (e.clientY - start.current.y)));
+        onHeight(latest.current);
+      }}
+      onPointerUp={() => {
+        if (start.current && latest.current < DICE_FOLD) onFold();
+        start.current = null;
+      }}
+      onDoubleClick={() => onHeight(320)} />
+  );
+}
+
+function DiceDock({ panel }: { panel: React.RefObject<HTMLElement | null> }) {
   const { roll, history, clearHistory } = useDice();
+  const [height, setHeight] = usePref("dm.dice.height", 320);
+  const [folded, setFolded] = usePref("dm.dice.folded", false);
   const [expr, setExpr] = useState("");
   const [open, setOpen] = usePref("dm.dice.history", true);
   const last = history[0];
   const recent = useMemo(() => history.slice(1, 30), [history]);
   const input = useRef<HTMLInputElement>(null);
+  if (folded) {
+    return (
+      <button type="button" className="dice-unfold" onClick={() => { setFolded(false); if (height < DICE_FOLD) setHeight(320); }} title="Bring the dice back">
+        🎲 Dice{last ? `: ${last.total}` : ""} <span aria-hidden="true">▴</span>
+      </button>
+    );
+  }
   return (
-    <section className="dice-dock" aria-label="Dice">
-      <div className="eyebrow">Dice</div>
+    <>
+    <DiceSplitter panel={panel} height={height} onHeight={setHeight} onFold={() => { setFolded(true); setHeight(320); }} />
+    <section className="dice-dock" aria-label="Dice" style={{ height }}>
+      <div className="row gap">
+        <div className="eyebrow grow">Dice</div>
+        <button type="button" className="icon-btn" aria-label="Fold the dice away" title="Fold away" onClick={() => setFolded(true)}>▾</button>
+      </div>
       <div className="row gap">
         <input ref={input} type="text" className="grow mono" placeholder="2d6+4" value={expr} aria-label="Dice expression"
           onChange={(e) => setExpr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && expr.trim() && roll(expr.trim())} />
@@ -294,5 +339,6 @@ function DiceDock() {
       </div>
       {open && <ul className="roll-list">{recent.map((r) => <HistoryItem key={r.time + r.expression} r={r} />)}</ul>}
     </section>
+    </>
   );
 }

@@ -7,7 +7,7 @@ import { api } from "../api";
 import { Checkbox, Field, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { Modal, useDialogs, useToast } from "../context/ui";
 import {
-  METHODS, canStep, standardArrayOK, fightingStyleAllowed, highestSpellLevel, levelUp, needsLineage, ordinal, parts, pickBackground, resetScores,
+  METHODS, canStep, extraSpell, spellCounts, standardArrayOK, fightingStyleAllowed, highestSpellLevel, levelUp, needsLineage, ordinal, parts, pickBackground, resetScores,
   resetText, skillKey, spellGuide, startingGear, step, type Build, type BuiltWeapon, type Method, type Rules, type Sheet,
 } from "../lib/builder";
 import { ABILITIES, ABILITY_NAMES, signed } from "../lib/util";
@@ -452,10 +452,9 @@ export function BuilderHow({ b, s, rules }: { b: Build; s: Sheet; rules: Rules }
 
 export function BuilderSpellNotes({ b, s, ch }: { b: Build; s: Sheet; ch: Character }) {
   const spells = ch.spellcasting.spells;
-  const cantrips = spells.filter((x) => x.level === 0 && !/magic initiate|feat/i.test(x.notes)).length;
-  const prepared = spells.filter((x) => x.level > 0 && x.prepared && !/always/i.test(x.notes)).length;
+  const { cantrips, prepared } = spellCounts(spells);
   const highest = highestSpellLevel(s);
-  const tooHigh = spells.filter((x) => x.level > highest && x.level > 0 && !/magic initiate|feat/i.test(x.notes));
+  const tooHigh = spells.filter((x) => x.level > highest && x.level > 0 && !extraSpell(x));
   const status = cantrips <= s.cantrips && prepared <= s.prepared ? (cantrips === s.cantrips && prepared === s.prepared ? "✓" : "room for more") : "too many";
   return (
     <div className="spell-notes">

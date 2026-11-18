@@ -79,7 +79,7 @@ export function HandbookList() {
         </div>
       </header>
       <p className="muted">Your own rules, lore and notes — searchable alongside the SRD in Rules &amp; SRD.</p>
-      <input type="search" className="wide" placeholder="Search your handbook…" aria-label="Search handbook" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="search" className="wide page-search" placeholder="Search your handbook…" aria-label="Search handbook" value={q} onChange={(e) => setQ(e.target.value)} />
       {list.length ? (
         <div className="cards">
           {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (

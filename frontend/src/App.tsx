@@ -62,7 +62,7 @@ function TopBar() {
     <header className="topbar">
       <button type="button" className="icon-btn menu-btn" aria-label="Show or hide the navigator" disabled={!onDm}
         title={onDm ? "Show or hide the navigator (scenes, NPCs, notes…)" : "The navigator is on the DM screen"} onClick={() => setNav(!nav)}>☰</button>
-      <NavLink className="brand" to="/"><span aria-hidden="true">✦</span> Questodian</NavLink>
+      <NavLink className="brand" to="/campaigns" title="All campaigns"><span aria-hidden="true">✦</span> Questodian</NavLink>
       <nav className="modes" aria-label="Main">
         {MODES.map((m) => <NavLink key={m.to} to={m.to} end={m.end} className={({ isActive }) => (isActive ? "on" : "")}>{m.label}</NavLink>)}
       </nav>

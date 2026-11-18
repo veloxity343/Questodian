@@ -932,4 +932,13 @@ export function spellGuide(b: Build, s: Sheet): string[] {
   ].filter(Boolean);
 }
 
+/** Spells that don't count toward the numbers: from a feat (Magic Initiate) or always prepared. */
+export const extraSpell = (sp: { notes: string }) => /magic initiate|feat|always/i.test(sp.notes);
+
+/** Cantrips known and spells prepared, as they count toward the class's numbers. */
+export function spellCounts(spells: { level: number; prepared: boolean; notes: string }[]) {
+  const counted = spells.filter((sp) => !extraSpell(sp));
+  return { cantrips: counted.filter((sp) => sp.level === 0).length, prepared: counted.filter((sp) => sp.level > 0 && sp.prepared).length };
+}
+
 export const highestSpellLevel = (s: Sheet) => (s.pact.slots ? s.pact.level : s.slots.reduce((h, n, i) => (n > 0 ? i + 1 : h), 0));
