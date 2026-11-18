@@ -74,6 +74,23 @@ async fn revision_0002_upgrades_with_a_backup() {
     check_fixture("v0002", true).await;
 }
 
+/// Made by this app at 0003 (before maps): a builder character, a handout and a rules edit.
+#[tokio::test]
+async fn revision_0003_upgrades_and_keeps_rule_edits() {
+    check_fixture("v0003", true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = open_fixture("v0003", dir.path()).await;
+    let mut repo = db.read().await.unwrap();
+    let edits = repo.rule_overrides().await.unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        (edits[0].kind.as_str(), edits[0].key.as_str(), &edits[0].data),
+        ("settings", "score_cap", &Some(json!(22)))
+    );
+    drop(repo);
+    db.close().await;
+}
+
 #[tokio::test]
 async fn revision_0001_upgrades_and_moves_session_encounters() {
     check_fixture("v0001", true).await;
@@ -122,7 +139,7 @@ async fn upgraded_schema_matches_a_new_database() {
     Database::open(fresh.path()).await.unwrap().close().await;
     let fresh = schema_shape(&fresh.path().join(DB_FILENAME)).await;
     assert!(fresh.iter().any(|line| line.starts_with("rule_overrides table_info")));
-    for name in ["v0001", "v0002"] {
+    for name in ["v0001", "v0002", "v0003"] {
         let upgraded = tempfile::tempdir().unwrap();
         open_fixture(name, upgraded.path()).await.close().await;
         assert_eq!(schema_shape(&upgraded.path().join(DB_FILENAME)).await, fresh, "{name}");

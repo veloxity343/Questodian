@@ -664,6 +664,9 @@ schema! {
         filename: String = String::new(),
         mime: String = String::new(),
         body: String = String::new(),
+        /// A map drawn in the app (grid, legend, cells, walls, labels, markers, tokens, fog),
+        /// as the map editor writes it; empty for image handouts.
+        map: IndexMap<String, Value> = IndexMap::new(),
     }
 }
 

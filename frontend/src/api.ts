@@ -78,6 +78,8 @@ export const api = {
   },
   projection: () => request<Projection>("GET", "projection"),
   project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
+  /** Move the tokens on a map handout (the players' screen), leaving the rest of the map alone. */
+  moveTokens: (id: string, tokens: unknown[]) => request<Handout>("POST", `handouts/${id}/tokens`, { tokens }),
   handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),

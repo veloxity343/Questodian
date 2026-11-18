@@ -273,6 +273,8 @@ export interface Handout extends RecordBase {
   filename: string;
   mime: string;
   body: string;
+  /** A map drawn in the app (lib/map.ts); empty for image handouts. */
+  map: Record<string, unknown>;
 }
 
 export interface KindMap {

@@ -6,6 +6,7 @@ import { EmptyState, HpBar, Loading } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
 import { usePref } from "../lib/hooks";
+import { blankMap } from "../lib/map";
 import type { Campaign, KindMap, Scene, SceneStatus } from "../types";
 import { MonsterDoc, NoteDoc, NpcDoc, SceneDoc, TrackerDoc } from "./docs";
 import { CampaignDoc, HandoutDoc, SessionDoc } from "./docs2";
@@ -114,6 +115,13 @@ function Navigator() {
     await dm.create(kind, { [field]: name || `New ${label}` } as Partial<KindMap[typeof kind]>);
   };
 
+  // A map is a handout drawn in the app (dm/map.tsx), in the Maps folder.
+  const createMap = async () => {
+    const name = await prompt("New map", { label: "Name", value: "" });
+    if (name === null) return;
+    await dm.create("handouts", { title: name || "New map", folder: "Maps", map: blankMap() as unknown as Record<string, unknown> });
+  };
+
   return (
     <nav className="navigator" aria-label="Campaign">
       <div className="nav-top">
@@ -129,6 +137,7 @@ function Navigator() {
           <div className="nav-head">
             <span className="eyebrow">{SECTIONS.find(([s]) => s === section)?.[1]} <span className="count">{section === "party" ? "" : (dm.lists[section as ListKind] as unknown[]).length}</span></span>
             {NEW_LABEL[section] && <button type="button" className="link small" onClick={() => create(section)}>+ {NEW_LABEL[section]}</button>}
+            {section === "handouts" && <button type="button" className="link small" onClick={createMap}>+ Map</button>}
           </div>
           {section !== "party" && section !== "sessions" && (
             <input type="search" className="nav-filter" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter" />

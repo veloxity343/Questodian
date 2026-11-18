@@ -73,6 +73,7 @@ pub fn router(app: Shared) -> Router {
         .route("/sessions/{id}/log", post(add_log))
         .route("/characters/{id}/rest", post(rest))
         .route("/handouts/{id}/file", get(handout_file).put(upload_handout))
+        .route("/handouts/{id}/tokens", post(move_tokens))
         .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
         .route("/export", get(export_bundle))
         .route("/export/{kind}/{id}", get(export_one))
@@ -558,6 +559,34 @@ async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(Stri
         let _ = tokio::fs::remove_file(path).await;
     }
     Ok(Json(json!({"deleted": id})))
+}
+
+/// The players' screen moving tokens on a map: only the tokens change, so a DM editing the
+/// rest of the map at the same time doesn't lose anything.
+async fn move_tokens(
+    State(app): State<Shared>,
+    UrlPath((id,)): UrlPath<(String,)>,
+    JsonBody(body): JsonBody,
+) -> Result<Json<Value>> {
+    let tokens = body.as_ref().and_then(|b| b.get("tokens")).cloned();
+    let Some(Value::Array(tokens)) = tokens else { return Err(body_error("send {\"tokens\": [...]}")) };
+    if !tokens.iter().all(Value::is_object) {
+        return Err(body_error("each token is an object"));
+    }
+    let mut repo = app.db.write().await?;
+    let mut doc = repo.get(Kind::Handouts, &id).await?;
+    match doc.get_mut("map") {
+        Some(Value::Object(map)) if map.contains_key("grid") => {
+            if map.get("players_move") != Some(&Value::Bool(true)) {
+                return Err(invalid("the DM hasn't let players move tokens on this map"));
+            }
+            map.insert("tokens".into(), Value::Array(tokens));
+        }
+        _ => return Err(invalid("this handout isn't a map")),
+    }
+    let saved = repo.update(Kind::Handouts, &id, doc).await?;
+    repo.commit().await?;
+    Ok(Json(saved))
 }
 
 async fn read_handout(state: State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Json<Value>> {

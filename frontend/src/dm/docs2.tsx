@@ -7,9 +7,11 @@ import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
 import { useDebounced, useDraft } from "../lib/hooks";
+import { blankMap, isMap, mapOf, type MapData } from "../lib/map";
 import { fmtDate, titleCase } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
 import { TrackerWidget } from "./docs";
+import { MapEditor, MapTokensFromPlayers, PlayersMap } from "./map";
 import { DocHeader, Pills, Section, useDeleteRecord, useRecordDraft } from "./parts";
 import { useDM, useParty } from "./store";
 
@@ -307,6 +309,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<ViewState>({ id: initial.id, zoom: 1, x: 0, y: 0 });
   const [casting, setCasting] = useState(false);
+  const party = useParty();
   const onDelete = useDeleteRecord("handouts", initial.id, initial.title, discard);
   const channel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
@@ -334,15 +337,16 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
     }
   };
   const folders = [...new Set(dm.lists.handouts.map((h) => h.folder).filter(Boolean))];
+  const drawn = isMap(doc.map) ? mapOf(doc.map) : null;
   return (
-    <article className="doc" onPaste={(e) => upload(e.clipboardData.files[0])}>
+    <article className="doc" onPaste={(e) => !drawn && upload(e.clipboardData.files[0])}>
       <DocHeader kind="handouts" status={status} editing={editing} setEditing={setEditing} onDelete={onDelete} linkName={doc.title}
         title={editing ? <TextInput className="title-input" value={doc.title} onChange={set("title")} aria-label="Title" /> : doc.title}
         subtitle={editing ? (
           <><TextInput list="handout-folders" value={doc.folder} onChange={set("folder")} placeholder="Folder (e.g. Maps / Session 1)" aria-label="Folder" />
             <datalist id="handout-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist></>
         ) : <span className="muted">{doc.folder}</span>}
-        extra={doc.filename ? (
+        extra={doc.filename || drawn ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
               onClick={() => { setCasting(true); void api.project(view).then(() => projectHandout()); }}>
@@ -352,7 +356,12 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
           </>
         ) : undefined}
       />
-      {doc.filename ? (
+      {drawn ? (
+        <MapTokensFromPlayers id={doc.id} map={drawn} onTokens={(tokens) => edit((d) => void ((d.map as unknown as MapData).tokens = tokens))}>
+          <MapEditor map={drawn} onChange={(next) => edit((d) => void (d.map = next as unknown as Record<string, unknown>))}
+            view={view} onView={(v) => setView((s) => ({ ...s, ...v }))} characters={party} />
+        </MapTokensFromPlayers>
+      ) : doc.filename ? (
         <PanZoom src={api.handoutUrl(doc)} alt={doc.title} view={view} onView={setView} />
       ) : (
         <label className="dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void upload(e.dataTransfer.files[0]); }}>
@@ -360,11 +369,14 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
           <strong>Add an image</strong><span className="muted small">Drop a file here, paste one, or click to choose (PNG, JPG, WebP, GIF, SVG).</span>
         </label>
       )}
-      {doc.filename && editing && (
+      {doc.filename && editing && !drawn && (
         <label className="btn small ghost upload-btn"><input type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />Replace image…</label>
       )}
       <Section label="Notes and key" value={doc.body} editing={editing} onChange={set("body")} rows={8}
         placeholder="Map key, what the players see, secrets…" />
+      {!drawn && !doc.filename && (
+        <p className="muted small">Or <button type="button" className="link" onClick={() => edit((d) => void (d.map = blankMap() as unknown as Record<string, unknown>))}>draw a map instead</button>.</p>
+      )}
     </article>
   );
 }
@@ -430,9 +442,16 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   useEffect(() => {
     if (handout) document.title = handout.title;
   }, [handout]);
+  // A map changes as the DM draws and the party moves: keep it fresh.
+  useEffect(() => {
+    if (!view.id || !handout || !isMap(handout.map)) return;
+    const timer = setInterval(() => api.get("handouts", view.id).then(setHandout, () => {}), 1500);
+    return () => clearInterval(timer);
+  }, [view.id, handout]);
   return (
     <div className="projection">
-      {handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
+      {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
+        : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
         : <p className="muted">Waiting for the DM…</p>}
     </div>
   );

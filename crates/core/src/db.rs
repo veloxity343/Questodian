@@ -24,15 +24,17 @@ pub const DB_FILENAME: &str = "questodian.db";
 const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
-pub const HEAD: &str = "0003";
+pub const HEAD: &str = "0004";
 /// What a database made before migrations existed contains.
 const BASELINE: &str = "0001";
 
 const SCHEMA_0002: &str = include_str!("migrations/0002_schema.sql");
 const UPGRADE_0001_TO_0002: &str = include_str!("migrations/0001_to_0002.sql");
-const UPGRADE_0002_TO_0003: &str = include_str!("migrations/0002_to_0003.sql");
+/// The upgrades written in SQL, in order: from, and what takes it to the next revision.
+const STEPS: [(&str, &str); 2] =
+    [("0002", include_str!("migrations/0002_to_0003.sql")), ("0003", include_str!("migrations/0003_to_0004.sql"))];
 /// Every revision this app can upgrade from, oldest first.
-const KNOWN: [&str; 3] = [BASELINE, "0002", HEAD];
+const KNOWN: [&str; 4] = [BASELINE, "0002", "0003", HEAD];
 
 /// `$QUESTODIAN_DATA`, else the usual per-user data folder for this OS.
 pub fn default_data_dir() -> PathBuf {
@@ -281,11 +283,14 @@ async fn upgrade_with(conn: &mut SqliteConnection, path: &Path, alone: bool) -> 
 
 /// Run every upgrade from `version` to [`HEAD`], in one transaction.
 async fn upgrade_from(conn: &mut SqliteConnection, version: String, moves: Vec<EncounterMove>) -> Result<()> {
-    if version == BASELINE {
+    let mut at = version.as_str();
+    if at == BASELINE {
         upgrade_0001_to_0002(conn, moves).await?;
+        at = "0002";
     }
-    if version == BASELINE || version == "0002" {
-        sqlx::raw_sql(sqlx::AssertSqlSafe(UPGRADE_0002_TO_0003)).execute(&mut *conn).await?;
+    let first = STEPS.iter().position(|(from, _)| *from == at).unwrap_or(STEPS.len());
+    for (_, sql) in &STEPS[first..] {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(*sql)).execute(&mut *conn).await?;
     }
     set_version(conn, HEAD).await
 }
@@ -334,7 +339,9 @@ where
 
 async fn create_schema(conn: &mut SqliteConnection) -> Result<()> {
     sqlx::raw_sql(sqlx::AssertSqlSafe(SCHEMA_0002)).execute(&mut *conn).await?;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(UPGRADE_0002_TO_0003)).execute(&mut *conn).await?;
+    for (_, sql) in STEPS {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(&mut *conn).await?;
+    }
     set_version(conn, HEAD).await
 }
 

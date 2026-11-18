@@ -192,3 +192,37 @@ async fn builder_characters_rest_by_the_2024_rules_in_a_2014_campaign() {
         assert_eq!(ch["hit_dice"]["remaining"], regained, "{build}");
     }
 }
+
+#[tokio::test]
+async fn players_move_tokens_only_when_allowed_and_only_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let map = json!({"grid": {"type": "square", "cols": 4, "rows": 3, "size": 40}, "cells": {"0,0": "water"},
+                     "tokens": [{"id": "t1", "c": 0, "r": 0, "name": "Ann"}], "players_move": false});
+    let (status, handout) =
+        call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Mill", "map": map}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{handout}");
+    let id = handout["id"].as_str().unwrap();
+    let moved = json!({"tokens": [{"id": "t1", "c": 2, "r": 1, "name": "Ann"}]});
+    let path = format!("/api/handouts/{id}/tokens");
+    let (status, _) = call(&router, Method::POST, &path, Some(moved.clone())).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not allowed yet");
+
+    let mut allowed = handout.clone();
+    allowed["map"]["players_move"] = json!(true);
+    call(&router, Method::PUT, &format!("/api/handouts/{id}"), Some(allowed)).await;
+    let (status, saved) = call(&router, Method::POST, &path, Some(moved)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["map"]["tokens"][0]["c"], 2);
+    assert_eq!(saved["map"]["cells"]["0,0"], "water", "the rest of the map is kept");
+
+    let (_, image) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Portrait"}))).await;
+    let (status, _) = call(
+        &router,
+        Method::POST,
+        &format!("/api/handouts/{}/tokens", image["id"].as_str().unwrap()),
+        Some(json!({"tokens": []})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "an image handout has no tokens");
+}
