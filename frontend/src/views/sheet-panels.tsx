@@ -15,7 +15,7 @@ import {
 import { type Derived } from "../lib/derive";
 import { useLoad } from "../lib/hooks";
 import { ABILITIES, ABILITY_NAMES, d20, signed, titleCase } from "../lib/util";
-import type { Ability, Campaign, Character, Edition, RollResult, SkillProficiency, SrdEntry } from "../types";
+import type { Ability, Campaign, Character, Edition, Resource, RollResult, SkillProficiency, SrdEntry } from "../types";
 import { BuilderSpellNotes } from "./builder";
 
 /** A change to the character (applied to a draft and saved). */
@@ -52,7 +52,26 @@ function srdLists(edition: Edition) {
   return srdCache[edition]!;
 }
 
-export const RESETS: Option[] = [["long", resetText("long")], ["short", resetText("short")], ["short_one", resetText("short_one")], ["none", resetText("none")]];
+const RESETS: Option[] = [["long", resetText("long")], ["short", resetText("short")], ["short_one", resetText("short_one")], ["none", resetText("none")]];
+
+/** Resources tracked by hand: name, uses left, maximum and when they come back. */
+export function ResourcesPanel({ title, items, onChange }: { title: string; items: Resource[]; onChange: (items: Resource[]) => void }) {
+  return (
+    <ListSection<Resource>
+      title={title}
+      items={items}
+      onChange={onChange}
+      blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
+      head={["Name", "Current", "Max", "Resets on", ""]}
+      row={(r, set) => [
+        <TextInput value={r.name} onChange={(v) => set({ name: v })} placeholder="Rage, Ki, Channel Divinity…" aria-label="Resource" />,
+        <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
+        <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
+        <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
+      ]}
+    />
+  );
+}
 
 export function CoinsPanel({ ch, edit }: { ch: Character; edit: Edit }) {
   return (

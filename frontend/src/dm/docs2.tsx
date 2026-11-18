@@ -426,12 +426,13 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   useEffect(() => {
     if (handout) document.title = handout.title;
   }, [handout]);
-  // A map changes as the DM draws and the party moves: keep it fresh.
+  // A map changes as the DM draws and the party moves: keep it fresh (one timer per map shown).
+  const showingMap = !!handout && isMap(handout.map);
   useEffect(() => {
-    if (!view.id || !handout || !isMap(handout.map)) return;
+    if (!view.id || !showingMap) return;
     const timer = setInterval(() => api.get("handouts", view.id).then(setHandout, () => {}), 1500);
     return () => clearInterval(timer);
-  }, [view.id, handout]);
+  }, [view.id, showingMap]);
   return (
     <div className="projection">
       <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)" aria-label="Full screen">⛶</button>

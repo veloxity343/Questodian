@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { Board } from "../components/board";
-import { Checkbox, EmptyState, Field, HpBar, ListSection, LoadError, Loading, NumInput, SaveStatus, Select, TextInput } from "../components/ui";
+import { Checkbox, EmptyState, Field, HpBar, LoadError, Loading, SaveStatus, TextInput } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
@@ -16,13 +16,13 @@ import { derive, type Derived } from "../lib/derive";
 import { targetEncounter } from "../lib/encounters";
 import { useDraft, useLoad, usePref } from "../lib/hooks";
 import { ABILITY_NAMES, download, downloadJson, pickFiles, slug, titleCase } from "../lib/util";
-import type { Campaign, Character, Resource } from "../types";
+import type { Campaign, Character } from "../types";
 import {
   BuilderAbilities, BuilderBanner, BuilderGuard, BuilderHeader, BuilderHow, BuilderResources, BuilderSkills, BuilderTiles, BuilderWarnings,
   BuilderWeapons, LevelLog, LevelUpDialog, RulesDataLink, StartingGearDialog, loadRules, useRules, type EditBuild,
 } from "./builder";
 import {
-  AbilitiesPanel, AttacksPanel, CoinsPanel, CombatPanel, FeaturesPanel, InventoryPanel, PersonalityPanel, RESETS, SheetHeader, SkillsPanel,
+  AbilitiesPanel, AttacksPanel, CoinsPanel, CombatPanel, FeaturesPanel, InventoryPanel, PersonalityPanel, ResourcesPanel, SheetHeader, SkillsPanel,
   SpellsPanel, type Edit, type Roll,
 } from "./sheet-panels";
 
@@ -114,7 +114,6 @@ export function CharacterSheet() {
   return <Sheet key={id} initial={ch} campaigns={campaigns} />;
 }
 
-
 function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign[] }) {
   const { meta } = useApp();
   const dice = useDice();
@@ -128,7 +127,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
   const { rules } = useRules();
   const [dialog, setDialog] = useState<"" | "level" | "gear">("");
   // The builder (2024 rules) works out most of the sheet; "by hand" switches it off but keeps the choices.
-  const wantsBuilder = !!rules && !!ch && isBuilt(ch) && !(ch.build as { manual?: boolean }).manual;
+  const wantsBuilder = !!rules && !!ch && isBuilt(ch) && !buildOf(ch).manual;
   // A class missing from the rules data (hidden, or from another install) can't be worked out.
   const missingClass = wantsBuilder && !parts(buildOf(ch!), rules!).cls ? buildOf(ch!).class : "";
   let building = wantsBuilder && !missingClass;
@@ -145,7 +144,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
   const editBuild: EditBuild = (fn) => {
     if (!rules) return;
     try {
-      apply(ch!, fn(buildOf(ch!)), rules); // throws, before anything is saved, if the rules data can't be read
+      // If the rules data can't be read, `apply` throws before the draft changes, so nothing is saved.
       edit((x) => void Object.assign(x, apply(x, fn(buildOf(x)), rules)));
     } catch (e) {
       toast(`The builder couldn't work that out: ${(e as Error).message}`, "error");
@@ -276,19 +275,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
           </section>
         ) },
         { id: "resources", title: "Class resources", node: (
-          <ListSection<Resource>
-            title="Class resources"
-            items={ch.resources}
-            onChange={(v) => edit((x) => void (x.resources = v))}
-            blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
-            head={["Name", "Current", "Max", "Resets on", ""]}
-            row={(r, set) => [
-              <TextInput value={r.name} onChange={(v) => set({ name: v })} placeholder="Rage, Ki, Channel Divinity…" aria-label="Resource" />,
-              <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
-              <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
-              <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
-            ]}
-          />
+          <ResourcesPanel title="Class resources" items={ch.resources} onChange={(v) => edit((x) => void (x.resources = v))} />
         ) },
         { id: "spells", title: "Spellcasting", node: <SpellsPanel ch={ch} d={d} edit={edit} roll={roll} /> },
         { id: "inventory", title: "Inventory", node: <InventoryPanel ch={ch} edit={edit} /> },
@@ -353,19 +340,8 @@ function BuiltSheet({ ch, b, s, rules, d, edit, editBuild, campaigns, roll, roll
           })} roll={roll} />
       ) },
       { id: "other-resources", title: "Other resources", node: (
-        <ListSection<Resource>
-          title="Other resources (magic items, feats…)"
-          items={otherResources}
-          onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))}
-          blank={() => ({ name: "", current: 1, max: 1, reset: "long" })}
-          head={["Name", "Current", "Max", "Resets on", ""]}
-          row={(r, set) => [
-            <TextInput value={r.name} onChange={(v) => set({ name: v })} aria-label="Resource" />,
-            <NumInput value={r.current} onChange={(v) => set({ current: v })} aria-label="Current" />,
-            <NumInput value={r.max} onChange={(v) => set({ max: v })} aria-label="Max" />,
-            <Select value={r.reset} options={RESETS} onChange={(v) => set({ reset: v as typeof r.reset })} aria-label="Resets on" />,
-          ]}
-        />
+        <ResourcesPanel title="Other resources (magic items, feats…)" items={otherResources}
+          onChange={(v) => edit((x) => void (x.resources = [...x.resources.filter((r) => builtResources.has(r.name)), ...v]))} />
       ) },
       { id: "inventory", title: "Inventory", node: <InventoryPanel ch={ch} edit={edit} rules={rules} capacity={s.carry.value} onStartingGear={() => openDialog("gear")} /> },
       { id: "coins", title: "Coins", node: <CoinsPanel ch={ch} edit={edit} /> },

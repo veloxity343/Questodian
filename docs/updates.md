@@ -1,6 +1,6 @@
 # Updates
 
-The desktop app checks GitHub for a newer release, the way WattsLeft does.
+The desktop app checks GitHub for a newer release.
 
 - On first launch it asks whether to check. The answer, the last check and the newest version
   found are kept in `updates.json` in the app's config folder (not the data folder).

@@ -12,7 +12,7 @@ const blank = {
   attacks: [], spellcasting: { ability: "", slots: {}, spells: [] }, resources: [], features: [], skills: {}, build: {},
 } as unknown as Character;
 
-/** The spreadsheet's example character: a Human Fighter 1, Soldier, with the Tough feat and the Defense style. */
+/** A Human Fighter 1, Soldier, with the Tough feat and the Defense style, in chain mail with a shield. */
 const fighter: Build = Object.assign(buildOf(blank), {
   class: "Fighter", species: "Human", background: "Soldier", human_feat: "Tough", fighting_style: "Defense",
   base: { str: 15, dex: 13, con: 14, int: 8, wis: 12, cha: 10 }, background_bonus: { str: 2, con: 1 },
@@ -44,7 +44,7 @@ describe("ability scores", () => {
 describe("working it out", () => {
   const s = work(fighter, rules);
 
-  it("matches the spreadsheet", () => {
+  it("works out AC, HP, attacks and warnings", () => {
     expect(s.ac.value).toBe(19); // chain mail 16 + shield 2 + Defense 1
     expect(s.hp.value).toBe(14); // d10 10 + Con 2 + Tough 2
     expect(s.weapons[0]).toMatchObject({ attack: 5, damage: "1d8+3 Slashing" });

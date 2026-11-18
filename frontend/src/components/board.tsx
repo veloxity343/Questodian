@@ -29,6 +29,15 @@ const EMPTY: Layout = { order: [], hidden: [], collapsed: [], width: {}, height:
 /** The grid's row unit; each card spans as many as its height needs. */
 const ROW = 4;
 
+/** `order` with `x` moved next to `target`: after it, or before it. Hidden panels keep their places. */
+export function placed(order: string[], x: string, target: string, after: boolean): string[] {
+  const next = order.filter((y) => y !== x);
+  const at = next.indexOf(target);
+  if (at < 0) return order;
+  next.splice(after ? at + 1 : at, 0, x);
+  return next;
+}
+
 export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const [stored, setLayout] = usePref<Layout>(`layout.${id}`, EMPTY);
   const layout = { ...EMPTY, ...stored };
@@ -45,12 +54,8 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const change = (fn: (l: Layout) => Layout) => setLayout((prev) => fn({ ...EMPTY, ...prev, order }));
   const toggle = (list: "hidden" | "collapsed", x: string) =>
     change((l) => ({ ...l, [list]: l[list].includes(x) ? l[list].filter((y) => y !== x) : [...l[list], x] }));
-  const move = (x: string, to: number) =>
-    change((l) => {
-      const next = l.order.filter((y) => y !== x);
-      next.splice(Math.max(0, Math.min(next.length, to)), 0, x);
-      return { ...l, order: next };
-    });
+  const move = (x: string, target: string | undefined, after: boolean) =>
+    target && change((l) => ({ ...l, order: placed(l.order, x, target, after) }));
   const changed = JSON.stringify(stored) !== JSON.stringify(EMPTY);
 
   return (
@@ -77,7 +82,7 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
         {shown.map((x, i) => {
           const item = byId.get(x)!;
           return (
-            <Card key={x} item={item} width={layout.width[x] ?? item.width ?? "half"} height={layout.height[x]}
+            <Tile key={x} item={item} width={layout.width[x] ?? item.width ?? "half"} height={layout.height[x]}
               collapsed={layout.collapsed.includes(x)} arranging={arranging} dragging={dragging === x}
               onCollapse={() => toggle("collapsed", x)}
               onHide={() => toggle("hidden", x)}
@@ -88,10 +93,10 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
                 else height[x] = h;
                 return { ...l, height };
               })}
-              onMove={(dir) => move(x, i + dir)}
+              onMove={(dir) => move(x, shown[i + dir], dir > 0)}
               onDragStart={() => setDragging(x)}
               onDragEnd={() => setDragging("")}
-              onDropHere={() => dragging && dragging !== x && move(dragging, order.indexOf(x))} />
+              onDropHere={() => dragging && dragging !== x && move(dragging, x, order.indexOf(dragging) < order.indexOf(x))} />
           );
         })}
       </div>
@@ -99,7 +104,7 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   );
 }
 
-function Card({ item, width, height, collapsed, arranging, dragging, onCollapse, onHide, onWidth, onHeight, onMove, onDragStart, onDragEnd, onDropHere }: {
+function Tile({ item, width, height, collapsed, arranging, dragging, onCollapse, onHide, onWidth, onHeight, onMove, onDragStart, onDragEnd, onDropHere }: {
   item: BoardItem;
   width: Width;
   height?: number;

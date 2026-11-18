@@ -218,7 +218,7 @@ def main(tools: Path) -> None:
     rules = {
         "meta": {
             "title": "Character builder rules (2024)",
-            "source": "SRD 5.2.1 (CC BY 4.0) and the 2024 Player's Handbook (entries marked srd: false), as in the dnd repo's character sheet",
+            "source": "SRD 5.2.1 (CC BY 4.0), with some backgrounds and origin feats from outside the SRD (marked srd: false)",
         },
         "abilities": ABILITIES,
         "skills": SKILLS,

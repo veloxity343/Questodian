@@ -1,6 +1,5 @@
 // The character builder (2024 rules): the choices a player makes (`Build`) and everything worked
-// out from them, with a plain-language explanation of each number. Ported from the dnd
-// repo's character sheet spreadsheet (tools/character-sheet/build.py and its button macros).
+// out from them, with a plain-language explanation of each number.
 // The rules data comes from GET /api/rules: the bundled data with the user's own edits.
 
 import type { Ability, Attack, Character, Feature, Resource, SkillProficiency } from "../types";
@@ -151,10 +150,13 @@ export interface Build {
   level_log: LevelLogEntry[];
   /** What the builder last wrote, so it replaces only its own rows and leaves the player's alone. */
   made?: Made;
+  /** Edited by hand: the builder keeps these choices but works nothing out until switched back on. */
+  manual?: boolean;
 }
 
 export interface Made { features: string[]; attacks: string[]; resources: string[] }
 
+/** Whether the character has builder choices (worked out unless `manual`, or its class is missing). */
 export const isBuilt = (ch: Character) => !!(ch.build as Partial<Build> | undefined)?.class;
 
 /** A character's build with anything missing filled in. */
@@ -182,13 +184,14 @@ export function buildOf(ch: Character): Build {
     extra_hp: Number(b.extra_hp) || 0,
     level_log: [...(b.level_log ?? [])],
     made: b.made,
+    manual: b.manual,
   };
 }
 
 /** A fresh build: point buy at 8s, or what the character already has where it matches. */
 export function startBuild(ch: Character, rules: Rules): Build {
   const b = buildOf({ ...ch, build: {} });
-  const named = <T extends { name: string }>(list: T[], name: string) => list.find((x) => x.name.toLowerCase() === name.trim().toLowerCase())?.name ?? "";
+  const named = <T extends { name: string }>(list: T[], name: string) => find(list, name, true)?.name ?? "";
   b.class = named(rules.classes, ch.classes[0]?.name ?? "") || rules.classes[0]?.name || "";
   // The builder has one class: it takes the character's whole level.
   b.level = Math.min(20, Math.max(1, ch.classes.reduce((t, c) => t + (Number(c.level) || 0), 0) || 1));
@@ -196,7 +199,7 @@ export function startBuild(ch: Character, rules: Rules): Build {
   // "Elf (Wood Elf)" is the species and its lineage, as the builder writes it.
   const [, speciesName = ch.race, lineageName = ""] = ch.race.match(/^(.*?)\s*\((.*)\)$/) ?? [];
   b.species = named(rules.species, speciesName);
-  b.lineage = rules.species.find((x) => x.name === b.species)?.choices?.find((c) => c.name.toLowerCase() === lineageName.toLowerCase())?.name ?? "";
+  b.lineage = find(find(rules.species, b.species)?.choices ?? [], lineageName, true)?.name ?? "";
   b.background = named(rules.backgrounds, ch.background);
   const scores = ABILITIES.map((a) => Number(ch.abilities[a]) || 10);
   if (!scores.every((x) => x === 10)) {
@@ -223,7 +226,13 @@ export function startNotes(ch: Character, b: Build): string[] {
 // ------------------------------------------------------------------ lookups
 
 export const skillKey = (name: string) => name.toLowerCase().replace(/\s+/g, "-");
-const find = <T extends { name: string }>(list: T[], name: string) => list.find((x) => x.name === name);
+/** An entry by name; `loose` ignores case and spaces around it (for names typed by hand). */
+function find<T extends { name: string }>(list: T[], name: string, loose = false) {
+  const want = loose ? name.trim().toLowerCase() : name;
+  return list.find((x) => (loose ? x.name.toLowerCase() : x.name) === want);
+}
+/** "Arcane Focus (orb)" → "Arcane Focus": the item a variant is of. */
+const baseName = (name: string) => (name.includes(" (") ? name.slice(0, name.indexOf(" (")) : name);
 const hasProperty = (w: WeaponRules, prop: string) => new RegExp(`\\b${prop}\\b`, "i").test(w.properties);
 
 export interface Parts {
@@ -275,10 +284,11 @@ function pointsSpent(b: Build, rules: Rules): number | null {
   return total;
 }
 
-export function standardArrayOK(b: Build, rules: Rules) {
-  const sorted = (xs: number[]) => [...xs].sort((x, y) => x - y).join(",");
-  return sorted(ABILITIES.map((a) => b.base[a])) === sorted(rules.standard_array);
-}
+/** The standard array, lowest first. */
+const ascending = (xs: number[]) => [...xs].sort((x, y) => x - y);
+const sameNumbers = (xs: number[], ys: number[]) => ascending(xs).join() === ascending(ys).join();
+
+export const standardArrayOK = (b: Build, rules: Rules) => sameNumbers(ABILITIES.map((a) => b.base[a]), rules.standard_array);
 
 /** Level 20 capstones that raise two scores by 4, to a maximum of 25 (Primal Champion, Body and Mind). */
 const CAPSTONES: Record<string, Ability[]> = { Barbarian: ["str", "con"], Monk: ["dex", "wis"] };
@@ -297,7 +307,7 @@ export function scores(b: Build, rules: Rules): Record<Ability, number> {
 export function canStep(b: Build, rules: Rules, a: Ability, dir: 1 | -1): boolean {
   const cur = b.base[a];
   if (b.method === "standard_array") {
-    const arr = [...rules.standard_array].sort((x, y) => x - y);
+    const arr = ascending(rules.standard_array);
     return standardArrayOK(b, rules) && (dir > 0 ? cur < arr[arr.length - 1] : cur > arr[0]);
   }
   if (b.method === "rolled") return dir > 0 ? cur < rules.rolled.max : cur > rules.rolled.min;
@@ -314,7 +324,7 @@ export function step(b: Build, rules: Rules, a: Ability, dir: 1 | -1): Build {
   const base = { ...b.base };
   const cur = base[a];
   if (b.method === "standard_array") {
-    const arr = [...rules.standard_array].sort((x, y) => x - y);
+    const arr = ascending(rules.standard_array);
     const target = arr[arr.indexOf(cur) + dir];
     const other = ABILITIES.find((x) => x !== a && base[x] === target);
     if (other) base[other] = cur;
@@ -332,8 +342,7 @@ export function step(b: Build, rules: Rules, a: Ability, dir: 1 | -1): Build {
 export function resetScores(b: Build, rules: Rules): Build {
   const cls = find(rules.classes, b.class);
   // The class's suggested order, as long as it's the same six numbers as the (possibly edited) array.
-  const same = (x: number[]) => [...x].sort((m, n) => m - n).join() === [...rules.standard_array].sort((m, n) => m - n).join();
-  const array = cls?.standard_array?.length === 6 && same(cls.standard_array) ? cls.standard_array : rules.standard_array;
+  const array = cls?.standard_array?.length === 6 && sameNumbers(cls.standard_array, rules.standard_array) ? cls.standard_array : rules.standard_array;
   const value = (i: number) => (b.method === "point_buy" ? rules.point_buy.min : b.method === "standard_array" ? array[i] : 10);
   return { ...b, base: Object.fromEntries(ABILITIES.map((a, i) => [a, value(i)])) as Record<Ability, number> };
 }
@@ -436,15 +445,16 @@ const RESET_TEXT: Record<Resource["reset"], string> = {
 };
 export const resetText = (r: Resource["reset"]) => RESET_TEXT[r];
 
+/** Martial Arts works only unarmored and without a shield. */
+const martialArts = (b: Build, p: Parts) => b.class === "Monk" && p.armor?.category === "None" && !b.shield;
+
 function weapon(w: WeaponRules, b: Build, p: Parts, mods: Record<Ability, number>, sc: Record<Ability, number>, pb: number, rules: Rules): BuiltWeapon {
   const rule = p.cls?.weapon_rule ?? "Simple";
   const light = hasProperty(w, "Light");
   const finesse = hasProperty(w, "Finesse");
   const proficient = rule === "All" || w.category === "Simple" || (rule === "Monk" && light) || (rule === "Rogue" && (light || finesse))
     || !!p.cls?.extra_weapons?.includes(w.name);
-  // Martial Arts works only unarmored and without a shield.
-  const martialArts = b.class === "Monk" && p.armor?.category === "None" && !b.shield;
-  const monkWeapon = martialArts && w.kind === "Melee" && (w.category === "Simple" || light);
+  const monkWeapon = martialArts(b, p) && w.kind === "Melee" && (w.category === "Simple" || light);
   const ranged = w.kind === "Ranged";
   const ability: Ability = finesse || monkWeapon ? (mods.dex > mods.str ? "dex" : "str") : ranged ? "dex" : "str";
   const mod = mods[ability];
@@ -512,10 +522,12 @@ export function work(b: Build, rules: Rules): Sheet {
   const options = cls?.skill_options === "any" ? null : (cls?.skill_options ?? []).map(skillKey);
   const outsideClass = options ? picks.filter((k) => !options.includes(k)).length : 0;
   const freePicks = allowed - (cls?.skill_picks ?? 0);
-  // The Elf's extra skill (Keen Senses) is one of a few; count picks that fit neither list.
+  // The Elf's extra skill (Keen Senses) is one of a few: one of them must be among the skills.
   const speciesOptions = species?.extra_skill_options?.map(skillKey);
-  const neither = options && speciesOptions && !skilled ? picks.filter((k) => !options.includes(k) && !speciesOptions.includes(k)).length : 0;
-  const pickOK = picks.length === allowed && outsideClass <= freePicks && neither === 0;
+  const keenMissing = !!speciesOptions && ![...picks, ...bgSkills].some((k) => speciesOptions.includes(k));
+  // Skilled gives three skills or tools: tools aren't picked here, so up to three fewer is fine.
+  const enough = skilled ? picks.length <= allowed && picks.length >= allowed - 3 : picks.length === allowed;
+  const pickOK = enough && outsideClass <= freePicks && !keenMissing;
 
   // Expertise: Rogue (2 at 1, 4 at 6), Bard (2 at 2, 4 at 9), Ranger (1 at 2, 3 at 9), Wizard (1 at 2).
   let expertiseAllowed = 0;
@@ -528,9 +540,9 @@ export function work(b: Build, rules: Rules): Sheet {
     ? `Expertise ${expertiseUsed} of ${expertiseAllowed}${expertiseOptions ? ` (${cls!.expertise_options!.join(", ")})` : " (on skills you're proficient in)"}.`
     : expertiseUsed ? `${b.class || "This class"} gets no Expertise${b.level < 20 && cls?.expertise && Object.keys(cls.expertise).length ? " yet" : ""}: remove it.` : "";
   const pickText = `Used ${picks.length} of ${allowed} (class ${cls?.skill_picks ?? 0}`
-    + (species?.extra_skill_picks ? `, ${species.name} ${species.extra_skill_picks}` : "") + (skilled ? ", Skilled feat 3" : "") + ")."
+    + (species?.extra_skill_picks ? `, ${species.name} ${species.extra_skill_picks}` : "") + (skilled ? ", Skilled feat 3 skills or tools" : "") + ")."
     + (options && outsideClass > freePicks ? ` ${outsideClass - freePicks} of your picks aren't on the ${cls?.name} list.` : options ? ` Class picks come from the ${cls?.name} list.` : "")
-    + (neither ? ` The ${species!.name} pick must be ${species!.extra_skill_options!.join(", ")}.` : "");
+    + (keenMissing ? ` The ${species!.name}'s skill must be one of ${species!.extra_skill_options!.join(", ")}.` : "");
 
   // Armor Class.
   const armor = p.armor;
@@ -587,7 +599,7 @@ export function work(b: Build, rules: Rules): Sheet {
 
   // Speed.
   const strShort = !!armor && armor.str_required > 0 && sc.str < armor.str_required;
-  const monkMove = b.class === "Monk" && unarmored && !b.shield ? parseInt(String(row?.columns[2] ?? "").replace(/[^\d]/g, ""), 10) || 0 : 0;
+  const monkMove = martialArts(b, p) ? parseInt(String(row?.columns[2] ?? "").replace(/[^\d]/g, ""), 10) || 0 : 0;
   const barbMove = b.class === "Barbarian" && b.level >= 5 && cat !== "Heavy" ? 10 : 0;
   const linSpeed = lineage?.extra_speed ?? 0;
   const speedValue = (species?.speed ?? 30) + linSpeed + monkMove + barbMove - (strShort ? 10 : 0);
@@ -614,12 +626,12 @@ export function work(b: Build, rules: Rules): Sheet {
   const masteryHow = masteries > 0 ? `Weapon Mastery: you can use the mastery property of ${masteries} kinds of weapon you're proficient with. You can swap one after a Long Rest.` : `${b.class ? `${b.class}s don't` : "This class doesn't"} get Weapon Mastery.`;
 
   const weapons = b.weapons.map((n) => find(rules.weapons, n)).filter((w): w is WeaponRules => !!w).map((w) => weapon(w, b, p, mods, sc, pb, rules));
-  const monkOK = b.class === "Monk" && unarmored && !b.shield;
+  // Martial Arts: the higher of Str or Dex for Unarmed Strikes, and for the Grapple and Shove DC.
+  const monkOK = martialArts(b, p);
   const uaAbility: Ability = monkOK && mods.dex > mods.str ? "dex" : "str";
   const uaMod = mods[uaAbility];
   const uaDamage = monkOK ? `${row?.columns[0] ?? "1d6"}${uaMod === 0 ? "" : S(uaMod)} Bludgeoning` : `${1 + mods.str} Bludgeoning`;
-  // Martial Arts lets a Monk use Dex for the Grapple and Shove DC.
-  const grappleAbility: Ability = monkOK && mods.dex > mods.str ? "dex" : "str";
+  const grappleAbility = uaAbility;
   const grappleDC = 8 + mods[grappleAbility] + pb;
   const unarmed: BuiltWeapon = {
     name: "Unarmed Strike", attack: uaMod + pb, damage: uaDamage, mastery: "", proficient: true,
@@ -629,12 +641,7 @@ export function work(b: Build, rules: Rules): Sheet {
   };
 
   const resources: BuiltResource[] = [];
-  for (const r of cls?.resources ?? []) {
-    const max = resourceMax(r.max, b, row, mods, pb);
-    if (max > 0) resources.push({ name: r.name, max, reset: resetOf(r.short_rest, b.level), how: resourceHow(r.max, r.name, max, b, cls, pb, mods) });
-  }
-  if (species?.resource) {
-    const r = species.resource;
+  for (const r of [...(cls?.resources ?? []), ...(species?.resource ? [species.resource] : [])]) {
     const max = resourceMax(r.max, b, row, mods, pb);
     if (max > 0) resources.push({ name: r.name, max, reset: resetOf(r.short_rest, b.level), how: resourceHow(r.max, r.name, max, b, cls, pb, mods) });
   }
@@ -662,7 +669,7 @@ export function work(b: Build, rules: Rules): Sheet {
     languages: "Common + 2 of your choice",
   };
 
-  // The checks the spreadsheet shows beside the ability table.
+  // The checks shown beside the ability table.
   const spent = pointsSpent(b, rules);
   const pbLimits = rules.point_buy;
   const abilitiesCheck = b.method === "point_buy"
@@ -750,6 +757,9 @@ function resourceHow(max: ResourceMax, name: string, value: number, b: Build, cl
 
 // ------------------------------------------------------------------ writing it to the character
 
+/** The attacks and resources the builder made, as opposed to ones the player added. */
+export const madeBy = (ch: Character): Made => (ch.build as { made?: Made }).made ?? { features: [], attacks: [], resources: [] };
+
 /**
  * Copy what the builder works out into the character's own fields, so everything else (the DM
  * screen, encounters, rests, exports) keeps reading the usual places. Current HP, used slots and
@@ -761,7 +771,7 @@ export function apply(ch: Character, b: Build, rules: Rules): Character {
   if (!p.cls) return ch;
   const s = work(b, rules);
   const out: Character = structuredClone(ch);
-  const before: Made = (ch.build as { made?: Made }).made ?? { features: [], attacks: [], resources: [] };
+  const before = madeBy(ch);
   out.classes = [{ name: b.class, subclass: b.subclass, level: b.level }];
   out.race = p.lineage ? `${b.species} (${p.lineage.name})` : b.species;
   out.background = b.background;
@@ -812,8 +822,6 @@ export function apply(ch: Character, b: Build, rules: Rules): Character {
   return out;
 }
 
-/** The attacks and resources the builder made, as opposed to ones the player added. */
-export const madeBy = (ch: Character): Made => (ch.build as { made?: Made }).made ?? { features: [], attacks: [], resources: [] };
 
 const totalDice = (text: string) => (String(text).match(/(\d+)d\d+/g) ?? []).reduce((t, part) => t + parseInt(part, 10), 0);
 
@@ -830,7 +838,7 @@ export function levelUp(b: Build, rules: Rules, rolled: number | null): LevelUp 
   const con = before.mods.con;
   if (rolled !== null) next.extra_hp = b.extra_hp + (Math.max(1, rolled + con) - (die / 2 + 1 + con));
   const after = work(next, rules);
-  const row = parts(next, rules).row;
+  const { cls, row } = parts(next, rules);
   const feats = row?.features ?? [];
   const hp = after.hp.value - before.hp.value;
   const gained: string[] = [`New features: ${feats.join(", ") || "none"}`, `Hit Point maximum: ${before.hp.value} → ${after.hp.value} (+${hp}${rolled !== null ? `, you rolled ${rolled}` : ""})`];
@@ -848,7 +856,8 @@ export function levelUp(b: Build, rules: Rules, rolled: number | null): LevelUp 
   if (has("Epic Boon")) todo.push("Choose an Epic Boon feat.");
   if (has("Subclass") && !has("Subclass feature")) todo.push("Choose your subclass.");
   if (has("Subclass feature")) todo.push("Read your new subclass feature in the reference.");
-  if (has("Expertise")) todo.push("Expertise: set two of your proficient skills to Expertise.");
+  const moreExpertise = after.expertise.allowed - before.expertise.allowed;
+  if (moreExpertise > 0) todo.push(`Expertise: choose ${moreExpertise} more of your proficient skills${cls?.expertise_options ? ` (${cls.expertise_options.join(", ")})` : ""}.`);
   if (has("Fighting Style")) todo.push("Choose a Fighting Style.");
   if (after.cantrips > before.cantrips) todo.push(`Learn ${after.cantrips - before.cantrips} new cantrip(s).`);
   if (after.prepared > before.prepared) todo.push(`Prepare ${after.prepared - before.prepared} more spell(s) (${after.prepared} total).`);
@@ -871,7 +880,7 @@ export function startingGear(b: Build, rules: Rules, classOption: string, backgr
   const lines = [...(p.cls?.starting_gear[classOption] ?? []), ...(p.background?.starting_gear[backgroundOption] ?? [])];
   const fill: GearFill = { armor: "None (unarmored)", shield: false, weapons: [], items: [], gp: 0, sp: 0, notes: [] };
   for (const { item, qty } of lines) {
-    const base = item.includes(" (") ? item.slice(0, item.indexOf(" (")) : item;
+    const base = baseName(item);
     if (item === "GP") fill.gp += qty;
     else if (item === "SP") fill.sp += qty;
     else if (item === "Shield") fill.shield = true;
@@ -897,7 +906,7 @@ export function startingGear(b: Build, rules: Rules, classOption: string, backgr
 
 /** The weight of an item: its exact name, or the part before " (" ("Quarterstaff (your Arcane Focus)"). */
 export function itemWeight(rules: Rules, name: string): number | null {
-  const base = name.includes(" (") ? name.slice(0, name.indexOf(" (")) : name;
+  const base = baseName(name);
   const item = rules.items.find((x) => x.name === name) ?? rules.items.find((x) => x.name === base);
   if (item) return item.weight;
   const w = rules.weapons.find((x) => x.name === name || x.name === base);
@@ -906,13 +915,16 @@ export function itemWeight(rules: Rules, name: string): number | null {
 
 // ------------------------------------------------------------------ spells
 
-/** How to choose spells and how spells change, for the class (from the spreadsheet's Spells tab). */
+/** The highest level of spell slot the character has (a Warlock's Pact Magic level). */
+export const highestSpellLevel = (s: Sheet) => (s.pact.slots ? s.pact.level : s.slots.reduce((h, n, i) => (n > 0 ? i + 1 : h), 0));
+
+/** How to choose spells and how spells change, for the class. */
 export function spellGuide(b: Build, s: Sheet): string[] {
   if (!s.spell) return [
     `${b.class ? `${b.class}s don't` : "This class doesn't"} cast spells. If a feat such as Magic Initiate gives you spells, add them below and note where they came from.`,
     "Magic Initiate: 2 cantrips + 1 level 1 spell from that list; the level 1 spell is always prepared and can be cast once per Long Rest without a slot.",
   ];
-  const highest = s.pact.slots ? s.pact.level : s.slots.reduce((h, n, i) => (n > 0 ? i + 1 : h), 0);
+  const highest = highestSpellLevel(s);
   const change = ["Bard", "Sorcerer", "Warlock"].includes(b.class) ? "When you gain a level you can swap one prepared spell (and one cantrip)."
     : ["Paladin", "Ranger"].includes(b.class) ? "After a Long Rest you can swap one prepared spell; on a level up you can swap a cantrip if you have any."
     : b.class === "Wizard" ? "After a Long Rest you can change any prepared spells, choosing from your spellbook."
@@ -932,8 +944,12 @@ export function spellGuide(b: Build, s: Sheet): string[] {
   ].filter(Boolean);
 }
 
-/** Spells that don't count toward the numbers: from a feat (Magic Initiate) or always prepared. */
-export const extraSpell = (sp: { notes: string }) => /magic initiate|feat|always/i.test(sp.notes);
+/**
+ * Spells that don't count toward the class's numbers, by what their notes say: from a feat
+ * (Magic Initiate), a class feature (Thaumaturge, Blessed Warrior, Mystic Arcanum...), a species
+ * or lineage, or always prepared.
+ */
+export const extraSpell = (sp: { notes: string }) => /magic initiate|feat|feature|species|lineage|arcanum|always/i.test(sp.notes);
 
 /** Cantrips known and spells prepared, as they count toward the class's numbers. */
 export function spellCounts(spells: { level: number; prepared: boolean; notes: string }[]) {
@@ -941,4 +957,3 @@ export function spellCounts(spells: { level: number; prepared: boolean; notes: s
   return { cantrips: counted.filter((sp) => sp.level === 0).length, prepared: counted.filter((sp) => sp.level > 0 && sp.prepared).length };
 }
 
-export const highestSpellLevel = (s: Sheet) => (s.pact.slots ? s.pact.level : s.slots.reduce((h, n, i) => (n > 0 ? i + 1 : h), 0));

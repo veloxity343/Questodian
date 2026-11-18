@@ -92,6 +92,8 @@ async fn edit_hide_reset_and_carry_through_a_backup() {
     assert!(entry(&rules, "feats", "Lucky").is_none());
 
     // Resetting brings back the bundled entry.
+    let (status, _) = call(&router, Method::PUT, "/api/rules/settings/%20score_cap%20", Some(json!(21))).await;
+    assert_eq!(status, StatusCode::OK, "the key is trimmed");
     let (status, rules) = call(&router, Method::DELETE, "/api/rules/classes/Fighter", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(entry(&rules, "classes", "Fighter").unwrap()["hit_die"], 10);
@@ -182,9 +184,15 @@ async fn builder_characters_rest_by_the_2024_rules_in_a_2014_campaign() {
         json!({"campaign_id": campaign["id"], "classes": [{"name": "Fighter", "level": 4}], "build": build,
                "hp": {"max": 30, "current": 30, "temp": 0}, "hit_dice": {"total": "4d10", "remaining": 0}})
     };
-    for (build, regained) in
-        [(json!({"class": "Fighter"}), 4), (json!({"class": "Fighter", "manual": true}), 2), (json!({}), 2)]
-    {
+    // Built with a class from the rules data: 2024 (all Hit Dice back). By hand, without a
+    // build, or with a class the rules data no longer has: the campaign's 2014 rules (half).
+    let cases = [
+        (json!({"class": "Fighter"}), 4),
+        (json!({"class": "Fighter", "manual": true}), 2),
+        (json!({}), 2),
+        (json!({"class": "Gunslinger"}), 2),
+    ];
+    for (build, regained) in cases {
         let (_, ch) = call(&router, Method::POST, "/api/characters", Some(body(build.clone()))).await;
         let id = ch["id"].as_str().unwrap();
         let (_, ch) =
@@ -198,7 +206,7 @@ async fn players_move_existing_tokens_only_and_only_when_allowed() {
     let dir = tempfile::tempdir().unwrap();
     let router = app(dir.path()).await;
     let map = json!({"grid": {"type": "square", "cols": 4, "rows": 3, "size": 40}, "cells": {"0,0": "water"},
-                     "tokens": [{"id": "t1", "c": 0, "r": 0, "name": "Ann"}], "players_move": false});
+                     "tokens": [{"id": "t1", "c": 0, "r": 0, "name": "Ann", "character_id": "ann"}], "players_move": false});
     let (status, handout) =
         call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Mill", "map": map}))).await;
     assert_eq!(status, StatusCode::CREATED, "{handout}");
@@ -211,8 +219,10 @@ async fn players_move_existing_tokens_only_and_only_when_allowed() {
     // The DM allows moves, renames the token and adds another; a player then moves the first.
     let mut dm = handout.clone();
     dm["map"]["players_move"] = json!(true);
-    dm["map"]["tokens"] =
-        json!([{"id": "t1", "c": 0, "r": 0, "name": "Ann (renamed)"}, {"id": "t2", "c": 3, "r": 2, "name": "Ogre"}]);
+    dm["map"]["tokens"] = json!([
+        {"id": "t1", "c": 0, "r": 0, "name": "Ann (renamed)", "character_id": "ann"},
+        {"id": "t2", "c": 3, "r": 2, "name": "Ogre"}
+    ]);
     call(&router, Method::PUT, &format!("/api/handouts/{id}"), Some(dm)).await;
     let (status, saved) = call(&router, Method::POST, &path, Some(step(2, 1))).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
@@ -228,6 +238,8 @@ async fn players_move_existing_tokens_only_and_only_when_allowed() {
     let (_, unknown) =
         call(&router, Method::POST, &path, Some(json!({"moves": [{"id": "nobody", "c": 1, "r": 1}]}))).await;
     assert_eq!(unknown["map"]["tokens"].as_array().unwrap().len(), 2, "an unknown token isn't added");
+    let (_, ogre) = call(&router, Method::POST, &path, Some(json!({"moves": [{"id": "t2", "c": 0, "r": 0}]}))).await;
+    assert_eq!(ogre["map"]["tokens"][1]["c"], 3, "players move only their characters' tokens");
 
     let (_, image) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Portrait"}))).await;
     let image_path = format!("/api/handouts/{}/tokens", image["id"].as_str().unwrap());
@@ -246,7 +258,17 @@ async fn copying_a_campaign_keeps_map_tokens_on_their_characters() {
     let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
     let (status, _) = call(&router, Method::POST, "/api/import?mode=copy", Some(bundle)).await;
     assert_eq!(status, StatusCode::OK);
-    let (_, handouts) = call(&router, Method::GET, "/api/handouts", None).await;
+    // Tokens that aren't objects, or have no character, copy without fuss.
+    let odd = json!({"format": "questodian", "version": 3, "collections": {"handouts": [
+        {"id": "h9", "title": "Odd", "map": {"grid": {"cols": 1, "rows": 1}, "tokens": [5, {"id": "t9", "c": 0, "r": 0}]}}
+    ]}});
+    let (status, report) = call(&router, Method::POST, "/api/import?mode=copy", Some(odd)).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let (_, all) = call(&router, Method::GET, "/api/handouts", None).await;
+    let (odd, mill): (Vec<Value>, Vec<Value>) =
+        all["handouts"].as_array().unwrap().iter().cloned().partition(|h| h["title"] == "Odd");
+    assert_eq!(odd[0]["map"]["tokens"], json!([5, {"id": "t9", "c": 0, "r": 0}]), "nothing added to the tokens");
+    let handouts = json!({"handouts": mill});
     let (_, characters) = call(&router, Method::GET, "/api/characters", None).await;
     let ids: Vec<&Value> = characters["characters"].as_array().unwrap().iter().map(|c| &c["id"]).collect();
     let linked: Vec<&Value> =

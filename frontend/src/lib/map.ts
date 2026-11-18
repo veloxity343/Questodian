@@ -112,7 +112,7 @@ export function hexPoints(m: MapData, c: number, r: number) {
   }).join(" ");
 }
 
-/** The cell under a point in px, or null outside the grid. Fractional for labels and markers. */
+/** The cell under a point in px, or null outside the grid. */
 export function cellAt(m: MapData, x: number, y: number): { c: number; r: number } | null {
   const { type, cols, rows, size } = m.grid;
   let c: number;
@@ -210,16 +210,18 @@ export function along(a: { x: number; y: number }, b: { x: number; y: number }, 
 
 /** Drop what's outside the grid after it shrinks. */
 export function cropTo(m: MapData): MapData {
-  const inside = (c: number, r: number) => c < m.grid.cols && r < m.grid.rows;
-  const keep = <T,>(o: Record<string, T>) =>
-    Object.fromEntries(Object.entries(o).filter(([k]) => {
-      const [c, r] = k.split(",").map(Number);
-      return inside(c, r);
-    }));
+  const { cols, rows } = m.grid;
+  const inside = (c: number, r: number) => c < cols && r < rows;
+  const cells = Object.fromEntries(Object.entries(m.cells).filter(([k]) => inside(...(k.split(",").map(Number) as [number, number]))));
+  // Walls run along cell edges, so the grid's right and bottom borders (column `cols`, row `rows`) stay.
+  const walls = Object.fromEntries(Object.entries(m.walls).filter(([k]) => {
+    const [c, r, side] = k.split(",");
+    return side === "w" ? Number(c) <= cols && Number(r) < rows : Number(c) < cols && Number(r) <= rows;
+  }));
   return {
     ...m,
-    cells: keep(m.cells),
-    walls: keep(m.walls),
+    cells,
+    walls,
     labels: m.labels.filter((x) => inside(x.c, x.r)),
     markers: m.markers.filter((x) => inside(x.c, x.r)),
     tokens: m.tokens.filter((x) => inside(x.c, x.r)),

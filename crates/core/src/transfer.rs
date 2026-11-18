@@ -385,7 +385,9 @@ fn remap_ids(docs: &mut Checked) {
                 }
                 Kind::Handouts => {
                     let tokens = doc.get_mut("map").and_then(|m| m.get_mut("tokens")).and_then(Value::as_array_mut);
-                    tokens.into_iter().flatten().for_each(|t| swap(&mut t["character_id"]));
+                    for link in tokens.into_iter().flatten().filter_map(|t| t.get_mut("character_id")) {
+                        swap(link);
+                    }
                 }
                 Kind::Npcs => {
                     if let Some(id) = text(doc, "stat_ref").strip_prefix("monster:") {

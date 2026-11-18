@@ -561,9 +561,9 @@ async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(Stri
     Ok(Json(json!({"deleted": id})))
 }
 
-/// The players' screen moving tokens on a map: `{"moves": [{"id", "c", "r"}]}`. Only the
-/// positions of tokens that exist change, to cells inside the grid, so a stale list on the
-/// players' screen can't remove, add or rename anything the DM has done since.
+/// The players' screen moving their tokens on a map: `{"moves": [{"id", "c", "r"}]}`. Only
+/// the positions of existing tokens that stand for a character change, to cells inside the
+/// grid, so a stale list on the players' screen can't remove, add or rename anything.
 async fn move_tokens(
     State(app): State<Shared>,
     UrlPath((id,)): UrlPath<(String,)>,
@@ -593,7 +593,11 @@ async fn move_tokens(
         if !(0..cols).contains(&c) || !(0..rows).contains(&r) {
             return Err(body_error(format!("cell {c},{r} is outside the map")));
         }
-        if let Some(token) = tokens.iter_mut().find(|t| t.get("id").and_then(Value::as_str) == Some(token_id)) {
+        let theirs = |t: &&mut Value| {
+            t.get("id").and_then(Value::as_str) == Some(token_id)
+                && t.get("character_id").and_then(Value::as_str).is_some_and(|c| !c.is_empty())
+        };
+        if let Some(token) = tokens.iter_mut().find(theirs) {
             token["c"] = json!(c);
             token["r"] = json!(r);
         }

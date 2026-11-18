@@ -1,4 +1,4 @@
-//! Checking GitHub for a newer Questodian, as WattsLeft does.
+//! Checking GitHub for a newer Questodian.
 //!
 //! On first launch the UI asks whether to check; the answer is kept in `updates.json` in the
 //! app's config folder (not the data folder, which holds campaigns). While it's on, the app
@@ -222,6 +222,18 @@ impl Updates {
             }
         }
         self.save(&live);
+    }
+
+    /// Start installing, unless an install is already under way. True if this call started it.
+    #[cfg_attr(not(feature = "updater"), allow(dead_code))] // only installing in place uses it
+    pub fn start_installing(&self) -> bool {
+        let mut live = self.lock();
+        if live.installing.is_some() || live.saved.available().is_none() {
+            return false;
+        }
+        live.installing = Some(0.0);
+        live.error = None;
+        true
     }
 
     #[cfg_attr(not(feature = "updater"), allow(dead_code))] // only installing in place uses it

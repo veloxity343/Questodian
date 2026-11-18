@@ -2,7 +2,7 @@
 // text, markers, party tokens and fog. The same drawing shows on the players' screen, where
 // fogged cells, secret doors and secret notes stay hidden.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "../api";
@@ -104,7 +104,7 @@ function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, on
         );
       })}
       <g>{fog}</g>
-      {map.tokens.map((t) => {
+      {map.tokens.filter((t) => visible(t.c, t.r)).map((t) => {
         const p = cellCenter(map, t.c, t.r);
         return (
           <g key={t.id} className="map-token" data-item={`token:${t.id}`}>
@@ -116,11 +116,16 @@ function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, on
       })}
       {/* The grid lines last, so they show over the fills. */}
       {type === "square" && <GridLines cols={cols} rows={rows} size={size} />}
-      {type === "hex" && Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => (
-        <polygon key={`g${c},${r}`} points={hexPoints(map, c, r)} className="map-grid" />
-      )))}
+      {type === "hex" && <HexGrid map={map} />}
     </svg>
   );
+}
+
+/** A hex grid's outlines: the same until the grid changes, so not redrawn on every stroke. */
+function HexGrid({ map }: { map: MapData }) {
+  const { cols, rows, size } = map.grid;
+  const path = useMemo(() => Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => `M${hexPoints(map, c, r)}Z`).join("")).join(""), [map.grid.type, cols, rows, size]);
+  return <path d={path} className="map-grid" />;
 }
 
 function GridLines({ cols, rows, size }: { cols: number; rows: number; size: number }) {
@@ -587,12 +592,16 @@ function LegendEditor({ map, set }: { map: MapData; set: (fn: (m: MapData) => vo
 export function PlayersMap({ handoutId, map, view }: { handoutId: string; map: MapData; view: MapViewState }) {
   const [tokens, setTokens] = useState<MapToken[]>(map.tokens);
   const moving = useRef<string | null>(null);
-  useEffect(() => setTokens(map.tokens), [map.tokens]);
+  // The DM's latest tokens, except while a player is dragging one.
+  useEffect(() => {
+    if (!moving.current) setTokens(map.tokens);
+  }, [map.tokens]);
   const shown = { ...map, tokens };
   const tool = map.players_move ? {
     down: (p: Point) => {
-      const el = p.target?.closest?.("[data-item^='token:']");
-      moving.current = el?.getAttribute("data-item")?.slice(6) ?? null;
+      // Players move their characters' tokens, not monsters.
+      const id = p.target?.closest?.("[data-item^='token:']")?.getAttribute("data-item")?.slice(6);
+      moving.current = tokens.find((t) => t.id === id && t.character_id) ? id! : null;
       return !!moving.current;
     },
     move: (p: Point) => {
@@ -608,26 +617,25 @@ export function PlayersMap({ handoutId, map, view }: { handoutId: string; map: M
   return <MapStage map={shown} view={view} players tool={tool} />;
 }
 
-
-
 /**
  * While the DM has a map open that players may move tokens on, pick up their moves (made on
- * the players' screen and saved to the server) so the DM's next save doesn't undo them.
+ * the players' screen and saved to the server) so the DM's next save doesn't undo them. Only
+ * positions are taken, and only where the server's changed: tokens the DM is adding, renaming
+ * or moving at the same time stay as the DM has them.
  */
 export function MapTokensFromPlayers({ id, map, onTokens, children }: { id: string; map: MapData; onTokens: (tokens: MapToken[]) => void; children: ReactNode }) {
-  const seen = useRef(JSON.stringify(map.tokens));
+  const seen = useRef(new Map(map.tokens.map((t) => [t.id, `${t.c},${t.r}`])));
   const latest = useRef({ map, onTokens });
   latest.current = { map, onTokens };
   useEffect(() => {
     if (!map.players_move) return;
     const timer = setInterval(async () => {
       try {
-        const saved = await api.get("handouts", id);
-        const tokens = ((saved.map as unknown as MapData)?.tokens ?? []) as MapToken[];
-        const text = JSON.stringify(tokens);
-        // Only a change made elsewhere: not one this editor just saved.
-        if (text !== seen.current && text !== JSON.stringify(latest.current.map.tokens)) latest.current.onTokens(tokens);
-        seen.current = text;
+        const saved = ((await api.get("handouts", id)).map as unknown as MapData)?.tokens ?? [];
+        const moved = new Map(saved.filter((t) => seen.current.get(t.id) !== `${t.c},${t.r}`).map((t) => [t.id, t]));
+        seen.current = new Map(saved.map((t) => [t.id, `${t.c},${t.r}`]));
+        const mine = latest.current.map.tokens;
+        if (mine.some((t) => moved.has(t.id))) latest.current.onTokens(mine.map((t) => (moved.has(t.id) ? { ...t, c: moved.get(t.id)!.c, r: moved.get(t.id)!.r } : t)));
       } catch {
         /* the next poll tries again */
       }

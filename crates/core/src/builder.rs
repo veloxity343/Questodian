@@ -159,6 +159,16 @@ fn fits(value: &Value, examples: &[&Value], field: &str) -> std::result::Result<
     }
 }
 
+/// Whether the character builder works out this character: it has a class from the rules data
+/// (with the edits) and isn't edited by hand. Such a character follows the 2024 rules.
+pub fn builds(build: &indexmap::IndexMap<String, Value>, overrides: &[Override]) -> bool {
+    let Some(class) = build.get("class").and_then(Value::as_str).filter(|c| !c.is_empty()) else { return false };
+    if build.get("manual").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    merged(overrides)["classes"].as_array().into_iter().flatten().any(|c| name_of(c) == class)
+}
+
 /// The bundled data with the edits applied. Each named entry gets `"source"`:
 /// `"bundled"`, `"edited"` or `"added"`; `"hidden"` lists hidden entries and
 /// `"edited_settings"` the changed settings, so the UI can offer to restore them.

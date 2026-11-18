@@ -178,10 +178,9 @@ async fn updates_route(app: &AppHandle, method: &Method, rest: &str, body: &[u8]
 #[cfg(feature = "updater")]
 fn install(app: &AppHandle, updates: Arc<Updates>) {
     use tauri_plugin_updater::UpdaterExt;
-    if updates.available().is_none() || updates.state().installing.is_some() {
+    if !updates.start_installing() {
         return;
     }
-    updates.set_installing(Some(0.0), None);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let result: Result<(), String> = async {
