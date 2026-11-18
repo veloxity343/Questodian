@@ -464,7 +464,7 @@ export function BuilderSpellNotes({ b, s, ch }: { b: Build; s: Sheet; ch: Charac
       )}
       {tooHigh.length > 0 && <p className="check-result bad">Above the highest level you can cast ({highest}): {tooHigh.map((x) => x.name).join(", ")}</p>}
       <ul className="small muted">{spellGuide(b, s).map((line) => <li key={line}>{line}</li>)}</ul>
-      <p className="small muted">Spells from a feat (Magic Initiate): put "Magic Initiate" in their notes so they don't count. Always-prepared spells: put "Always" in their notes.</p>
+      <p className="small muted">Spells a feature, feat or species gives (Thaumaturge, Magic Initiate, a lineage, Mystic Arcanum): add them with "+ From a feature", or note "feature", "feat", "species" or "Mystic Arcanum" on them, and they don't count. Always-prepared spells: note "Always".</p>
     </div>
   );
 }
@@ -501,7 +501,7 @@ export function LevelUpDialog({ b, s, rules, onClose, onDone }: { b: Build; s: S
     <Modal title={`Level up to ${b.class} ${b.level + 1}?`} onClose={onClose} actions={[{ label: "Cancel" }, { label: "Level up", primary: true, onClick: go }]}>
       <p>Your Hit Point maximum goes up by your Hit Die (d{die}) + your Constitution modifier ({signed(con)}). Take the fixed average or roll.</p>
       <div className="stack">
-        <label className="check"><input type="radio" name="hp" checked={choice === "average"} onChange={() => setChoice("average")} /> Take the average: {avg} {signed(con)} = {Math.max(1, avg + con)} HP</label>
+        <label className="check"><input type="radio" name="hp" checked={choice === "average"} onChange={() => setChoice("average")} /> Take the fixed value: {avg} {signed(con)} = {avg + con} HP</label>
         <label className="check"><input type="radio" name="hp" checked={choice === "roll"} onChange={() => setChoice("roll")} /> Roll a d{die} (at least 1 HP)</label>
         {choice === "roll" && (
           <div className="row gap">

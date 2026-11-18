@@ -12,6 +12,7 @@ import {
   MARKER_ICONS, TOKEN_COLORS, along, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
+import { emptyHistory, redo, remember, undo } from "../lib/history";
 import { download, slug, zoomAround } from "../lib/util";
 import type { Character } from "../types";
 
@@ -37,7 +38,7 @@ const MAP_CSS = [
 ].join("");
 
 /** The map as SVG. `players` hides fog, secret doors and secret notes. */
-function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, onPointerUp, onDoubleClick, style }: {
+export function MapSvg({ map, players = false, svgRef, onPointerDown, onPointerMove, onPointerUp, onDoubleClick, style }: {
   map: MapData;
   players?: boolean;
   svgRef?: React.Ref<SVGSVGElement>;
@@ -250,11 +251,43 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   const latest = useRef(map);
   latest.current = map;
 
+  // Undo and redo. A stroke (from pressing the pointer to letting go) is one change.
+  const history = useRef(emptyHistory<MapData>());
+  const stroke = useRef<{ recorded: boolean } | null>(null);
+  const [, redraw] = useState(0);
+  const commit = (next: MapData) => {
+    if (!stroke.current?.recorded) history.current = remember(history.current, latest.current);
+    if (stroke.current) stroke.current.recorded = true;
+    latest.current = next;
+    onChange(next);
+    redraw((n) => n + 1);
+  };
+  const step = (back: boolean) => {
+    const moved = (back ? undo : redo)(history.current, latest.current);
+    if (!moved) return;
+    history.current = moved.history;
+    latest.current = moved.value;
+    onChange(moved.value);
+    redraw((n) => n + 1);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable]");
+      if (typing || !(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        e.preventDefault();
+        step(key === "z" && !e.shiftKey);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   const set = (fn: (m: MapData) => void) => {
     const next = structuredClone(latest.current);
     fn(next);
-    latest.current = next;
-    onChange(next);
+    commit(next);
   };
   const cell = (p: Point) => cellAt(map, p.x, p.y);
   const itemAt = (p: Point) => {
@@ -431,6 +464,8 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
           <button type="button" key={t} className={`tool-btn ${tool === t ? "on" : ""}`} title={title} aria-label={title} aria-pressed={tool === t}
             onClick={() => setTool(t)}>{symbol}</button>
         ))}
+        <button type="button" className="tool-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!history.current.past.length} onClick={() => step(true)}>↶</button>
+        <button type="button" className="tool-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!history.current.future.length} onClick={() => step(false)}>↷</button>
         <span className="grow" />
         <button type="button" className="btn small" onClick={fit}>Fit</button>
         <button type="button" className={`btn small ${showGrid ? "primary" : ""}`} onClick={() => setShowGrid(!showGrid)}>Grid…</button>
@@ -502,13 +537,14 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
         {tool === "move" && <span className="muted small">Drag tokens, markers and text; drag empty space to pan; double-click one to rename it. The wheel zooms.</span>}
       </div>
 
-      {showGrid && <GridSettings map={map} onChange={onChange} confirm={confirm} />}
+      {showGrid && <GridSettings map={map} onChange={commit} confirm={confirm} />}
 
       <div ref={stage}>
         <MapStage map={map} view={view} onView={onView}
           tool={{
             // The move tool grabs a token, marker or label under the pointer, and otherwise pans.
             down: (p) => {
+              stroke.current = { recorded: false };
               if (tool !== "move") {
                 void down(p);
                 return true;
@@ -516,7 +552,12 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
               moving.current = itemAt(p);
               return !!moving.current;
             },
-            move, up: () => (moving.current = null), double: (p) => void double(p),
+            move,
+            up: () => {
+              moving.current = null;
+              stroke.current = null;
+            },
+            double: (p) => void double(p),
           }} />
       </div>
 

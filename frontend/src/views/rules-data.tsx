@@ -72,22 +72,36 @@ function EntryList({ kind, rules }: { kind: string; rules: Rules }) {
     const template = entry ?? entries[0];
     setAdding({ ...structuredClone(template ?? {}), name, source: "added", srd: false } as Entry);
   };
+  // A request that fails says so, rather than doing nothing.
+  const attempt = async (work: () => Promise<void>) => {
+    try {
+      await work();
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
+  };
   const reset = async (e: Entry) => {
     const what = e.source === "added" ? `Delete ${e.name}? It's one you added.` : `Reset ${e.name} to the bundled version? Your changes to it are lost.`;
     if (!(await confirm(what, { label: e.source === "added" ? "Delete" : "Reset" }))) return;
-    setRules(await api.resetRule(kind, e.name));
-    if (e.source === "added") setSelected(entries[0]?.name ?? "");
-    toast(e.source === "added" ? `Deleted ${e.name}` : `${e.name} is back to the bundled version`);
+    await attempt(async () => {
+      setRules(await api.resetRule(kind, e.name));
+      if (e.source === "added") setSelected(entries[0]?.name ?? "");
+      toast(e.source === "added" ? `Deleted ${e.name}` : `${e.name} is back to the bundled version`);
+    });
   };
   const hide = async (e: Entry) => {
     if (!(await confirm(`Hide ${e.name}? The builder stops offering it. Characters already using it keep their choice, but it won't be worked out. You can bring it back below the list.`, { label: "Hide" }))) return;
-    setRules(await api.editRule(kind, e.name, null));
-    setSelected(entries.find((x) => x.name !== e.name)?.name ?? "");
+    await attempt(async () => {
+      setRules(await api.editRule(kind, e.name, null));
+      setSelected(entries.find((x) => x.name !== e.name)?.name ?? "");
+    });
   };
   const restore = async (name: string) => {
     if (!(await confirm(`Bring back ${name}?`, { label: "Bring back", danger: false }))) return;
-    setRules(await api.resetRule(kind, name));
-    setSelected(name);
+    await attempt(async () => {
+      setRules(await api.resetRule(kind, name));
+      setSelected(name);
+    });
   };
 
   return (
@@ -201,7 +215,7 @@ function EntryEditor({ entry, isNew, onSave, onCancel, onReset, onHide }: {
             <dt>{k.replace(/_/g, " ")}</dt>
             <dd>
               {editing ? (
-                <ValueEditor value={draft[k]} name={k} onChange={(v) => setDraft((d) => ({ ...d, [k]: v }))}
+                <ValueEditor value={draft[k]} shape={entry[k]} name={k} onChange={(v) => setDraft((d) => ({ ...d, [k]: v }))}
                   onBroken={(bad) => setBroken((s) => { const n = new Set(s); if (bad) n.add(k); else n.delete(k); return n; })} />
               ) : <ValueView value={entry[k]} />}
             </dd>
@@ -221,7 +235,14 @@ function ValueView({ value }: { value: unknown }) {
 }
 
 /** An editor fitting the value: text, number, yes/no, a comma list, or JSON for anything nested. */
-function ValueEditor({ value, name, onChange, onBroken }: { value: unknown; name: string; onChange: (v: unknown) => void; onBroken: (bad: boolean) => void }) {
+/** The editor is chosen by the saved value's shape, so it doesn't change while typing (clearing a list, say). */
+function ValueEditor({ value, shape, name, onChange, onBroken }: {
+  value: unknown;
+  shape: unknown;
+  name: string;
+  onChange: (v: unknown) => void;
+  onBroken: (bad: boolean) => void;
+}) {
   if (typeof value === "boolean") return <Checkbox checked={value} onChange={onChange} aria-label={name} />;
   if (typeof value === "number") return <NumInput value={value} onChange={onChange} aria-label={name} />;
   if (typeof value === "string") {
@@ -230,8 +251,8 @@ function ValueEditor({ value, name, onChange, onBroken }: { value: unknown; name
       : <TextInput value={value} onChange={onChange} aria-label={name} />;
   }
   // A comma list for lists of names; lists with blank places (column labels) keep their positions in JSON.
-  if (Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string" && v.trim() && !v.includes(","))) {
-    return <ListText value={value as string[]} onChange={onChange} name={name} />;
+  if (Array.isArray(shape) && shape.length > 0 && shape.every((v) => typeof v === "string" && v.trim() && !v.includes(","))) {
+    return <ListText value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} name={name} />;
   }
   return <JsonText value={value} onChange={onChange} onBroken={onBroken} name={name} />;
 }
@@ -283,7 +304,11 @@ function SettingsList({ rules }: { rules: Rules }) {
             onSave={(d) => save(key, d.value)} onCancel={() => {}}
             onReset={edited ? async () => {
               if (!(await confirm(`Reset ${title.toLowerCase()} to the bundled version?`, { label: "Reset" }))) return;
-              setRules(await api.resetRule("settings", key));
+              try {
+                setRules(await api.resetRule("settings", key));
+              } catch (err) {
+                toast((err as Error).message, "error");
+              }
             } : undefined} />
         );
       })}

@@ -436,7 +436,9 @@ export function AttacksPanel({ ch, edit, roll, title = "Attacks & Actions" }: { 
 export function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d: Derived; edit: Edit; roll: Roll; built?: Built; b?: Build }) {
   const toast = useToast();
   const showStatblock = useStatblock();
-  const [picking, setPicking] = useState(false);
+  // "class": the class's own spells, within its limits. "feature": spells a feature, feat or
+  // species gives (Thaumaturge, Magic Initiate, a lineage, Mystic Arcanum), which don't count.
+  const [picking, setPicking] = useState<"" | "class" | "feature">("");
   const sc = ch.spellcasting;
   const slot = (lvl: number) => sc.slots[lvl] || { max: 0, used: 0 };
   // With the builder: only spells you can cast, and only as many as the class lets you know or prepare.
@@ -517,7 +519,13 @@ export function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d:
         onChange={(v) => edit((x) => void (x.spellcasting.spells = [...v].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))))}
         blank={() => ({ name: "", level: 0, prepared: false, notes: "", srd_id: "" })}
         head={["Lvl", "Name", "Prep", "Notes", ""]}
-        extra={<button type="button" className="btn small" onClick={() => setPicking(true)}>+ From SRD</button>}
+        extra={
+          <>
+            <button type="button" className="btn small" onClick={() => setPicking("class")}>+ From SRD</button>
+            {built && <button type="button" className="btn small" onClick={() => setPicking("feature")}
+              title="Spells a feature, feat or species gives (Thaumaturge, Magic Initiate, a lineage, Mystic Arcanum): they don't count toward your class's numbers">+ From a feature</button>}
+          </>
+        }
         row={(sp, set) => [
           <NumInput className="num-input tiny" min={0} max={9} aria-label="Spell level" value={sp.level} onChange={(v) => set({ level: v })} />,
           <div className="row gap-sm">
@@ -529,12 +537,18 @@ export function SpellsPanel({ ch, d, edit, roll, built, b }: { ch: Character; d:
         ]}
       />
       {picking && (
-        <SrdPicker category="spells" className={b?.class ?? ch.classes[0]?.name} onClose={() => setPicking(false)}
-          maxLevel={built ? highest : undefined} edition={built ? "2024" : undefined} refuse={built ? refuseSpell : undefined}
-          note={built ? (built.spell
-            ? `Showing cantrips${highest ? ` and spells up to level ${highest}` : ""}: what you can cast at level ${b?.level}. Cantrips ${counts.cantrips} of ${built.cantrips}; prepare up to ${built.prepared}.`
-            : "Your class doesn't cast spells; this is for spells from a feat such as Magic Initiate (cantrips and level 1).") : undefined}
-          onPick={(e) => edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: false, notes: e.summary, srd_id: e.id }))} />
+        picking === "feature" ? (
+          <SrdPicker category="spells" onClose={() => setPicking("")} edition="2024"
+            note={'Spells from a feature, feat or species, from any list. They\'re noted "From a feature" and don\'t count toward your class\'s numbers; add where each comes from to its notes.'}
+            onPick={(e) => edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: e.data.level > 0, notes: `From a feature. ${e.summary}`, srd_id: e.id }))} />
+        ) : (
+          <SrdPicker category="spells" className={b?.class ?? ch.classes[0]?.name} onClose={() => setPicking("")}
+            maxLevel={built ? highest : undefined} edition={built ? "2024" : undefined} refuse={built ? refuseSpell : undefined}
+            note={built ? (built.spell
+              ? `Showing cantrips${highest ? ` and spells up to level ${highest}` : ""}: what you can cast at level ${b?.level}. Cantrips ${counts.cantrips} of ${built.cantrips}; prepare up to ${built.prepared}. Spells from a feature: use "+ From a feature".`
+              : "Your class doesn't cast spells; this is for spells from a feat such as Magic Initiate (cantrips and level 1).") : undefined}
+            onPick={(e) => edit((x) => void x.spellcasting.spells.push({ name: e.name, level: e.data.level, prepared: false, notes: e.summary, srd_id: e.id }))} />
+        )
       )}
     </section>
   );

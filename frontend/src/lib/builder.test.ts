@@ -79,6 +79,14 @@ describe("the character", () => {
     expect(JSON.stringify(apply(ch, buildOf(ch), rules))).toBe(JSON.stringify(ch));
   });
 
+  it("gains HP on level up as the SRD says: the fixed value, or a roll with a minimum of 1", () => {
+    // A Wizard with Con 3 (-4): the fixed value 4 - 4 gains nothing; a rolled 1 still gains 1.
+    const frail = { ...fighter, class: "Wizard", human_feat: "", fighting_style: "", base: { ...fighter.base, con: 3 }, background_bonus: {} };
+    const hp = (b: Build) => work(b, rules).hp.value;
+    expect(hp(levelUp(frail, rules, null)!.build) - hp(frail)).toBe(0);
+    expect(hp(levelUp(frail, rules, 1)!.build) - hp(frail)).toBe(1);
+  });
+
   it("leaves a sheet alone when its class isn't in the rules data", () => {
     const ch = apply(blank, fighter, rules);
     expect(apply(ch, buildOf(ch), { ...rules, classes: [] })).toBe(ch);
