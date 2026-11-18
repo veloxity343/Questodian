@@ -1,6 +1,6 @@
 // The DM screen: navigator on the left, tabbed workspace in the middle, reference on the right.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Splitter } from "../components/splitter";
 import { EmptyState, HpBar, Loading } from "../components/ui";
@@ -239,17 +239,69 @@ function EncounterList() {
 
 // ------------------------------------------------------------------ workspace (middle)
 
+/** Tabs share the strip's width like a browser's, shrinking to a minimum (and dropping the kind
+ *  badge when narrow). Past that the strip pages with ‹ › instead of scrolling, so the mouse
+ *  wheel stays free for the page, and the open tab is always brought into view. */
+/** `active` is compared by identity: opening a tab, even the open one, makes a new ref and brings it into view. */
+function useTabStrip(count: number, active: DocRef | null) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const [ends, setEnds] = useState({ start: true, end: true });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    setEnds({ start: el.scrollLeft <= 1, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 });
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    el.addEventListener("scroll", update);
+    return () => { observer.disconnect(); el.removeEventListener("scroll", update); };
+  }, []);
+  useEffect(() => {
+    const el = ref.current?.querySelector<HTMLElement>(".doc-tab.on");
+    const strip = ref.current;
+    if (el && strip) {
+      const left = el.offsetLeft - strip.offsetLeft;
+      if (left < strip.scrollLeft) strip.scrollLeft = left;
+      else if (left + el.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + el.offsetWidth - strip.clientWidth;
+    }
+    update();
+  }, [active, count]);
+  const page = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
+  return { ref, narrow: count > 0 && width / count < 160, overflow: !(ends.start && ends.end), ends, page };
+}
+
 function Workspace({ campaign }: { campaign: Campaign }) {
   const dm = useDM();
   const navigate = useNavigate();
   const label = (r: DocRef) => r.kind === "campaigns" ? campaign.name : titleOf(r.kind as ListKind, dm.get(r.kind as ListKind, r.id));
+  const strip = useTabStrip(dm.tabs.length, dm.active);
+  const [dragging, setDragging] = useState<DocRef | null>(null);
   return (
     <section className="workspace">
-      <div className="doc-tabs" role="tablist">
+      <div className="doc-tab-bar">
+      {strip.overflow && (
+        <button type="button" className="doc-tab-page" aria-label="Earlier tabs" title="Earlier tabs" disabled={strip.ends.start} onClick={() => strip.page(-1)}>‹</button>
+      )}
+      <div ref={strip.ref} className={`doc-tabs ${strip.narrow ? "narrow" : ""}`} role="tablist">
         {dm.tabs.map((t) => {
           const on = dm.active?.kind === t.kind && dm.active.id === t.id;
+          const moving = dragging?.kind === t.kind && dragging.id === t.id;
           return (
-            <div key={`${t.kind}:${t.id}`} className={`doc-tab ${on ? "on" : ""}`} role="tab" aria-selected={on}
+            <div key={`${t.kind}:${t.id}`} className={`doc-tab ${on ? "on" : ""} ${moving ? "dragging" : ""}`} role="tab" aria-selected={on}
+              title={label(t)} draggable
+              onDragStart={(e) => { e.dataTransfer.setData("text/plain", label(t)); e.dataTransfer.effectAllowed = "move"; setDragging(t); }}
+              onDragEnd={() => setDragging(null)}
+              onDragOver={(e) => {
+                if (!dragging) return;
+                e.preventDefault();
+                if (!moving) dm.moveTab(dragging, t);
+              }}
+              onDrop={(e) => e.preventDefault()}
               onMouseDown={(e) => e.button === 1 && dm.close(t)}>
               <button type="button" className="doc-tab-main" onClick={() => dm.open(t)}>
                 <span className="kind-badge">{KIND_LABEL[t.kind]}</span><span className="doc-tab-title">{label(t)}</span>
@@ -258,6 +310,10 @@ function Workspace({ campaign }: { campaign: Campaign }) {
             </div>
           );
         })}
+      </div>
+      {strip.overflow && (
+        <button type="button" className="doc-tab-page" aria-label="Later tabs" title="Later tabs" disabled={strip.ends.end} onClick={() => strip.page(1)}>›</button>
+      )}
       </div>
       <div className="doc-scroll">
         {dm.active ? <DocView key={`${dm.active.kind}:${dm.active.id}`} doc={dm.active} /> : (

@@ -70,6 +70,8 @@ interface DM {
   active: DocRef | null;
   open: (ref: DocRef) => void;
   close: (ref: DocRef) => void;
+  /** Move tab `ref` to where `target` is (after it when moving right, before it when moving left). */
+  moveTab: (ref: DocRef, target: DocRef) => void;
   create: <K extends DocKind & ListKind>(kind: K, data?: Partial<KindMap[K]>) => Promise<KindMap[K]>;
 
   view: ViewRef | null;
@@ -187,6 +189,20 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
     [setTabs, setActive],
   );
 
+  const moveTab = useCallback(
+    (ref: DocRef, target: DocRef) => {
+      setTabs((t) => {
+        const from = t.findIndex((x) => same(x, ref));
+        const to = t.findIndex((x) => same(x, target));
+        if (from < 0 || to < 0 || from === to) return t;
+        const next = [...t];
+        next.splice(to, 0, ...next.splice(from, 1));
+        return next;
+      });
+    },
+    [setTabs],
+  );
+
   const create = useCallback(
     async <K extends DocKind & ListKind>(kind: K, data: Partial<KindMap[K]> = {}) => {
       const doc = await api.create(kind, { campaign_id: cid, ...data } as Partial<KindMap[K]>);
@@ -239,7 +255,7 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
 
   const value: DM = {
     campaign, edition: campaign.edition, lists, loaded, reload, upsert, remove, get,
-    tabs, active, open, close, create, view, show, rightTab, setRightTab, encounterId, followLink,
+    tabs, active, open, close, moveTab, create, view, show, rightTab, setRightTab, encounterId, followLink,
   };
   return <DMContext.Provider value={value}>{children}</DMContext.Provider>;
 }
