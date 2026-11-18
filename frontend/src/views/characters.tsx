@@ -171,7 +171,7 @@ function Sheet({ initial, campaigns }: { initial: Character; campaigns: Campaign
 
   const startBuilder = async () => {
     if (!rules || !ch) return;
-    const next = isBuilt(ch) ? buildOf(ch) : startBuild(ch, rules);
+    const next = isBuilt(ch) ? { ...buildOf(ch), manual: false } : startBuild(ch, rules);
     const notes = isBuilt(ch) ? [] : startNotes(ch, next);
     const ok = await confirm(
       "Switch this sheet to the builder? It works out ability scores, saves, skills, AC, HP, speed, attacks, resources, spell slots and features from your choices, replacing what's typed in those places now. Spells, inventory, coins, notes and anything you added yourself stay."

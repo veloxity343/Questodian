@@ -9,7 +9,7 @@ import { api } from "../api";
 import { Checkbox, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useDialogs, useToast } from "../context/ui";
 import {
-  MARKER_ICONS, TOKEN_COLORS, along, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
+  MARKER_ICONS, TOKEN_COLORS, along, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, edgeOn, floodFill, hexPoints, mapSize, newId, vttWalls,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
 import { emptyHistory, redo, remember, undo } from "../lib/history";
@@ -385,10 +385,12 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   const move = (p: Point) => {
     if (tool === "paint" || tool === "fog" || (tool === "erase" && !itemAt(p))) return paintTo(p);
     if (tool === "wall") {
-      // Every edge along the stroke, so walls drawn quickly have no gaps.
+      // Every edge along the stroke, in the stroke's direction, so walls drawn quickly have no
+      // gaps and no stubs where they cross the grid.
       const from = lastPoint.current ?? p;
       lastPoint.current = p;
-      const edges = new Set(along(from, p, map.grid.size / 4).map((q) => edgeAt(map, q.x, q.y)).filter((e): e is string => !!e));
+      const side = Math.abs(p.x - from.x) >= Math.abs(p.y - from.y) ? "n" : "w";
+      const edges = new Set(along(from, p, map.grid.size / 4).map((q) => edgeOn(map, q.x, q.y, side)).filter((e): e is string => !!e));
       edges.delete(lastCell.current);
       if (!edges.size) return;
       lastCell.current = [...edges].at(-1)!;

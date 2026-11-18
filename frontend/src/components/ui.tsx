@@ -55,7 +55,12 @@ export function NumInput({ value, onChange, commit = false, className = "num-inp
         // Show the stored value again; if the change goes through, it arrives as the new value.
         setText(String(value ?? 0));
       }}
-      onKeyDown={(e) => commit && e.key === "Enter" && e.currentTarget.blur()}
+      onKeyDown={(e) => {
+        if (!commit || e.key !== "Enter") return;
+        // Enter saves like leaving the box; it mustn't also press a button a confirmation opens.
+        e.preventDefault();
+        e.currentTarget.blur();
+      }}
     />
   );
 }

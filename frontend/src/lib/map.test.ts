@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { along, blankMap, cellAt, cellCenter, edgeAt, floodFill, vttWalls } from "./map";
+import { along, blankMap, cellAt, cellCenter, edgeAt, edgeOn, floodFill, vttWalls } from "./map";
 
 describe("grids", () => {
   it.each(["square", "hex"] as const)("finds every %s cell from its centre and near its edge", (type) => {
@@ -59,6 +59,15 @@ describe("walls", () => {
 });
 
 describe("strokes", () => {
+  it("draw walls along their own direction, with no stubs at the corners they cross", () => {
+    const m = blankMap();
+    // Drawn across, a little below the line between rows 2 and 3, over five cells.
+    const across = new Set(along({ x: 5, y: 84 }, { x: 195, y: 84 }, m.grid.size / 4).map((p) => edgeOn(m, p.x, p.y, "n")));
+    expect([...across]).toEqual(["0,2,n", "1,2,n", "2,2,n", "3,2,n", "4,2,n"]);
+    const down = new Set(along({ x: 41, y: 5 }, { x: 41, y: 115 }, m.grid.size / 4).map((p) => edgeOn(m, p.x, p.y, "w")));
+    expect([...down]).toEqual(["1,0,w", "1,1,w", "1,2,w"]);
+  });
+
   it("touch every cell between two pointer positions", () => {
     const m = blankMap();
     const cells = new Set(along({ x: 10, y: 10 }, { x: 410, y: 10 }, m.grid.size / 3).map((p) => cellAt(m, p.x, p.y)?.c));

@@ -155,6 +155,19 @@ export function edgeAt(m: MapData, x: number, y: number): string | null {
   return nearY >= 0 && nearY <= m.grid.rows && c >= 0 && c < m.grid.cols ? `${c},${nearY},n` : null;
 }
 
+/**
+ * The square-grid edge of one direction nearest a point: a top edge ("n") for a stroke drawn
+ * across, a left edge ("w") for one drawn down, so a stroke that isn't exactly on a grid line
+ * doesn't pick up the crossing edges at each corner.
+ */
+export function edgeOn(m: MapData, x: number, y: number, side: "n" | "w"): string | null {
+  if (m.grid.type !== "square") return null;
+  const s = m.grid.size;
+  const [c, r] = side === "n" ? [Math.floor(x / s), Math.round(y / s)] : [Math.round(x / s), Math.floor(y / s)];
+  const inside = side === "n" ? c >= 0 && c < m.grid.cols && r >= 0 && r <= m.grid.rows : c >= 0 && c <= m.grid.cols && r >= 0 && r < m.grid.rows;
+  return inside ? `${c},${r},${side}` : null;
+}
+
 /** The line of a square-grid edge, in px. */
 export function edgeLine(m: MapData, key: string) {
   const [c, r, side] = key.split(",");
