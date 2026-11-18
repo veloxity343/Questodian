@@ -111,8 +111,9 @@ jobs:
     name: Check latest.json lists every platform
     needs: [create-release, desktop]
     runs-on: ubuntu-latest
+    # Write, though it only reads: GitHub shows a draft release only to tokens that can write.
     permissions:
-      contents: read
+      contents: write
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
