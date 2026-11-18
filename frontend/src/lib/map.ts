@@ -173,8 +173,12 @@ function neighbours(m: MapData, c: number, r: number): [number, number][] {
   return dirs.map(([dc, dr]) => [c + dc, r + dr]);
 }
 
-/** Every cell connected to (c, r) with the same fill, stopping at walls on square grids. */
-export function floodFill(m: MapData, c: number, r: number): string[] {
+/**
+ * The cells a fill from (c, r) covers, stopping at walls and doors. `sameColour`: only the
+ * connected cells painted like (c, r); otherwise every cell the walls enclose, whatever its
+ * colour (the whole grid if there are none), to lay one surface over another.
+ */
+export function floodFill(m: MapData, c: number, r: number, sameColour = true): string[] {
   const start = m.cells[cellKey(c, r)] ?? "";
   const seen = new Set([cellKey(c, r)]);
   const queue: [number, number][] = [[c, r]];
@@ -190,12 +194,18 @@ export function floodFill(m: MapData, c: number, r: number): string[] {
       const [nc, nr] = next;
       const key = cellKey(nc, nr);
       if (nc < 0 || nr < 0 || nc >= m.grid.cols || nr >= m.grid.rows || seen.has(key)) continue;
-      if ((m.cells[key] ?? "") !== start || blocked(here, next)) continue;
+      if ((sameColour && (m.cells[key] ?? "") !== start) || blocked(here, next)) continue;
       seen.add(key);
       queue.push(next);
     }
   }
   return [...seen];
+}
+
+/** The points every `step` px along a line, ends included: a fast stroke still touches every cell it crosses. */
+export function along(a: { x: number; y: number }, b: { x: number; y: number }, step: number) {
+  const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step));
+  return Array.from({ length: n + 1 }, (_, i) => ({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n }));
 }
 
 /** Drop what's outside the grid after it shrinks. */

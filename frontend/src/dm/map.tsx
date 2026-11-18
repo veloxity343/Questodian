@@ -9,7 +9,7 @@ import { api } from "../api";
 import { Checkbox, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useDialogs, useToast } from "../context/ui";
 import {
-  MARKER_ICONS, TOKEN_COLORS, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
+  MARKER_ICONS, TOKEN_COLORS, along, cellAt, cellCenter, cellKey, cropTo, edgeAt, edgeLine, floodFill, hexPoints, mapSize, newId, vttWalls,
   type Edge, type GridType, type MapData, type MapToken,
 } from "../lib/map";
 import { download, slug, zoomAround } from "../lib/util";
@@ -235,13 +235,20 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   const [tokenFor, setTokenFor] = useState("");
   const [showGrid, setShowGrid] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
-  // While dragging: what's being moved, and the map as it was at the start (one edit per stroke).
+  const [fillMode, setFillMode] = useState<"colour" | "walls">("colour");
+  // While dragging: what's being moved, and where the stroke last was.
   const moving = useRef<{ kind: string; id: string } | null>(null);
   const lastCell = useRef("");
+  const lastPoint = useRef<Point | null>(null);
+  // The map with every change so far: pointer events can come faster than the screen redraws,
+  // and each must build on the last, or a stroke loses cells.
+  const latest = useRef(map);
+  latest.current = map;
 
   const set = (fn: (m: MapData) => void) => {
-    const next = structuredClone(map);
+    const next = structuredClone(latest.current);
     fn(next);
+    latest.current = next;
     onChange(next);
   };
   const cell = (p: Point) => cellAt(map, p.x, p.y);
@@ -251,24 +258,33 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
     return kind ? { kind, id } : null;
   };
 
-  const paintCell = (p: Point) => {
-    const at = cell(p);
-    if (!at) return;
-    const key = cellKey(at.c, at.r);
-    if (key === lastCell.current) return;
-    lastCell.current = key;
-    if (tool === "paint") set((m) => void (brush ? (m.cells[key] = brush) : delete m.cells[key]));
-    if (tool === "fog") set((m) => {
+  /** Paint, erase or fog every cell from the last point of the stroke to this one, in one change. */
+  const paintTo = (p: Point) => {
+    const from = lastPoint.current ?? p;
+    lastPoint.current = p;
+    const keys = new Set<string>();
+    for (const q of along(from, p, map.grid.size / 3)) {
+      const at = cell(q);
+      if (at) keys.add(cellKey(at.c, at.r));
+    }
+    keys.delete(lastCell.current);
+    if (!keys.size) return;
+    lastCell.current = [...keys].at(-1)!;
+    set((m) => {
       const shown = new Set(m.fog.revealed);
-      if (fogMode === "reveal") shown.add(key);
-      else shown.delete(key);
-      m.fog.revealed = [...shown];
+      for (const key of keys) {
+        if (tool === "paint" && brush) m.cells[key] = brush;
+        else if (tool === "paint" || tool === "erase") delete m.cells[key];
+        else if (fogMode === "reveal") shown.add(key);
+        else shown.delete(key);
+      }
+      if (tool === "fog") m.fog.revealed = [...shown];
     });
-    if (tool === "erase") set((m) => void delete m.cells[key]);
   };
 
   const down = async (p: Point) => {
     lastCell.current = "";
+    lastPoint.current = null;
     const item = itemAt(p);
     const at = cell(p);
     switch (tool) {
@@ -276,7 +292,7 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
         return;
       case "paint":
       case "fog":
-        return paintCell(p);
+        return paintTo(p);
       case "erase": {
         if (item) {
           return set((m) => {
@@ -287,12 +303,12 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
         }
         const e = edgeAt(map, p.x, p.y);
         if (e && map.walls[e] && nearLine(map, p, e)) return set((m) => void delete m.walls[e]);
-        return paintCell(p);
+        return paintTo(p);
       }
       case "fill":
         if (!at) return;
         return set((m) => {
-          for (const key of floodFill(m, at.c, at.r)) {
+          for (const key of floodFill(m, at.c, at.r, fillMode === "colour")) {
             if (brush) m.cells[key] = brush;
             else delete m.cells[key];
           }
@@ -302,6 +318,7 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
         const e = edgeAt(map, p.x, p.y);
         if (!e) return;
         lastCell.current = e;
+        lastPoint.current = p;
         return set((m) => {
           if (m.walls[e] === edge) delete m.walls[e];
           else m.walls[e] = edge;
@@ -328,13 +345,18 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
   };
 
   const move = (p: Point) => {
-    if (tool === "paint" || tool === "fog" || (tool === "erase" && !itemAt(p))) return paintCell(p);
+    if (tool === "paint" || tool === "fog" || (tool === "erase" && !itemAt(p))) return paintTo(p);
     if (tool === "wall") {
-      const e = edgeAt(map, p.x, p.y);
-      if (e && e !== lastCell.current) {
-        lastCell.current = e;
-        set((m) => void (m.walls[e] = edge));
-      }
+      // Every edge along the stroke, so walls drawn quickly have no gaps.
+      const from = lastPoint.current ?? p;
+      lastPoint.current = p;
+      const edges = new Set(along(from, p, map.grid.size / 4).map((q) => edgeAt(map, q.x, q.y)).filter((e): e is string => !!e));
+      edges.delete(lastCell.current);
+      if (!edges.size) return;
+      lastCell.current = [...edges].at(-1)!;
+      set((m) => {
+        for (const e of edges) m.walls[e] = edge;
+      });
       return;
     }
     if (tool === "move" && moving.current) {
@@ -417,6 +439,15 @@ export function MapEditor({ name, map, onChange, view, onView, characters }: {
       </div>
 
       <div className="map-options row gap wrap">
+        {tool === "fill" && (
+          <div className="row gap-sm" role="radiogroup" aria-label="Fill">
+            {([["colour", "Same-colour area"], ["walls", "Up to the walls"]] as const).map(([k, label]) => (
+              <button type="button" key={k} role="radio" aria-checked={fillMode === k} className={`chip-btn ${fillMode === k ? "active" : ""}`}
+                title={k === "walls" ? "Everything the walls and doors enclose, whatever its colour (the whole grid if there are none)" : "The connected cells painted the same as the one you click"}
+                onClick={() => setFillMode(k)}>{label}</button>
+            ))}
+          </div>
+        )}
         {(tool === "paint" || tool === "fill") && (
           <div className="row gap-sm wrap" role="radiogroup" aria-label="Paint with">
             {map.legend.map((l) => (

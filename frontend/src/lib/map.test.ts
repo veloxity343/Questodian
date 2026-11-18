@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blankMap, cellAt, cellCenter, edgeAt, floodFill, vttWalls } from "./map";
+import { along, blankMap, cellAt, cellCenter, edgeAt, floodFill, vttWalls } from "./map";
 
 describe("grids", () => {
   it.each(["square", "hex"] as const)("finds every %s cell from its centre and near its edge", (type) => {
@@ -35,6 +35,15 @@ describe("walls", () => {
     expect(floodFill(m, 0, 0)).toHaveLength(12);
   });
 
+  it("bound a fill up to the walls, whatever the colours inside", () => {
+    const m = room();
+    m.cells = { "0,0": "water", "1,1": "grass", "4,0": "stone" };
+    expect(floodFill(m, 0, 0)).toEqual(["0,0"]);
+    expect(floodFill(m, 0, 0, false)).toHaveLength(24);
+    for (let r = 0; r < 4; r++) m.walls[`3,${r},w`] = "wall";
+    expect(floodFill(m, 1, 1, false).sort()).toEqual(["0,0", "0,1", "0,2", "0,3", "1,0", "1,1", "1,2", "1,3", "2,0", "2,1", "2,2", "2,3"]);
+  });
+
   it("go to a VTT as straight lines and doors, with secret doors as walls", () => {
     const m = room();
     m.walls = { "1,1,n": "wall", "2,1,n": "door", "3,1,n": "wall", "1,1,w": "secret", "1,2,w": "wall" };
@@ -46,5 +55,13 @@ describe("walls", () => {
     ]);
     expect(portals).toEqual([{ position: { x: 2.5, y: 1 }, bounds: [{ x: 2, y: 1 }, { x: 3, y: 1 }], rotation: 0, closed: true, freestanding: false }]);
     expect(vttWalls(blankMap("hex"))).toEqual({ walls: [], portals: [] });
+  });
+});
+
+describe("strokes", () => {
+  it("touch every cell between two pointer positions", () => {
+    const m = blankMap();
+    const cells = new Set(along({ x: 10, y: 10 }, { x: 410, y: 10 }, m.grid.size / 3).map((p) => cellAt(m, p.x, p.y)?.c));
+    expect([...cells]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 });
