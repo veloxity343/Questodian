@@ -1,8 +1,8 @@
 // A page of panels you can arrange: drag to reorder, set each one's width, drag its height,
 // collapse it, or hide it. The layout is kept per page on this device.
 
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { usePref } from "../lib/hooks";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useDragReorder, usePref } from "../lib/hooks";
 import { Splitter } from "./splitter";
 
 export type Width = "third" | "half" | "two-thirds" | "full";
@@ -42,7 +42,6 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const [stored, setLayout] = usePref<Layout>(`layout.${id}`, EMPTY);
   const layout = { ...EMPTY, ...stored };
   const [arranging, setArranging] = useState(false);
-  const [dragging, setDragging] = useState("");
 
   // The saved order first (for items that still exist), then any new ones where the page puts them.
   const known = new Set(items.map((i) => i.id));
@@ -57,6 +56,7 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   const move = (x: string, target: string | undefined, after: boolean) =>
     target && change((l) => ({ ...l, order: placed(l.order, x, target, after) }));
   const changed = JSON.stringify(stored) !== JSON.stringify(EMPTY);
+  const drag = useDragReorder((x, target) => move(x, target, order.indexOf(x) < order.indexOf(target)));
 
   return (
     <div className={`board ${arranging ? "arranging" : ""}`}>
@@ -83,7 +83,7 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
           const item = byId.get(x)!;
           return (
             <Tile key={x} item={item} width={layout.width[x] ?? item.width ?? "half"} height={layout.height[x]}
-              collapsed={layout.collapsed.includes(x)} arranging={arranging} dragging={dragging === x}
+              collapsed={layout.collapsed.includes(x)} arranging={arranging} dragging={drag.dragging === x} target={drag.over === x}
               onCollapse={() => toggle("collapsed", x)}
               onHide={() => toggle("hidden", x)}
               onWidth={(w) => change((l) => ({ ...l, width: { ...l.width, [x]: w } }))}
@@ -94,9 +94,7 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
                 return { ...l, height };
               })}
               onMove={(dir) => move(x, shown[i + dir], dir > 0)}
-              onDragStart={() => setDragging(x)}
-              onDragEnd={() => setDragging("")}
-              onDropHere={() => dragging && dragging !== x && move(dragging, x, order.indexOf(dragging) < order.indexOf(x))} />
+              onGrab={(e) => drag.start(x, e)} />
           );
         })}
       </div>
@@ -104,27 +102,26 @@ export function Board({ id, items }: { id: string; items: BoardItem[] }) {
   );
 }
 
-function Tile({ item, width, height, collapsed, arranging, dragging, onCollapse, onHide, onWidth, onHeight, onMove, onDragStart, onDragEnd, onDropHere }: {
+function Tile({ item, width, height, collapsed, arranging, dragging, target, onCollapse, onHide, onWidth, onHeight, onMove, onGrab }: {
   item: BoardItem;
   width: Width;
   height?: number;
   collapsed: boolean;
   arranging: boolean;
   dragging: boolean;
+  /** The dragged panel goes here if let go now. */
+  target: boolean;
   onCollapse: () => void;
   onHide: () => void;
   onWidth: (w: Width) => void;
   onHeight: (h: number | null) => void;
   onMove: (dir: -1 | 1) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDropHere: () => void;
+  onGrab: (e: PointerEvent) => void;
 }) {
   const tile = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [span, setSpan] = useState(1);
   const [empty, setEmpty] = useState(false);
-  const [over, setOver] = useState(false);
 
   // Masonry: a tile spans as many grid rows as it is tall (its body's padding is the gap below).
   useEffect(() => {
@@ -141,32 +138,18 @@ function Tile({ item, width, height, collapsed, arranging, dragging, onCollapse,
   }, []);
 
   const fixed = !collapsed && height !== undefined;
-  const drop = {
-    onDragOver: (e: DragEvent) => {
-      if (!arranging) return;
-      e.preventDefault();
-      setOver(true);
-    },
-    onDragLeave: () => setOver(false),
-    onDrop: (e: DragEvent) => {
-      e.preventDefault();
-      setOver(false);
-      onDropHere();
-    },
-  };
 
   return (
-    <div ref={tile} className={`tile w-${width} ${collapsed ? "collapsed" : ""} ${dragging ? "dragging" : ""} ${over ? "drop-here" : ""} ${empty ? "empty" : ""}`}
-      style={{ gridRowEnd: `span ${span}` }} {...drop}>
+    <div ref={tile} data-reorder={arranging ? item.id : undefined}
+      className={`tile w-${width} ${collapsed ? "collapsed" : ""} ${dragging ? "dragging" : ""} ${target ? "drop-here" : ""} ${empty ? "empty" : ""}`}
+      style={{ gridRowEnd: `span ${span}` }}>
       <div ref={body} className="tile-body" style={fixed ? { height, overflowY: "auto" } : undefined}>
         {item.node}
       </div>
       <div className="tile-tools">
         {arranging && (
           <>
-            <span className="drag-handle" draggable title="Drag to move" aria-label={`Move ${item.title}`}
-              onDragStart={(e) => { e.dataTransfer.setData("text/plain", item.id); e.dataTransfer.effectAllowed = "move"; onDragStart(); }}
-              onDragEnd={onDragEnd}>⠿</span>
+            <span className="drag-handle" title="Drag to move" aria-label={`Move ${item.title}`} onPointerDown={onGrab}>⠿</span>
             <button type="button" className="icon-btn" aria-label={`Move ${item.title} up`} title="Move earlier" onClick={() => onMove(-1)}>↑</button>
             <button type="button" className="icon-btn" aria-label={`Move ${item.title} down`} title="Move later" onClick={() => onMove(1)}>↓</button>
             <select className="small-select" aria-label={`${item.title} width`} value={width} onChange={(e) => onWidth(e.target.value as Width)}>

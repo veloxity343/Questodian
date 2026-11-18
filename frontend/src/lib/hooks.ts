@@ -129,3 +129,80 @@ export function useDraft<T>(
 
   return { doc, setDoc, edit, flush, discard, status };
 }
+
+/**
+ * Drag things into a new order: the DM screen's tabs, a page's panels. Each item carries
+ * `data-reorder={id}`; `start(id, e)` from its (or its handle's) pointerdown. Past a few pixels it's
+ * a drag, and the click that ends it is swallowed. Pointer events rather than HTML drag and drop,
+ * which some browsers won't start from a button and desktop webviews can take over.
+ *
+ * With `lane` (items of one size in a row, like tabs), `onMove(id, target)` runs live as the
+ * pointer comes over each item; the pointer only counts across, and near either end the lane
+ * scrolls along. Without it (items of mixed sizes, which reflow as they move), `over` names the
+ * item under the pointer and `onMove` runs once, on release. Escape cancels.
+ */
+export function useDragReorder(onMove: (id: string, target: string) => void, lane?: { current: HTMLElement | null }) {
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const press = useRef<{ id: string; x: number; y: number; moved: boolean; over: string } | null>(null);
+  const moveRef = useRef(onMove);
+  moveRef.current = onMove;
+
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      const p = press.current;
+      if (!p) return;
+      if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
+      if (!p.moved) {
+        p.moved = true;
+        setDragging(p.id);
+      }
+      let { clientX: x, clientY: y } = e;
+      const row = lane?.current;
+      if (row) {
+        const box = row.getBoundingClientRect();
+        if (x < box.left + 16) row.scrollLeft -= 12;
+        else if (x > box.right - 16) row.scrollLeft += 12;
+        x = Math.min(box.right - 2, Math.max(box.left + 2, x));
+        y = box.top + box.height / 2;
+      }
+      const under = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-reorder]")?.dataset.reorder ?? "";
+      if (under === p.over) return;
+      p.over = under;
+      if (!row) setOver(under && under !== p.id ? under : null);
+      else if (under && under !== p.id) moveRef.current(p.id, under);
+    };
+    const onUp = (e: PointerEvent) => {
+      const p = press.current;
+      press.current = null;
+      if (!p?.moved) return;
+      setDragging(null);
+      setOver(null);
+      if (!lane?.current && e.type === "pointerup" && p.over && p.over !== p.id) moveRef.current(p.id, p.over);
+      const swallow = (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !press.current) return;
+      press.current = null;
+      setDragging(null);
+      setOver(null);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [lane]);
+
+  const start = useCallback((id: string, e: { button: number; clientX: number; clientY: number }) => {
+    if (e.button === 0) press.current = { id, x: e.clientX, y: e.clientY, moved: false, over: id };
+  }, []);
+  return { dragging, over, start };
+}

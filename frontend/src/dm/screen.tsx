@@ -6,7 +6,7 @@ import { Splitter } from "../components/splitter";
 import { EmptyState, HpBar, Loading } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDialogs } from "../context/ui";
-import { usePref } from "../lib/hooks";
+import { useDragReorder, usePref } from "../lib/hooks";
 import { blankMap } from "../lib/map";
 import type { Campaign, KindMap, Scene, SceneStatus } from "../types";
 import { MonsterDoc, NoteDoc, NpcDoc, SceneDoc, TrackerDoc } from "./docs";
@@ -275,63 +275,17 @@ function useTabStrip(count: number, active: DocRef | null) {
   return { ref, narrow: count > 0 && width / count < 160, overflow: !(ends.start && ends.end), ends, page };
 }
 
-/** Drag a tab along the strip to move it. Pointer events rather than HTML drag and drop, which
- *  some browsers won't start from a button and the desktop window can intercept. */
-function useTabDrag(tabs: DocRef[], moveTab: (ref: DocRef, target: DocRef) => void, strip: React.RefObject<HTMLDivElement | null>) {
-  const [dragging, setDragging] = useState<DocRef | null>(null);
-  const press = useRef<{ ref: DocRef; x: number; moved: boolean } | null>(null);
-  const latest = useRef(tabs);
-  latest.current = tabs;
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const p = press.current;
-      const el = strip.current;
-      if (!p || !el) return;
-      if (!p.moved && Math.abs(e.clientX - p.x) < 6) return;
-      if (!p.moved) {
-        p.moved = true;
-        setDragging(p.ref);
-      }
-      // Past either end, the strip pages along so the tab can go to a place out of sight.
-      const box = el.getBoundingClientRect();
-      if (e.clientX < box.left + 16) el.scrollLeft -= 12;
-      else if (e.clientX > box.right - 16) el.scrollLeft += 12;
-      const x = Math.min(box.right - 2, Math.max(box.left + 2, e.clientX));
-      const over = document.elementFromPoint(x, box.top + box.height / 2)?.closest<HTMLElement>(".doc-tab")?.dataset.tab;
-      const target = latest.current.find((t) => `${t.kind}:${t.id}` === over);
-      if (target && !(target.kind === p.ref.kind && target.id === p.ref.id)) moveTab(p.ref, target);
-    };
-    const onUp = () => {
-      const p = press.current;
-      press.current = null;
-      if (!p?.moved) return;
-      setDragging(null);
-      // The release would also click the tab; swallow that one click.
-      const swallow = (e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
-      window.addEventListener("click", swallow, { capture: true, once: true });
-      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [moveTab, strip]);
-
-  return { dragging, start: (ref: DocRef, x: number) => { press.current = { ref, x, moved: false }; } };
-}
-
 function Workspace({ campaign }: { campaign: Campaign }) {
   const dm = useDM();
   const navigate = useNavigate();
   const label = (r: DocRef) => r.kind === "campaigns" ? campaign.name : titleOf(r.kind as ListKind, dm.get(r.kind as ListKind, r.id));
   const strip = useTabStrip(dm.tabs.length, dm.active);
-  const drag = useTabDrag(dm.tabs, dm.moveTab, strip.ref);
-  const dragging = drag.dragging;
+  const key = (t: DocRef) => `${t.kind}:${t.id}`;
+  const drag = useDragReorder((id, target) => {
+    const find = (k: string) => dm.tabs.find((t) => key(t) === k);
+    const [a, b] = [find(id), find(target)];
+    if (a && b) dm.moveTab(a, b);
+  }, strip.ref);
   return (
     <section className="workspace">
       <div className="doc-tab-bar">
@@ -341,11 +295,10 @@ function Workspace({ campaign }: { campaign: Campaign }) {
       <div ref={strip.ref} className={`doc-tabs ${strip.narrow ? "narrow" : ""}`} role="tablist">
         {dm.tabs.map((t) => {
           const on = dm.active?.kind === t.kind && dm.active.id === t.id;
-          const moving = dragging?.kind === t.kind && dragging.id === t.id;
           return (
-            <div key={`${t.kind}:${t.id}`} data-tab={`${t.kind}:${t.id}`} className={`doc-tab ${on ? "on" : ""} ${moving ? "dragging" : ""}`}
+            <div key={key(t)} data-reorder={key(t)} className={`doc-tab ${on ? "on" : ""} ${drag.dragging === key(t) ? "dragging" : ""}`}
               role="tab" aria-selected={on} title={label(t)}
-              onPointerDown={(e) => e.button === 0 && !(e.target as HTMLElement).closest(".doc-tab-x") && drag.start(t, e.clientX)}
+              onPointerDown={(e) => !(e.target as HTMLElement).closest(".doc-tab-x") && drag.start(key(t), e)}
               onMouseDown={(e) => e.button === 1 && dm.close(t)}>
               <button type="button" className="doc-tab-main" onClick={() => dm.open(t)}>
                 <span className="kind-badge">{KIND_LABEL[t.kind]}</span><span className="doc-tab-title">{label(t)}</span>
