@@ -23,7 +23,7 @@ use crate::kinds::Kind;
 use crate::schemas::{
     self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
 };
-use crate::{builder, dice, game, rules, srd, transfer};
+use crate::{builder, dice, files, game, rules, srd, transfer};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -522,18 +522,17 @@ async fn upload_handout(
         return Err(invalid("image is empty or larger than 15 MB"));
     }
     let dir = app.db.files_dir();
-    tokio::fs::create_dir_all(&dir).await?;
     let mut repo = app.db.write().await?;
     let doc = repo.get(Kind::Handouts, &id).await?;
     let old = doc["filename"].as_str().unwrap_or("").to_string();
     let name = format!("{id}-{}{extension}", &crate::repo::new_id()[..6]);
-    tokio::fs::write(dir.join(&name), &body).await?;
+    files::write(&dir.join(&name), &body)?;
     let saved = repo.update(Kind::Handouts, &id, json!({"filename": name, "mime": mime})).await?;
     repo.commit().await?;
     if old != name
         && let Some(path) = handout_path(&dir, &old)
     {
-        let _ = tokio::fs::remove_file(path).await;
+        files::remove(&path);
     }
     Ok(Json(saved))
 }
@@ -542,7 +541,7 @@ async fn handout_file(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String
     let doc = app.db.read().await?.get(Kind::Handouts, &id).await?;
     let filename = doc["filename"].as_str().unwrap_or("");
     let path = handout_path(&app.db.files_dir(), filename).ok_or_else(|| not_found("this handout has no image yet"))?;
-    let bytes = tokio::fs::read(&path).await.map_err(|_| not_found("this handout has no image yet"))?;
+    let bytes = files::read(&path).ok_or_else(|| not_found("this handout has no image yet"))?;
     let mime = doc["mime"].as_str().filter(|m| !m.is_empty()).map(String::from);
     let mime = mime.unwrap_or_else(|| mime_guess::from_path(&path).first_or_octet_stream().essence_str().to_string());
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache".to_string())], Body::from(bytes))
@@ -556,7 +555,7 @@ async fn remove_handout_image(State(app): State<Shared>, UrlPath((id,)): UrlPath
     let saved = repo.update(Kind::Handouts, &id, json!({"filename": "", "mime": ""})).await?;
     repo.commit().await?;
     if let Some(path) = handout_path(&app.db.files_dir(), doc["filename"].as_str().unwrap_or("")) {
-        let _ = tokio::fs::remove_file(path).await;
+        files::remove(&path);
     }
     Ok(Json(saved))
 }
@@ -568,7 +567,7 @@ async fn delete_handout(State(app): State<Shared>, UrlPath((id,)): UrlPath<(Stri
     repo.delete(Kind::Handouts, &id).await?;
     repo.commit().await?;
     if let Some(path) = handout_path(&app.db.files_dir(), doc["filename"].as_str().unwrap_or("")) {
-        let _ = tokio::fs::remove_file(path).await;
+        files::remove(&path);
     }
     Ok(Json(json!({"deleted": id})))
 }

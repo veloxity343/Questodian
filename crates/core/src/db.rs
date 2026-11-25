@@ -7,9 +7,13 @@
 //! tests. A database newer than this app knows is refused untouched; an older one is
 //! copied to a backup file before upgrading.
 //!
-//! SQLite calls are synchronous (`rusqlite`, the same code the browser build can use) and
-//! quick; anything that can wait long (the folder lock, an upgrade) runs on a blocking
-//! thread.
+//! SQLite calls are synchronous (`rusqlite`) and quick; anything that can wait long (the
+//! folder lock, an upgrade) runs on a blocking thread.
+//!
+//! The same code runs in a browser (the web build), with two differences: the database is
+//! in the page's own storage, where only one connection may have a file open (so there's one
+//! connection, and every unit of work takes its turn, reads too), and that storage has no
+//! write-ahead log, so SQLite keeps its default rollback journal there.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,6 +29,7 @@ use crate::kinds::{Column, ColumnKind, Kind};
 use crate::repo::{Repo, new_id, now};
 
 pub const DB_FILENAME: &str = "questodian.db";
+#[cfg(not(target_family = "wasm"))]
 const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
@@ -42,8 +47,10 @@ const KNOWN: [&str; 4] = [BASELINE, "0002", "0003", HEAD];
 
 /// How long a statement waits for another copy of the app to finish writing.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
+/// In a browser: see the top of this file.
+const WEB: bool = cfg!(target_family = "wasm");
 /// Connections kept open for reuse between units of work.
-const IDLE_CONNECTIONS: usize = 4;
+const IDLE_CONNECTIONS: usize = if WEB { 1 } else { 4 };
 /// Prepared statements kept per connection (each kind has a few; sqlx kept 100 too).
 const STATEMENT_CACHE: usize = 100;
 
@@ -76,9 +83,10 @@ fn expand_home(path: PathBuf) -> PathBuf {
 /// An open database and what's known about its tables.
 pub struct Database {
     pool: Pool,
-    /// Units of work that write take turns here, waiting without holding a thread. (Writes
-    /// from another copy of the app are waited for inside SQLite, up to [`BUSY_TIMEOUT`].)
-    writer: tokio::sync::Mutex<()>,
+    /// Units of work that write (and in a browser, every unit of work) take turns here,
+    /// waiting without holding a thread. (Writes from another copy of the app are waited
+    /// for inside SQLite, up to [`BUSY_TIMEOUT`].)
+    turns: tokio::sync::Mutex<()>,
     pub data_dir: PathBuf,
     pub path: PathBuf,
     /// The copy saved before an upgrade, if this open upgraded the schema.
@@ -95,34 +103,44 @@ impl Database {
     /// Every open copy of the app shares a lock on `questodian.lock` in the data folder.
     /// Changing the schema needs it exclusively, so a database is never upgraded under
     /// another running copy (which would then break).
+    ///
+    /// In a browser `data_dir` is a name within the page's storage (empty for its top), and
+    /// the storage's own lock (one open file at a time) keeps other copies out instead. The
+    /// web build sets that storage up before calling this.
     pub async fn open(data_dir: impl AsRef<Path>) -> Result<Database> {
         let data_dir = data_dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&data_dir)?;
         let path = data_dir.join(DB_FILENAME);
+        #[cfg(not(target_family = "wasm"))]
         let (backup, lock) = {
+            std::fs::create_dir_all(&data_dir)?;
             let (data_dir, path) = (data_dir.clone(), path.clone());
             tokio::task::spawn_blocking(move || open_guarded(&data_dir, &path))
                 .await
                 .map_err(|e| Error::Internal(e.to_string()))??
         };
+        #[cfg(target_family = "wasm")]
+        let (backup, lock) = (upgrade(&path, true)?, None);
         let pool = Pool { path: path.clone(), idle: Mutex::new(Vec::new()) };
         let conn = pool.get()?;
         let columns = read_columns(&conn)?;
         pool.put(conn);
-        Ok(Database { pool, writer: tokio::sync::Mutex::new(()), data_dir, path, backup, columns, _lock: lock })
+        #[cfg(target_family = "wasm")]
+        crate::files::open()?;
+        Ok(Database { pool, turns: tokio::sync::Mutex::new(()), data_dir, path, backup, columns, _lock: lock })
     }
 
     /// A unit of work that may write: nothing is saved unless [`Repo::commit`] is called.
     /// `BEGIN IMMEDIATE` takes the write lock up front, so two writers queue instead of failing.
     /// Writers take turns, so a task holding one must not ask for another: it would wait forever.
     pub async fn write(&self) -> Result<Repo<'_>> {
-        let turn = self.writer.lock().await;
+        let turn = self.turns.lock().await;
         Repo::begin(&self.pool, "BEGIN IMMEDIATE", Some(turn), &self.columns, self.files_dir())
     }
 
     /// A unit of work that only reads.
     pub async fn read(&self) -> Result<Repo<'_>> {
-        Repo::begin(&self.pool, "BEGIN", None, &self.columns, self.files_dir())
+        let turn = if WEB { Some(self.turns.lock().await) } else { None };
+        Repo::begin(&self.pool, "BEGIN", turn, &self.columns, self.files_dir())
     }
 
     /// Where handout images live.
@@ -173,7 +191,10 @@ fn connect(path: &Path) -> Result<Connection> {
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    if !WEB {
+        conn.execute_batch("PRAGMA journal_mode = WAL")?;
+    }
     Ok(conn)
 }
 
@@ -213,6 +234,7 @@ fn strings(conn: &Connection, sql: &str) -> Result<Vec<String>> {
 ///
 /// Whenever the version was read before the shared lock was taken, it's read again after,
 /// so a copy never runs on a schema another (newer) copy changed in between.
+#[cfg(not(target_family = "wasm"))]
 fn open_guarded(data_dir: &Path, path: &Path) -> Result<(Option<PathBuf>, Option<std::fs::File>)> {
     use std::fs::TryLockError;
 
@@ -241,6 +263,7 @@ fn open_guarded(data_dir: &Path, path: &Path) -> Result<(Option<PathBuf>, Option
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn unguarded(path: &Path, why: &std::io::Error) -> Result<(Option<PathBuf>, Option<std::fs::File>)> {
     eprintln!("questodian: file locks aren't available here ({why}); open only one copy of Questodian at a time");
     Ok((upgrade(path, true)?, None))
@@ -523,27 +546,42 @@ fn backup_database(conn: &Connection, path: &Path, label: &str) -> Result<PathBu
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let prefix = format!("{name}.backup-{label}-");
     let folder = path.parent().unwrap_or(Path::new("."));
-    let existing = std::fs::read_dir(folder)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&prefix)))
-        .max();
-    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    let wal = folder.join(format!("{name}-wal"));
-    let changed = [modified(path), modified(&wal)].into_iter().flatten().max();
-    if let Some(existing) = existing
-        && modified(&existing).zip(changed).is_some_and(|(backup, data)| backup >= data)
-    {
+    if let Some(existing) = reusable_backup(path, folder, &prefix)? {
         return Ok(existing);
     }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let dest = folder.join(format!("{prefix}{stamp}"));
     conn.execute("VACUUM INTO ?", [dest.to_string_lossy()])?;
-    std::fs::File::open(&dest)?.sync_all()?;
-    if let Ok(dir) = std::fs::File::open(folder) {
-        let _ = dir.sync_all(); // not possible on every OS; the file itself is synced
+    #[cfg(not(target_family = "wasm"))]
+    {
+        std::fs::File::open(&dest)?.sync_all()?;
+        if let Ok(dir) = std::fs::File::open(folder) {
+            let _ = dir.sync_all(); // not possible on every OS; the file itself is synced
+        }
     }
     Ok(dest)
+}
+
+/// The newest backup starting with `prefix`, if it was made after the database last changed.
+#[cfg(not(target_family = "wasm"))]
+fn reusable_backup(path: &Path, folder: &Path, prefix: &str) -> Result<Option<PathBuf>> {
+    let existing = std::fs::read_dir(folder)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(prefix)))
+        .max();
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    let wal = PathBuf::from(wal);
+    let changed = [modified(path), modified(&wal)].into_iter().flatten().max();
+    Ok(existing.filter(|e| modified(e).zip(changed).is_some_and(|(backup, data)| backup >= data)))
+}
+
+/// Browser storage can't be listed or dated from here, so a backup is always made afresh.
+#[cfg(target_family = "wasm")]
+fn reusable_backup(_path: &Path, _folder: &Path, _prefix: &str) -> Result<Option<PathBuf>> {
+    Ok(None)
 }
 
 /// For tests and tools: run a statement list (e.g. a fixture dump) on a database file.

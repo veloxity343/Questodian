@@ -1,7 +1,7 @@
 # PWA proof
 
 Can Questodian's Rust core run inside a browser, so the app works on an iPad with no computer?
-This crate tests the pieces, outside the main workspace.
+This crate tests the pieces, outside the main workspace. The real version is now `crates/web`.
 
 1. **axum in WebAssembly:** done. An axum 0.8.9 `Router` (no default features) compiles to
    `wasm32-unknown-unknown` and answers requests inside a Web Worker.

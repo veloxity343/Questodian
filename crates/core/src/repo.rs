@@ -78,7 +78,7 @@ impl<'a> Repo<'a> {
     pub async fn commit(mut self) -> Result<()> {
         self.conn().execute_batch("COMMIT")?;
         for path in std::mem::take(&mut self.remove_on_commit) {
-            let _ = std::fs::remove_file(path); // already gone is fine
+            crate::files::remove(&path);
         }
         Ok(())
     }

@@ -4,7 +4,7 @@ FRONTEND := frontend
 NPM := npm --prefix $(FRONTEND)
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev api web ui run app desktop test typecheck check clean
+.PHONY: help install dev api web ui run app desktop wasm test typecheck check clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -34,9 +34,19 @@ app: ui ## Build the UI and open the desktop app (debug build)
 desktop: ## Build the desktop app and its installers for this OS into target/release/bundle/
 	npx tauri build
 
+# The web build needs the wasm32 target, wasm-bindgen-cli at the version in Cargo.lock, and
+# clang (SQLite's C code): see docs/dev/development.md.
+WASM_OUT := target/web-pkg
+
+wasm: ## Build the core for a browser (WebAssembly) into target/web-pkg/
+	cargo build -p questodian-web --target wasm32-unknown-unknown --profile web
+	wasm-bindgen --target web --remove-name-section --remove-producers-section \
+		--out-dir $(WASM_OUT) target/wasm32-unknown-unknown/web/questodian_web.wasm
+
 test: ## Rust: format check, lint and tests
 	cargo fmt --all --check
 	cargo clippy -p questodian-core -p questodian-cli --all-targets -- -D warnings
+	cargo clippy -p questodian-core -p questodian-web --target wasm32-unknown-unknown -- -D warnings
 	cargo test -p questodian-core -p questodian-cli
 
 typecheck: ## Typecheck and test the frontend

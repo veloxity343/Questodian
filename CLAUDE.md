@@ -8,9 +8,10 @@ React + TypeScript UI (`frontend/`, Vite) on a Rust backend, in a Cargo workspac
 
 - `crates/core`: dice, rules, the SRD, schemas, the SQLite repo (rusqlite), migrations, game logic, import/export and the axum router.
 - `crates/cli`: the `questodian` command (`serve`, `roll`, `calc`, `srd`, `export`, `import`).
+- `crates/web`: the core in WebAssembly for the browser version (`make wasm`), answering the API in a Web Worker with SQLite in browser storage (OPFS).
 - `src-tauri`: the Tauri 2 desktop app, serving the router to its window through its `questodian://` scheme.
 
-The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it was retired after the Rust port reached parity. Its databases, backups and exports must keep working: the schema version stays in `alembic_version`, and the lenient input rules in `schemas.rs` match what it accepted. Background and decisions: `docs/rust-port.md`. Next: mobile (iOS/Android) via Tauri.
+The first version of Questodian was Python (FastAPI, SQLAlchemy, Alembic); it was retired after the Rust port reached parity. Its databases, backups and exports must keep working: the schema version stays in `alembic_version`, and the lenient input rules in `schemas.rs` match what it accepted. Background and decisions: `docs/rust-port.md`. Next: an iPad version as an offline web app (PWA) on the `pwa` branch, with `ipad` (Tauri mobile) kept as the alternative.
 
 ## Commands
 

@@ -207,6 +207,34 @@ async fn a_failed_unit_of_work_saves_nothing() {
     db.close().await;
 }
 
+/// A backup made after the database file last changed isn't reused when its write-ahead log
+/// has changed since: the newest data is in the log.
+#[tokio::test]
+async fn a_backup_isnt_reused_when_the_log_is_newer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(DB_FILENAME);
+    let sql = std::fs::read_to_string(format!("{FIXTURES}/v0002.sql")).unwrap();
+    db::load_sql(&path, &sql).await.unwrap();
+    let at = |secs| std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(at(946_684_800)).unwrap();
+    let backup = dir.path().join(format!("{DB_FILENAME}.backup-0002-20000102-000000"));
+    std::fs::File::create(&backup).unwrap().set_modified(at(946_771_200)).unwrap();
+    // Another connection leaves a change in the log, unmerged into the database file.
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;").unwrap();
+    other.execute_batch("UPDATE campaigns SET name = name || ' (renamed)'").unwrap();
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(at(946_684_800)).unwrap();
+    let db = Database::open(dir.path()).await.unwrap();
+    let made = db.backup.clone().expect("a backup");
+    assert_ne!(made, backup, "a fresh copy, with the logged change");
+    let copy = rusqlite::Connection::open(&made).unwrap();
+    let renamed: i64 =
+        copy.query_row("SELECT count(*) FROM campaigns WHERE name LIKE '% (renamed)'", [], |r| r.get(0)).unwrap();
+    assert!(renamed > 0, "the backup has the change from the log");
+    drop(other);
+    db.close().await;
+}
+
 /// Writers from many tasks at once take turns and all succeed; readers carry on meanwhile.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_units_of_work_queue_and_all_succeed() {

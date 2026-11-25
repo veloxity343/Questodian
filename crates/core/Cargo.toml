@@ -18,9 +18,19 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
 tower.workspace = true
 uuid.workspace = true
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["sync"] }
+
+# In a browser (the web build, crates/web): no threads, files or sockets; time and random
+# numbers come from JavaScript.
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+tokio = { version = "1.54.1", default-features = false, features = ["sync"] }
+uuid = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
+tokio = { workspace = true, features = ["time"] }
 tempfile = "3.27.0"

@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>web core test</title>
+<script>
+const worker = new Worker("worker.js", { type: "module" });
+let next = 0; const waiting = new Map();
+worker.onmessage = ({ data }) => { waiting.get(data.id)(data); waiting.delete(data.id); };
+window.api = (method, url, body, contentType) => new Promise(resolve => {
+  const id = next++; waiting.set(id, resolve);
+  const headers = contentType ? [["content-type", contentType]] : (typeof body === "string" ? [["content-type", "application/json"]] : []);
+  const bytes = body === undefined ? undefined : (typeof body === "string" ? new TextEncoder().encode(body) : body);
+  worker.postMessage({ id, method, url, headers, body: bytes });
+}).then(r => r.ok ? { status: r.status, headers: JSON.parse(r.headers), text: new TextDecoder().decode(r.body), size: r.body.length } : { error: r.error });
+</script>
