@@ -8,7 +8,7 @@ import { useLoad } from "../lib/hooks";
 import { pickFiles, slug, today } from "../lib/util";
 import { daysSince, saveFile, useLastBackup } from "../web/backup";
 import { checkThisBrowser, reportText, type Check } from "../web/selftest";
-import type { Kind } from "../types";
+import type { ExportBundle, Kind, Unreadable } from "../types";
 
 const KINDS: Kind[] = ["campaigns", "sessions", "characters", "handbook"];
 const MODES: [string, string][] = [
@@ -16,6 +16,17 @@ const MODES: [string, string][] = [
   ["skip", "Skip — keep my existing records, only add new ones"],
   ["copy", "Copy — import everything as new records (sharing between DMs)"],
 ];
+
+const records = (n: number) => (n === 1 ? "1 record" : `${n} records`);
+
+/** Records that can't be read, which exports leave out. */
+function UnreadableList({ records: list }: { records: Unreadable[] }) {
+  return (
+    <ul>
+      {list.map((r, i) => <li key={i}>{r.kind} <code>{r.id || "(no id)"}</code>: {r.error}</li>)}
+    </ul>
+  );
+}
 
 export function DataPage() {
   const { meta, campaigns, campaignId, refreshCampaigns } = useApp();
@@ -27,8 +38,17 @@ export function DataPage() {
   /** A file waiting for a tap to open the Share sheet (see saveFile). */
   const [ready, setReady] = useState<{ name: string; text: string; full: boolean } | null>(null);
   const { data: counts, error, reload } = useLoad(() => Promise.all(KINDS.map(async (k) => [k, (await api.list(k)).length] as const)), []);
+  // Loaded on its own, so a problem here can't take the page (and importing) away.
+  const { data: check, error: checkError, reload: recheck } = useLoad(() => api.unreadable(), []);
+  const unreadable = check ?? [];
   if (error) return <LoadError error={error} />;
   if (!counts) return <Loading />;
+
+  // A backup that leaves records out must say so, not just save.
+  const warnIfIncomplete = (bundle: ExportBundle) => {
+    const missing = bundle.unreadable?.length || 0;
+    if (missing) toast(`Exported, but ${records(missing)} can't be read and ${missing === 1 ? "isn't" : "aren't"} in the file`, "error", 8000);
+  };
 
   const doImport = async () => {
     const files = await pickFiles({ accept: ".json,.md,.markdown,.txt,application/json", multiple: true });
@@ -44,6 +64,11 @@ export function DataPage() {
           const imp = Object.entries(r.imported).map(([k, v]) => `${v} ${k}`).join(", ") || "nothing new";
           const skip = Object.entries(r.skipped).map(([k, v]) => `${v} ${k}`).join(", ");
           lines.push(`✔ ${f.name}: imported ${imp}${skip ? ` (skipped ${skip})` : ""}`);
+          const missing = r.unreadable?.length || 0;
+          if (missing) {
+            const which = r.unreadable.map((u) => `${u.kind} ${u.id || "(no id)"}`).join(", ");
+            lines.push(`✘ ${f.name} is incomplete: ${records(missing)} couldn't be read when it was made and ${missing === 1 ? "isn't" : "aren't"} in it (${which})`);
+          }
         }
       } catch (e) {
         lines.push(`✘ ${f.name}: ${(e as Error).message}`);
@@ -53,24 +78,41 @@ export function DataPage() {
     toast("Import finished");
     await refreshCampaigns();
     reload();
+    recheck();
   };
   const save = async (file: { name: string; text: string; full: boolean }) => {
     const result = await saveFile(file.name, file.text);
     setReady(result === "tap-again" ? file : null);
     if (result === "saved" && file.full) setLastBackup(new Date().toISOString());
   };
-  const fullBackup = async () =>
-    save({ name: `questodian-backup-${today()}.questodian.json`, text: JSON.stringify(await api.exportAll(), null, 2), full: true });
+  const fullBackup = async () => {
+    const bundle = await api.exportAll();
+    warnIfIncomplete(bundle);
+    await save({ name: `questodian-backup-${today()}.questodian.json`, text: JSON.stringify(bundle, null, 2), full: true });
+  };
   const exportCampaign = async () => {
     const id = exportId || campaigns[0].id;
     const name = campaigns.find((c) => c.id === id)?.name || "campaign";
-    await save({ name: `${slug(name)}.questodian.json`, text: JSON.stringify(await api.exportAll(id), null, 2), full: false });
+    const bundle = await api.exportAll(id);
+    warnIfIncomplete(bundle);
+    await save({ name: `${slug(name)}.questodian.json`, text: JSON.stringify(bundle, null, 2), full: false });
   };
   const sinceBackup = daysSince(lastBackup);
 
   return (
     <>
       <header className="page-head"><h1>Import / Export</h1></header>
+      {checkError && <p className="bad small">Couldn't check for records that can't be read: {checkError.message}</p>}
+      {unreadable.length > 0 && (
+        <section className="panel warnings" role="alert">
+          <h2>{records(unreadable.length)} can't be read</h2>
+          <p>
+            {unreadable.length === 1 ? "It isn't" : "They aren't"} shown anywhere in Questodian and won't be in backups or
+            exports until fixed. Nothing has been deleted: {unreadable.length === 1 ? "it's" : "they're"} still in the database.
+          </p>
+          <UnreadableList records={unreadable} />
+        </section>
+      )}
       <Board id="data" items={[
         { id: "export", title: "Export", node: (
         <section className="panel">
