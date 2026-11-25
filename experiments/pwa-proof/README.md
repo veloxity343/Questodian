@@ -9,8 +9,8 @@ This crate tests the pieces, outside the main workspace.
    `ffi-sqlite-wasm-rs` feature) with `sqlite-wasm-vfs` 0.3 (`sahpool`): SQLite 3.54.1 in the
    worker, records written through the router, still there after reloads and in a new tab.
    Building it compiles SQLite's C code, so it needs clang (`sudo apt install clang llvm`).
-3. **On an iPad:** to do. OPFS needs a secure page (HTTPS), so the page has to be hosted, for
-   example on GitHub Pages.
+3. **On an iPad:** done. Hosted on GitHub Pages (OPFS needs HTTPS), the page ran in Safari on an
+   iPad and the campaigns list kept growing across reloads.
 
 What it showed:
 - The `.wasm` is 2.2 MB, 0.78 MB gzipped, before any size optimisation.
