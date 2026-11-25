@@ -77,7 +77,14 @@ export function DataPage() {
           </div>
           <h3>Stored locally</h3>
           <ul className="small">{counts.map(([k, n]) => <li key={k}>{n} {k}</li>)}</ul>
-          <p className="muted small">Database: <code>{meta?.database || "?"}</code></p>
+          {import.meta.env.MODE === "web" ? (
+            <p className="muted small">
+              Stored in this browser, on this device only. Removing the app from the Home Screen or clearing this site's data
+              can delete it, so download a full backup now and then.
+            </p>
+          ) : (
+            <p className="muted small">Database: <code>{meta?.database || "?"}</code></p>
+          )}
         </section>
         ) },
         { id: "import", title: "Import", node: (

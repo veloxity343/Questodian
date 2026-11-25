@@ -4,7 +4,7 @@ FRONTEND := frontend
 NPM := npm --prefix $(FRONTEND)
 
 .DEFAULT_GOAL := help
-.PHONY: help install dev api web ui run app desktop wasm test typecheck check clean
+.PHONY: help install dev api web ui run app desktop wasm pwa test typecheck check clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,6 +43,12 @@ wasm: ## Build the core for a browser (WebAssembly) into target/web-pkg/
 	wasm-bindgen --target web --remove-name-section --remove-producers-section \
 		--out-dir $(WASM_OUT) target/wasm32-unknown-unknown/web/questodian_web.wasm
 
+# Where the web version will be served; GitHub Pages serves this repository at /Questodian/.
+QUESTODIAN_BASE ?= /
+
+pwa: wasm ## Build the web version (installable, offline) into frontend/dist-web/ (QUESTODIAN_BASE=/Questodian/ for GitHub Pages)
+	QUESTODIAN_BASE=$(QUESTODIAN_BASE) $(NPM) run build:web
+
 test: ## Rust: format check, lint and tests
 	cargo fmt --all --check
 	cargo clippy -p questodian-core -p questodian-cli --all-targets -- -D warnings
@@ -56,4 +62,4 @@ typecheck: ## Typecheck and test the frontend
 check: test typecheck ## Run everything CI runs
 
 clean: ## Remove build output (keeps your database)
-	rm -rf target $(FRONTEND)/dist $(FRONTEND)/*.tsbuildinfo
+	rm -rf target $(FRONTEND)/dist $(FRONTEND)/dist-web $(FRONTEND)/*.tsbuildinfo

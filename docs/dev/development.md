@@ -43,7 +43,8 @@ Run `make` to list them all. The main ones:
 | `make run` | Build the UI and serve the app in your browser |
 | `make app` | The desktop app (debug build) |
 | `make desktop` | The desktop app and its installers for this OS, into `target/release/bundle/` |
-| `make wasm` | The core built for a browser, into `target/web-pkg/` (the web version is in progress) |
+| `make wasm` | The core built for a browser, into `target/web-pkg/` |
+| `make pwa` | The web version (installable, works offline) into `frontend/dist-web/`. `QUESTODIAN_BASE=/Questodian/` builds it for GitHub Pages |
 
 `make api` and `make web` run the two dev servers on their own.
 
@@ -87,6 +88,16 @@ A Cargo workspace plus a React app:
     - `hooks.ts`: shared hooks (saved preferences, drafts that save themselves, drag to reorder,
       pan and zoom);
     - `desktop.ts`: the desktop app's own addresses.
+  - `web/`: the web version's start-up (only in `make pwa` builds). The first window to open
+    becomes the host: its worker (`db-worker.ts`) runs the core from `crates/web`. The service
+    worker (`sw.js`) passes every window's `/api/...` requests to the host, so images, the
+    players' window and other tabs all work, and keeps the app's files for offline use. When the
+    host window closes, the next window takes over (a Web Lock queues them). A new build
+    installs in the background and takes over once every window of the old one has closed, so
+    two versions never share the database; API writes that arrive as page navigations (a form
+    on another site) are refused. Icons and the
+    manifest are in `frontend/web-public/`; `vite.config.ts` writes `sw.js` with the list of
+    files to keep.
 - `data/`: the bundled SRD and the builder's rules data: see [Bundled data](data.md)
 - `scripts/`: the scripts that build `data/`
 
@@ -103,8 +114,10 @@ characters and handbook entries.
   [Database and migrations](database.md));
 - the frontend's Vitest tests (`*.test.ts` next to the code they test).
 
-The web build has a smoke test in a real browser, not part of `make check`: after `make wasm`,
-`uv run --with playwright python crates/web/smoke/smoke.py`.
+The web version has two tests in a real browser, not part of `make check`:
+- the core alone: after `make wasm`, `uv run --with playwright python crates/web/smoke/smoke.py`;
+- the whole app (the service worker, a second window taking over, offline): after
+  `make pwa QUESTODIAN_BASE=/Questodian/`, `uv run --with playwright python crates/web/smoke/pwa.py`.
 
 UI changes should also be tried in a real browser, and in the desktop window for anything that
 drags, scrolls or uses the system: some webviews behave differently from Chromium. Pointer events
