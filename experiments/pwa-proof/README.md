@@ -5,9 +5,18 @@ This crate tests the pieces, outside the main workspace.
 
 1. **axum in WebAssembly:** done. An axum 0.8.9 `Router` (no default features) compiles to
    `wasm32-unknown-unknown` and answers requests inside a Web Worker.
-2. **SQLite in WebAssembly, stored in the browser (OPFS):** next. Needs `rusqlite` 0.43 (its
-   default `ffi-sqlite-wasm-rs` feature) and `sqlite-wasm-vfs` 0.3 (`sahpool`), which compile
-   SQLite's C code, so they need clang with the WebAssembly target.
+2. **SQLite in WebAssembly, stored in the browser (OPFS):** done. `rusqlite` 0.43 (its default
+   `ffi-sqlite-wasm-rs` feature) with `sqlite-wasm-vfs` 0.3 (`sahpool`): SQLite 3.54.1 in the
+   worker, records written through the router, still there after reloads and in a new tab.
+   Building it compiles SQLite's C code, so it needs clang (`sudo apt install clang llvm`).
+3. **On an iPad:** to do. OPFS needs a secure page (HTTPS), so the page has to be hosted, for
+   example on GitHub Pages.
+
+What it showed:
+- The `.wasm` is 2.2 MB, 0.78 MB gzipped, before any size optimisation.
+- Only one tab can have the database open (OPFS sync access handles are exclusive): a second tab
+  gets `NoModificationAllowedError` until the first closes. The app will need to say so plainly.
+- The sahpool VFS doesn't do WAL, so the browser database uses SQLite's default journal.
 
 Build and try it:
 

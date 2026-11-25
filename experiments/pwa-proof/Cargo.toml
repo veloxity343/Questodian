@@ -17,4 +17,9 @@ tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1"
 serde_json = "1"
 wasm-bindgen = "0.2.130"
+# SQLite compiled to WebAssembly (rusqlite's default ffi-sqlite-wasm-rs feature), stored in the
+# browser's origin-private file system (OPFS) through the sahpool VFS.
+rusqlite = "0.43.0"
+sqlite-wasm-rs = { version = "0.6.3", features = ["wasm-bindgen"] }
+sqlite-wasm-vfs = { version = "0.3.0", features = ["sahpool"] }
 wasm-bindgen-futures = "0.4.80"
