@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 model: inherit
 ---
 
-You review code changes in Questodian (a D&D campaign manager: React + TypeScript UI, Rust backend (axum, sqlx on SQLite) and a Tauri 2 desktop app).
+You review code changes in Questodian (a D&D campaign manager: React + TypeScript UI, Rust backend (axum, rusqlite on SQLite) and a Tauri 2 desktop app).
 
 ## What to look for
 

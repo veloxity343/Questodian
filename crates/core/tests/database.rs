@@ -42,13 +42,12 @@ fn hide_generated(mut records: Value) -> Value {
 }
 
 async fn version(db: &Database) -> String {
-    sqlx_version(&db.path).await
+    file_version(&db.path).await
 }
 
-async fn sqlx_version(path: &Path) -> String {
-    use sqlx::Connection;
-    let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", path.display())).await.unwrap();
-    sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_one(&mut conn).await.unwrap()
+async fn file_version(path: &Path) -> String {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.query_row("SELECT version_num FROM alembic_version", [], |row| row.get(0)).unwrap()
 }
 
 async fn check_fixture(name: &str, expect_backup: bool) {
@@ -103,28 +102,28 @@ async fn database_from_before_migrations_upgrades() {
 
 /// Each table's columns, foreign keys and indexes, for comparing schemas.
 async fn schema_shape(path: &Path) -> Vec<String> {
-    use sqlx::{Connection, Row};
-    let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", path.display())).await.unwrap();
+    let conn = rusqlite::Connection::open(path).unwrap();
     let mut out = Vec::new();
     let tables = Kind::ALL.iter().map(|kind| kind.table()).chain(["rule_overrides"]);
     for t in tables {
         for pragma in ["table_info", "foreign_key_list", "index_list"] {
-            let rows =
-                sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA {pragma}({t})"))).fetch_all(&mut conn).await.unwrap();
-            let mut lines: Vec<String> = rows
-                .iter()
-                .map(|r| {
-                    let cells: Vec<String> = (0..r.len())
+            let mut statement = conn.prepare(&format!("PRAGMA {pragma}({t})")).unwrap();
+            let width = statement.column_count();
+            let mut lines: Vec<String> = statement
+                .query_map([], |r| {
+                    let cells: Vec<String> = (0..width)
                         .filter(|&i| !(pragma == "index_list" && i == 0)) // seq number
                         .filter(|&i| !(pragma == "foreign_key_list" && i <= 1)) // id, seq
                         .map(|i| {
-                            r.try_get::<String, _>(i)
-                                .or_else(|_| r.try_get::<i64, _>(i).map(|n| n.to_string()))
+                            r.get::<_, String>(i)
+                                .or_else(|_| r.get::<_, i64>(i).map(|n| n.to_string()))
                                 .unwrap_or_else(|_| "NULL".into())
                         })
                         .collect();
-                    format!("{t} {pragma}: {}", cells.join(" | "))
+                    Ok(format!("{t} {pragma}: {}", cells.join(" | ")))
                 })
+                .unwrap()
+                .map(Result::unwrap)
                 .collect();
             lines.sort();
             out.extend(lines);
@@ -205,6 +204,51 @@ async fn a_failed_unit_of_work_saves_nothing() {
         // dropped without commit
     }
     assert_eq!(all_records(&db).await["handbook"], json!([]));
+    db.close().await;
+}
+
+/// Writers from many tasks at once take turns and all succeed; readers carry on meanwhile.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_units_of_work_queue_and_all_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = std::sync::Arc::new(Database::open(dir.path()).await.unwrap());
+    let tasks: Vec<_> = (0..40)
+        .map(|i| {
+            let db = db.clone();
+            tokio::spawn(async move {
+                if i % 2 == 0 {
+                    db.read().await.unwrap().list(Kind::Handbook, &[]).await.unwrap();
+                } else {
+                    let mut repo = db.write().await.unwrap();
+                    repo.create(Kind::Handbook, Some(json!({"title": format!("entry {i}")}))).await.unwrap();
+                    tokio::task::yield_now().await; // let others in while this unit of work is open
+                    repo.commit().await.unwrap();
+                }
+            })
+        })
+        .collect();
+    for task in tasks {
+        task.await.unwrap();
+    }
+    assert_eq!(all_records(&db).await["handbook"].as_array().unwrap().len(), 20);
+    db.close().await;
+}
+
+/// A unit of work dropped without committing gives up its turn, so the next writer goes ahead.
+#[tokio::test]
+async fn a_dropped_writer_lets_the_next_one_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path()).await.unwrap();
+    let mut repo = db.write().await.unwrap();
+    repo.create(Kind::Handbook, Some(json!({"title": "rolled back"}))).await.unwrap();
+    drop(repo);
+    let next = tokio::time::timeout(std::time::Duration::from_secs(5), db.write()).await;
+    let mut repo = next.expect("the turn was given up").unwrap();
+    repo.create(Kind::Handbook, Some(json!({"title": "saved"}))).await.unwrap();
+    repo.commit().await.unwrap();
+    let titles: Vec<_> =
+        all_records(&db).await["handbook"].as_array().unwrap().iter().map(|h| h["title"].clone()).collect();
+    assert_eq!(titles, [json!("saved")]);
     db.close().await;
 }
 

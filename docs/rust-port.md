@@ -278,6 +278,13 @@ Decided while working through the milestones; each is easy to revisit.
   JSON, so SeaORM entities would only have converted rows to JSON and back. One
   generic `repo.rs` on sqlx reads each table's declared column types (`JSON`,
   `BOOLEAN`, ...) and needs no per-table code. SQLite is still compiled in.
+- **rusqlite instead of sqlx (after the port, 2026-11-25).** sqlx doesn't build for
+  WebAssembly, and a browser (iPad) version needs the same database code there; rusqlite
+  does (`experiments/pwa-proof`). Its calls are synchronous and quick, so `Repo` runs
+  them inline; `Database` keeps a few connections for reuse, writers take turns on an
+  async lock before `BEGIN IMMEDIATE`, and opening (the folder lock, upgrades) runs on
+  a blocking thread. Same pragmas, schema and behaviour; SQLite is still compiled in
+  (rusqlite's `bundled`). Where this page says sqlx above, read rusqlite.
 - **Migrations:** new databases run `migrations/0002_schema.sql`, captured from a
   database the Python app made. Revision 0001 (and pre-Alembic) databases are backed
   up with `VACUUM INTO`, then upgraded by `migrations/0001_to_0002.sql` plus moving

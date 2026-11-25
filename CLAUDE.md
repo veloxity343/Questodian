@@ -6,7 +6,7 @@ A D&D campaign manager and DM screen: campaigns, sessions, scenes, NPCs, encount
 
 React + TypeScript UI (`frontend/`, Vite) on a Rust backend, in a Cargo workspace:
 
-- `crates/core`: dice, rules, the SRD, schemas, the sqlx repo, migrations, game logic, import/export and the axum router.
+- `crates/core`: dice, rules, the SRD, schemas, the SQLite repo (rusqlite), migrations, game logic, import/export and the axum router.
 - `crates/cli`: the `questodian` command (`serve`, `roll`, `calc`, `srd`, `export`, `import`).
 - `src-tauri`: the Tauri 2 desktop app, serving the router to its window through its `questodian://` scheme.
 

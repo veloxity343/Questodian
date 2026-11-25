@@ -48,8 +48,8 @@ impl From<DiceError> for Error {
     }
 }
 
-impl From<sqlx::Error> for Error {
-    fn from(e: sqlx::Error) -> Self {
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Self {
         Error::Internal(format!("database error: {e}"))
     }
 }
