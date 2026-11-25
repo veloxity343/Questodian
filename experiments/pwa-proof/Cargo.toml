@@ -1,0 +1,20 @@
+[package]
+name = "pwa-proof"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not part of the main workspace: a proof that the core's stack runs in a browser.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The app's own versions; no tokio networking in a browser, so no default features.
+axum = { version = "0.8.9", default-features = false, features = ["json", "query"] }
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1"
+serde_json = "1"
+wasm-bindgen = "0.2.130"
+wasm-bindgen-futures = "0.4.80"
