@@ -38,6 +38,7 @@ BUILD = """() => new Promise(res => { const c = new MessageChannel(); c.port1.on
   navigator.serviceWorker.controller.postMessage({type: "build"}, [c.port2]); })"""
 FETCH = """([m, u, b]) => fetch(u, {method: m, headers: b ? {"content-type": "application/json"} : {}, body: b})
   .then(async r => ({status: r.status, text: await r.text()}))"""
+MOVED = 200000  # entries in the import cut off by a handover
 failures = []
 
 
@@ -76,6 +77,8 @@ def main():
             browser = getattr(p, engine).launch()
         context = browser.new_context()
         errors = []
+        messages = []  # everything the pages log, shown if the database doesn't open
+        context.on("console", lambda m: messages.append(f"{m.type}: {m.text}"))
         context.on("console", lambda m: m.type == "error" and "403" not in m.text and "favicon.ico" not in str(m.location) and errors.append(f"{m.text} ({m.location.get('url')})"))
         context.on("response", lambda r: r.status == 404 and errors.append(f"404: {r.url}"))
 
@@ -84,7 +87,11 @@ def main():
         host.wait_for_selector("main", timeout=30000)
         check("the service worker controls the page", host.evaluate("!!navigator.serviceWorker.controller"))
         created = api(host, "POST", "campaigns", json.dumps({"name": "Web campaign", "edition": "2024"}))
-        check("the API answers through the service worker", created["status"] == 201, created["status"])
+        check("the API answers through the service worker", created["status"] == 201,
+              created["status"] if created["status"] == 201 else f'{created["status"]} {created["text"][:300]}')
+        if created["status"] != 201:  # nothing after this can work: say why, and stop
+            print("     console:", *messages[-20:], sep="\n       ")
+            sys.exit(1)
 
         handout = json.loads(api(host, "POST", "handouts", json.dumps({"name": "Map"}))["text"])
         file_url = url + f"api/handouts/{handout['id']}/file"
@@ -160,18 +167,21 @@ def main():
         seen(guest, False)
 
         # A save in flight when its host hands over (longer than the second it waits for answers): sent
-        # again to the new host, made once, promptly.
-        guest.evaluate("""u => { const t = performance.now(); window.__moved = fetch(u, {method: "POST", headers: {"content-type": "application/json"},
-          body: JSON.stringify({format: "questodian", version: 3, collections: {handbook: Array.from({length: 70000},
-            (_, i) => ({title: "Moved " + i}))}})}).then(r => [r.status, Math.round(performance.now() - t)]); }""", url + "api/import?mode=copy")
-        guest.wait_for_timeout(1200)  # under way in the host's worker
+        # again to the new host, made once, promptly. The import is big enough to take several
+        # seconds even on a fast machine, and its body is made before it's sent, so the handover
+        # starts while the host's worker is still on it.
+        guest.evaluate("""u => { const body = JSON.stringify({format: "questodian", version: 3, collections: {handbook:
+          Array.from({length: MOVED}, (_, i) => ({title: "Moved " + i}))}});
+          const t = performance.now(); window.__moved = fetch(u, {method: "POST", headers: {"content-type": "application/json"}, body})
+          .then(r => [r.status, Math.round(performance.now() - t)]); }""".replace("MOVED", str(MOVED)), url + "api/import?mode=copy")
+        guest.wait_for_timeout(400)  # sent, and under way in the host's worker
         seen(host, True)
         status, ms = guest.evaluate("window.__moved")
         cut = host.evaluate("document.documentElement.dataset.cutOff")
         moved = [e for e in json.loads(api(guest, "GET", "handbook")["text"]).get("handbook", []) if e.get("title", "").startswith("Moved ")]
         check("a save cut off by a handover is sent again, made once, promptly",
-              cut == "1" and status in (200, 409) and len(moved) == 70000 and ms < 30000,
-              f"cut off {cut}, {status}, {len(moved)} of 70000, {ms} ms")
+              cut == "1" and status in (200, 409) and len(moved) == MOVED and ms < 30000,
+              f"cut off {cut}, {status}, {len(moved)} of {MOVED}, {ms} ms")
         seen(host, False)
         wait_until(lambda: hosting(guest))
 
