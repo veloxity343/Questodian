@@ -280,7 +280,7 @@ Decided while working through the milestones; each is easy to revisit.
   `BOOLEAN`, ...) and needs no per-table code. SQLite is still compiled in.
 - **rusqlite instead of sqlx (after the port, 2026-11-25).** sqlx doesn't build for
   WebAssembly, and a browser (iPad) version needs the same database code there; rusqlite
-  does (`experiments/pwa-proof`). Its calls are synchronous and quick, so `Repo` runs
+  does (a proof showed it working on an iPad). Its calls are synchronous and quick, so `Repo` runs
   them inline; `Database` keeps a few connections for reuse, writers take turns on an
   async lock before `BEGIN IMMEDIATE`, and opening (the folder lock, upgrades) runs on
   a blocking thread. Same pragmas, schema and behaviour; SQLite is still compiled in

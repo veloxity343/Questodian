@@ -72,7 +72,7 @@ A Cargo workspace plus a React app:
 - `crates/cli/`: the `questodian` command
 - `crates/web/`: the core for a browser (WebAssembly): the API answered inside a Web Worker, with
   the database in the browser's own storage (OPFS). Only one tab or window can have it open at a
-  time. `experiments/pwa-proof/` is the proof it grew from
+  time.
 - `src-tauri/`: the desktop app. It serves the UI and API to its window through its own
   `questodian://` address, with nothing listening on the network. `updates.rs` is the update check.
 - `frontend/src/`: the React UI
