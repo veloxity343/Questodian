@@ -57,9 +57,27 @@ export function zoomAround<V extends { zoom: number; x: number; y: number }>(
   return { ...view, zoom, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k };
 }
 
-/** Save text or a file the browser already has (a PNG, say) as a download. */
+/** Share files rather than download them: in the web version on a touch screen, where the Share
+ *  sheet offers Save to Files (a download goes to Safari's Downloads, easily missed). */
+export function sharesFiles(): boolean {
+  if (import.meta.env.MODE !== "web" || !matchMedia("(pointer: coarse)").matches) return false;
+  return !!navigator.canShare?.({ files: [new File(["{}"], "probe.json", { type: "application/json" })] });
+}
+
+/** Save text or a file the browser already has (a PNG, say): shared (see sharesFiles), else
+ *  downloaded. */
 export function download(filename: string, content: string | Blob, type = "application/json") {
   const blob = typeof content === "string" ? new Blob([content], { type }) : content;
+  if (sharesFiles()) {
+    const file = new File([blob], filename, { type: blob.type || type });
+    navigator.share({ files: [file] }).catch((e: Error) => e.name !== "AbortError" && saveAsDownload(filename, blob));
+    return;
+  }
+  saveAsDownload(filename, blob);
+}
+
+/** Save as a download, without offering to share. */
+export function saveAsDownload(filename: string, blob: Blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;

@@ -8,7 +8,9 @@ borrowing it and taking over, and working offline.
 It also deploys a second build over the first (rebuilding the frontend with the same base) to
 check that an open app keeps working on its version and the new one takes over afterwards.
 
-Uses Playwright's Chromium (`playwright install chromium` once, or set CHROMIUM to a browser).
+Uses Playwright's Chromium (`playwright install chromium` once, or set CHROMIUM to a browser), or
+its WebKit with BROWSER=webkit (`playwright install --with-deps webkit`; WebKit is the engine
+Safari is built on, but this isn't Safari).
 Each run starts with empty browser storage. Exits non-zero if a check fails.
 """
 
@@ -66,7 +68,12 @@ def main():
         return page.evaluate(FETCH, [method, url + "api/" + path, body])
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None)
+        engine = os.environ.get("BROWSER", "chromium")
+        print("     browser:", engine)
+        if engine == "chromium":
+            browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None)
+        else:
+            browser = getattr(p, engine).launch()
         context = browser.new_context()
         errors = []
         context.on("console", lambda m: m.type == "error" and "403" not in m.text and "favicon.ico" not in str(m.location) and errors.append(f"{m.text} ({m.location.get('url')})"))
@@ -128,8 +135,65 @@ def main():
         names = [e.get("title") for e in json.loads(api(guest, "GET", "handouts")["text"]).get("handouts", [])]
         check("a save from a window that closes straight away is kept", "Quick" in names, names)
 
+        # A host going into the background hands over to a waiting window, and queues again.
+        def hosting(page):
+            return page.evaluate("document.documentElement.dataset.host === 'yes'")
+
+        def seen(page, hidden):
+            page.evaluate("""h => { Object.defineProperty(document, "hidden", {configurable: true, get: () => h});
+              document.dispatchEvent(new Event("visibilitychange")); }""", hidden)
+
+        def wait_until(test, tries=40):
+            for _ in range(tries):
+                if test():
+                    return True
+                guest.wait_for_timeout(250)
+            return False
+
+        check("one window has the data", hosting(host) and not hosting(guest))
+        seen(host, True)
+        check("in the background, it hands over to the waiting window", wait_until(lambda: hosting(guest) and not hosting(host)))
+        check("... which answers", api(host, "GET", "campaigns")["status"] == 200)
+        seen(host, False)
+        seen(guest, True)
+        check("and back, when that one goes into the background", wait_until(lambda: hosting(host) and not hosting(guest)))
+        seen(guest, False)
+
+        # A save in flight when its host hands over (longer than the second it waits for answers): sent
+        # again to the new host, made once, promptly.
+        guest.evaluate("""u => { const t = performance.now(); window.__moved = fetch(u, {method: "POST", headers: {"content-type": "application/json"},
+          body: JSON.stringify({format: "questodian", version: 3, collections: {handbook: Array.from({length: 70000},
+            (_, i) => ({title: "Moved " + i}))}})}).then(r => [r.status, Math.round(performance.now() - t)]); }""", url + "api/import?mode=copy")
+        guest.wait_for_timeout(1200)  # under way in the host's worker
+        seen(host, True)
+        status, ms = guest.evaluate("window.__moved")
+        cut = host.evaluate("document.documentElement.dataset.cutOff")
+        moved = [e for e in json.loads(api(guest, "GET", "handbook")["text"]).get("handbook", []) if e.get("title", "").startswith("Moved ")]
+        check("a save cut off by a handover is sent again, made once, promptly",
+              cut == "1" and status in (200, 409) and len(moved) == 70000 and ms < 30000,
+              f"cut off {cut}, {status}, {len(moved)} of 70000, {ms} ms")
+        seen(host, False)
+        wait_until(lambda: hosting(guest))
+
+        host.goto(url + "data")
+        host.get_by_role("button", name="Check this browser").click()
+        host.get_by_text("Everything checked works.").or_(host.get_by_text("failed.")).first.wait_for(timeout=60000)
+        report = host.locator(".browser-check").inner_text()
+        check("the self-test passes", host.get_by_text("Everything checked works.").count() == 1, report.replace("\n", " | "))
+        left = [e.get("title") for e in json.loads(api(guest, "GET", "handouts")["text"]).get("handouts", [])]
+        check("... and leaves nothing behind", not any("self-test" in (t or "") for t in left), left)
+
+        # A save in flight when its host closes is sent again, and made once: a big import from
+        # the guest, with the host closed while it works.
+        guest.evaluate("""u => { window.__import = fetch(u, {method: "POST", headers: {"content-type": "application/json"},
+          body: JSON.stringify({format: "questodian", version: 3, collections: {handbook: Array.from({length: 3000},
+            (_, i) => ({title: "Bulk " + i, body: "x".repeat(200)}))}})}).then(r => r.status); }""", url + "api/import?mode=copy")
+        guest.wait_for_timeout(150)
         host.close()
-        guest.wait_for_timeout(2500)
+        status = guest.evaluate("window.__import")
+        bulk = [e for e in json.loads(api(guest, "GET", "handbook")["text"]).get("handbook", []) if e.get("title", "").startswith("Bulk ")]
+        check("a save cut off by its host closing is made once", status in (200, 409) and len(bulk) == 3000, f"{status}, {len(bulk)} of 3000")
+        guest.wait_for_timeout(1000)
         after = api(guest, "GET", "campaigns")
         count = len(json.loads(after["text"]).get("campaigns", [])) if after["status"] == 200 else after["text"][:100]
         check("when the host window closes, another takes over", count == 1, count)

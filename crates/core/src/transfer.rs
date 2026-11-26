@@ -341,7 +341,7 @@ fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
     let extension = Path::new(text(doc, "filename"))
         .extension()
         .map(|e| e.to_string_lossy().into_owned())
-        .filter(|e| !e.is_empty())
+        .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))
         .map_or_else(|| ".png".to_string(), |e| format!(".{e}"));
     let name = format!("{}-{}{extension}", text(doc, "id"), &new_id()[..6]);
     files::write(&dir.join(&name), bytes)?;

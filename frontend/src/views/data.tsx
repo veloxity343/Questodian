@@ -5,7 +5,9 @@ import { LoadError, Loading, Select, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { useToast } from "../context/ui";
 import { useLoad } from "../lib/hooks";
-import { downloadJson, pickFiles, slug, today } from "../lib/util";
+import { pickFiles, slug, today } from "../lib/util";
+import { daysSince, saveFile, useLastBackup } from "../web/backup";
+import { checkThisBrowser, reportText, type Check } from "../web/selftest";
 import type { Kind } from "../types";
 
 const KINDS: Kind[] = ["campaigns", "sessions", "characters", "handbook"];
@@ -21,6 +23,9 @@ export function DataPage() {
   const [exportId, setExportId] = useState(campaignId);
   const [mode, setMode] = useState("overwrite");
   const [report, setReport] = useState<string[]>([]);
+  const [lastBackup, setLastBackup] = useLastBackup();
+  /** A file waiting for a tap to open the Share sheet (see saveFile). */
+  const [ready, setReady] = useState<{ name: string; text: string; full: boolean } | null>(null);
   const { data: counts, error, reload } = useLoad(() => Promise.all(KINDS.map(async (k) => [k, (await api.list(k)).length] as const)), []);
   if (error) return <LoadError error={error} />;
   if (!counts) return <Loading />;
@@ -49,11 +54,19 @@ export function DataPage() {
     await refreshCampaigns();
     reload();
   };
+  const save = async (file: { name: string; text: string; full: boolean }) => {
+    const result = await saveFile(file.name, file.text);
+    setReady(result === "tap-again" ? file : null);
+    if (result === "saved" && file.full) setLastBackup(new Date().toISOString());
+  };
+  const fullBackup = async () =>
+    save({ name: `questodian-backup-${today()}.questodian.json`, text: JSON.stringify(await api.exportAll(), null, 2), full: true });
   const exportCampaign = async () => {
     const id = exportId || campaigns[0].id;
     const name = campaigns.find((c) => c.id === id)?.name || "campaign";
-    downloadJson(`${slug(name)}.questodian.json`, await api.exportAll(id));
+    await save({ name: `${slug(name)}.questodian.json`, text: JSON.stringify(await api.exportAll(id), null, 2), full: false });
   };
+  const sinceBackup = daysSince(lastBackup);
 
   return (
     <>
@@ -64,9 +77,15 @@ export function DataPage() {
           <h2>Export</h2>
           <p>Everything is plain JSON you can back up, version, or hand to another DM.</p>
           <div className="stack">
-            <button type="button" className="btn primary" onClick={async () => downloadJson(`questodian-backup-${today()}.questodian.json`, await api.exportAll())}>
+            <button type="button" className="btn primary" onClick={fullBackup}>
               ⬇ Full backup (all data)
             </button>
+            {ready && (
+              <div className="row gap">
+                <span className="small">Ready to save:</span>
+                <button type="button" className="btn primary" onClick={() => void save(ready)}>Save {ready.name}</button>
+              </div>
+            )}
             {campaigns.length > 0 && (
               <div className="row gap">
                 <Select aria-label="Campaign to export" value={exportId || campaigns[0].id} options={campaigns.map((c): Option => [c.id, c.name])} onChange={setExportId} />
@@ -80,7 +99,8 @@ export function DataPage() {
           {import.meta.env.MODE === "web" ? (
             <p className="muted small">
               Stored in this browser, on this device only. Removing the app from the Home Screen or clearing this site's data
-              can delete it, so download a full backup now and then.
+              can delete it, so save a full backup now and then (to Files or iCloud Drive, say). Last full backup from this
+              browser: {sinceBackup === null ? "none yet" : sinceBackup === 0 ? "today" : sinceBackup === 1 ? "yesterday" : `${sinceBackup} days ago`}.
             </p>
           ) : (
             <p className="muted small">Database: <code>{meta?.database || "?"}</code></p>
@@ -106,6 +126,7 @@ export function DataPage() {
           )}
         </section>
         ) },
+        ...(import.meta.env.MODE === "web" ? [{ id: "browser", title: "This browser", node: <BrowserCheck /> }] : []),
         { id: "about", title: "About the rules content", width: "full", node: (
         <section className="panel">
           <h2>About the rules content</h2>
@@ -116,5 +137,47 @@ export function DataPage() {
         ) },
       ]} />
     </>
+  );
+}
+
+/** The web version's self-test (web/selftest.ts), with a report to copy and send. */
+function BrowserCheck() {
+  const toast = useToast();
+  const [checks, setChecks] = useState<Check[] | null>(null);
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    setRunning(true);
+    try {
+      setChecks(await checkThisBrowser());
+    } finally {
+      setRunning(false);
+    }
+  };
+  const copy = async () => {
+    const ok = await navigator.clipboard?.writeText(reportText(checks || [])).then(() => true, () => false);
+    toast(ok ? "Report copied" : "Couldn't copy: select the report and copy it");
+  };
+  const failed = checks?.filter((c) => c.ok === false).length ?? 0;
+  return (
+    <section className="panel">
+      <h2>This browser</h2>
+      <p className="small">Checks what the web version needs, here. It adds a test handout and deletes it again; nothing else changes.</p>
+      <div className="row gap">
+        <button type="button" className="btn" onClick={run} disabled={running}>{running ? "Checking…" : "Check this browser"}</button>
+        {checks && <button type="button" className="btn ghost" onClick={copy}>Copy report</button>}
+      </div>
+      {checks && (
+        <>
+          <p className={failed ? "bad small" : "small"}>{failed ? `${failed} check${failed === 1 ? "" : "s"} failed.` : "Everything checked works."}</p>
+          <ul className="browser-check small">
+            {checks.map((c) => (
+              <li key={c.name} className={c.ok === false ? "bad" : ""}>
+                <span aria-hidden="true">{c.ok === null ? "ℹ" : c.ok ? "✔" : "✘"}</span> {c.name}{c.detail && <span className="muted">: {c.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }

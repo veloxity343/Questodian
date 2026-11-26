@@ -18,6 +18,7 @@ opens. Keep writing the version there.
 | `0002` | The DM screen's tables (scenes, NPCs, notes, handouts, trackers, monsters, encounters) and each campaign's rules edition; sessions' encounters moved into `encounters`. Part of this upgrade is in `db.rs` rather than SQL |
 | `0003` | Characters' builder choices (`characters.build`) and the user's rules-data edits (`rule_overrides`) |
 | `0004` | Drawn maps on handouts (`handouts.map`) |
+| `0005` | The web version's record of saves already made (`saved_requests`), so a save sent twice happens once. Unused by the desktop app |
 
 When the app opens a database:
 - **Older than it knows:** it saves a backup (`questodian.db.backup-<old version>-<time>`, made with

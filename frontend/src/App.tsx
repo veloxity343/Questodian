@@ -13,6 +13,7 @@ import { DataPage } from "./views/data";
 import { HandbookEditor, HandbookList } from "./views/handbook";
 import { Reference } from "./views/reference";
 import { Tools } from "./views/tools";
+import { backupDue, BACKUP_EVERY_DAYS, useLastBackup } from "./web/backup";
 
 const MODES = [
   { to: "/", label: "DM Screen", end: true },
@@ -58,13 +59,21 @@ function TopBar() {
   const [nav, setNav] = usePref("dm.nav", true);
   const { pathname } = useLocation();
   const onDm = pathname === "/";
+  const { campaigns } = useApp();
+  const [lastBackup] = useLastBackup();
+  const remind = backupDue(lastBackup, campaigns.length > 0);
   return (
     <header className="topbar">
       <button type="button" className="icon-btn menu-btn" aria-label="Show or hide the navigator" disabled={!onDm}
         title={onDm ? "Show or hide the navigator (scenes, NPCs, notes…)" : "The navigator is on the DM screen"} onClick={() => setNav(!nav)}>☰</button>
       <NavLink className="brand" to="/campaigns" title="All campaigns"><span aria-hidden="true">✦</span> Questodian</NavLink>
       <nav className="modes" aria-label="Main">
-        {MODES.map((m) => <NavLink key={m.to} to={m.to} end={m.end} className={({ isActive }) => (isActive ? "on" : "")}>{m.label}</NavLink>)}
+        {MODES.map((m) => (
+          <NavLink key={m.to} to={m.to} end={m.end} className={({ isActive }) => (isActive ? "on" : "")}
+            title={m.to === "/data" && remind ? `No full backup from this browser in ${BACKUP_EVERY_DAYS} days` : undefined}>
+            {m.label}{m.to === "/data" && remind && <span className="nav-dot" aria-label="(backup due)" />}
+          </NavLink>
+        ))}
       </nav>
       <span className="grow" />
       {onDm && (

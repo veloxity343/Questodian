@@ -1,7 +1,8 @@
 # Questodian documentation
 
 Questodian is a campaign manager and DM screen for 5e, for the 2014 rules (SRD 5.1) and the 2024
-rules (SRD 5.2.1). It runs on your own computer, offline, as a desktop app or in a browser.
+rules (SRD 5.2.1). It runs on your own computer, offline, as a desktop app or in a browser, and on
+an iPad as a web app.
 
 ![The DM screen with an encounter running](images/dm-screen.webp)
 
@@ -18,6 +19,7 @@ The screenshots in these pages show an invented demo campaign, *The Drowned Abbe
 | [Dice](guide/dice.md) | The quick roll, the Tools page roller, clicking to roll, dice syntax |
 | [Library, Handbook, Tools and Settings](guide/other-pages.md) | The SRD library, your own documents, calculators, arranging any page, the theme |
 | [Data and backups](guide/data-and-backups.md) | Exports and imports, automatic backups, moving to another computer |
+| [The web version](guide/web-version.md) | Questodian in a browser, on an iPad: the Home Screen, backups, moving data, players' view |
 | [Updates](guide/updates.md) | How the desktop app finds and installs new versions |
 | [Command line](guide/command-line.md) | The `questodian` command: serve, roll, calc, srd, export, import |
 | [Troubleshooting and known issues](guide/troubleshooting.md) | First-launch warnings, common problems, mistakes in the bundled data |

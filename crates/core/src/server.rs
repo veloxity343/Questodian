@@ -527,14 +527,25 @@ async fn upload_handout(
     let old = doc["filename"].as_str().unwrap_or("").to_string();
     let name = format!("{id}-{}{extension}", &crate::repo::new_id()[..6]);
     files::write(&dir.join(&name), &body)?;
-    let saved = repo.update(Kind::Handouts, &id, json!({"filename": name, "mime": mime})).await?;
-    repo.commit().await?;
+    let saved = match save_upload(repo, &id, &name, &mime).await {
+        Ok(saved) => saved,
+        Err(e) => {
+            files::remove(&dir.join(&name)); // nothing points to it
+            return Err(e);
+        }
+    };
     if old != name
         && let Some(path) = handout_path(&dir, &old)
     {
         files::remove(&path);
     }
     Ok(Json(saved))
+}
+
+async fn save_upload(mut repo: crate::repo::Repo<'_>, id: &str, name: &str, mime: &str) -> Result<Value> {
+    let saved = repo.update(Kind::Handouts, id, json!({"filename": name, "mime": mime})).await?;
+    repo.commit().await?;
+    Ok(saved)
 }
 
 async fn handout_file(State(app): State<Shared>, UrlPath((id,)): UrlPath<(String,)>) -> Result<Response> {

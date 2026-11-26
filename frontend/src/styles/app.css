@@ -433,6 +433,8 @@ textarea.rules-json.invalid { border-color: var(--bad); }
 }
 .settings-btn { position: relative; text-decoration: none; font-size: 1.1rem; color: var(--text); }
 .settings-btn.active { color: var(--accent); }
+.browser-check { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.modes .nav-dot { display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .settings-btn .dot { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .page-search { margin-bottom: 16px; }
 

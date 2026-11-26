@@ -1,13 +1,14 @@
 // Workspace documents: sessions, the campaign overview, and handouts.
 
 import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, NumInput, Select, TextInput, type Option } from "../components/ui";
 import { useApp } from "../context/app";
 import { useDice } from "../context/dice";
 import { useDialogs, useToast } from "../context/ui";
 import { useDebounced, useDraft, usePanZoom } from "../lib/hooks";
-import { openPlayersWindow, togglePlayersFullscreen } from "../lib/desktop";
+import { isAppPath, openPlayersWindow, playersInThisWindow, togglePlayersFullscreen } from "../lib/desktop";
 import { blankMap, isMap, mapOf, type MapData } from "../lib/map";
 import { fmtDate, titleCase } from "../lib/util";
 import type { Campaign, Edition, Handout, Session, SessionStatus } from "../types";
@@ -300,6 +301,12 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<ViewState>({ id: initial.id, zoom: 1, x: 0, y: 0 });
   const [casting, setCasting] = useState(false);
+  const navigate = useNavigate();
+  const here = useLocation();
+  const showPlayers = () => {
+    if (playersInThisWindow()) navigate(`/project?back=${encodeURIComponent(here.pathname + here.search)}`);
+    else openPlayersWindow();
+  };
   const party = useParty();
   const onDelete = useDeleteRecord("handouts", initial.id, initial.title, discard);
   const channel = useRef<BroadcastChannel | null>(null);
@@ -355,7 +362,7 @@ export function HandoutDoc({ initial }: { initial: Handout }) {
         extra={doc.filename || drawn ? (
           <>
             <button type="button" className={`btn small ${casting ? "primary" : ""}`}
-              onClick={() => { setCasting(true); void api.project(view).then(() => openPlayersWindow()); }}>
+              onClick={() => { setCasting(true); void api.project(view).then(showPlayers); }}>
               📽 {casting ? "Showing to players" : "Show to players"}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setView((v) => ({ ...v, zoom: 1, x: 0, y: 0 }))}>Reset view</button>
@@ -412,6 +419,10 @@ function PanZoom({ src, alt, view, onView, interactive = true }: {
 
 /** The players' window: shows whichever handout the DM is casting, mirroring zoom and pan. */
 export function ProjectionView({ id = "" }: { id?: string }) {
+  const navigate = useNavigate();
+  // Shown in the DM's own window (playersInThisWindow): the way back. Only a page of the app.
+  const back = useSearchParams()[0].get("back") || "";
+  const canGoBack = isAppPath(back);
   const [view, setView] = useState<ViewState>({ id, zoom: 1, x: 0, y: 0 });
   const [handout, setHandout] = useState<Handout | null>(null);
   const seq = useRef(-1);
@@ -446,6 +457,7 @@ export function ProjectionView({ id = "" }: { id?: string }) {
   }, [view.id, showingMap]);
   return (
     <div className="projection">
+      {canGoBack && <button type="button" className="players-back-btn" onClick={() => navigate(back)}>← DM screen</button>}
       <button type="button" className="fullscreen-btn" onClick={() => void togglePlayersFullscreen()} title="Full screen (for a projector or TV)">Full screen</button>
       {handout && isMap(handout.map) ? <PlayersMap handoutId={handout.id} map={mapOf(handout.map)} view={view} />
         : handout?.filename ? <PanZoom src={api.handoutUrl(handout)} alt={handout.title} view={view} interactive={false} />
