@@ -24,7 +24,11 @@ function UpdatesPanel() {
     return (
       <section className="panel">
         <h2>Updates</h2>
-        <p className="muted">The desktop app checks for updates. In a browser, get new versions from the Releases page on GitHub.</p>
+        <p className="muted">
+          {import.meta.env.MODE === "web"
+            ? "This web version updates itself: while you're online, a new version downloads in the background, and it's used once every Questodian window has been closed."
+            : "The desktop app checks for updates. In a browser, get new versions from the Releases page on GitHub."}
+        </p>
       </section>
     );
   }

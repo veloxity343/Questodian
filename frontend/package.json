@@ -9,6 +9,7 @@
     "dev:api": "cargo run -p questodian-cli -- serve --no-browser",
     "dev:all": "concurrently --kill-others --names api,web --prefix-colors blue,magenta \"npm:dev:api\" \"npm:dev\"",
     "build": "tsc -b && vite build",
+    "build:web": "tsc -b && vite build --mode web",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "preview": "vite preview"

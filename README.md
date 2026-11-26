@@ -10,7 +10,7 @@ roller. Fully offline: one local database file, no account, nothing to connect.
 - **Rules:** each campaign uses either the 2014 rules (SRD 5.1) or the 2024 rules (SRD 5.2.1)
 - **Desktop app:** Windows, macOS and Linux, built with [Tauri 2](https://v2.tauri.app/), and it
   updates itself; it can also run as a local web server for any browser
-- **Backend:** Rust: [axum](https://github.com/tokio-rs/axum) for the API, [sqlx](https://github.com/launchbadge/sqlx) on SQLite
+- **Backend:** Rust: [axum](https://github.com/tokio-rs/axum) for the API, [rusqlite](https://github.com/rusqlite/rusqlite) on SQLite
 - **Frontend:** [React](https://react.dev/) + TypeScript, built with [Vite](https://vite.dev/)
 
 ## Install

@@ -12,6 +12,7 @@ use serde_json::{Map, Value, json};
 
 use crate::builder;
 use crate::error::{Error, Result, invalid};
+use crate::files;
 use crate::kinds::{Kind, LINKS};
 use crate::repo::{Repo, new_id, now, valid_id};
 use crate::rules::{self, ABILITIES, ABILITY_NAMES};
@@ -104,7 +105,7 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
         for handout in handouts {
             let filename = text(handout, "filename").to_string();
             if let Some(path) = handout_file(&repo.files_dir, &filename)
-                && let Ok(bytes) = std::fs::read(path)
+                && let Some(bytes) = files::read(&path)
             {
                 handout["file_b64"] = Value::String(BASE64.encode(bytes));
             }
@@ -328,7 +329,7 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
     if let Err(e) = result {
         // The records roll back with the transaction; take the image files with them.
         for file in written_files {
-            let _ = std::fs::remove_file(file);
+            files::remove(&file);
         }
         return Err(e);
     }
@@ -336,7 +337,6 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
 }
 
 fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
-    std::fs::create_dir_all(dir)?;
     // The old file's extension, like Python's `Path.suffix` (".png" alone has none).
     let extension = Path::new(text(doc, "filename"))
         .extension()
@@ -344,7 +344,7 @@ fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
         .filter(|e| !e.is_empty())
         .map_or_else(|| ".png".to_string(), |e| format!(".{e}"));
     let name = format!("{}-{}{extension}", text(doc, "id"), &new_id()[..6]);
-    std::fs::write(dir.join(&name), bytes)?;
+    files::write(&dir.join(&name), bytes)?;
     Ok(name)
 }
 

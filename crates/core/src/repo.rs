@@ -8,13 +8,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use rusqlite::types::{ToSqlOutput, ValueRef};
+use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, Sqlite, Transaction, TypeInfo, ValueRef};
 
 use crate::builder::Override;
+use crate::db::Pool;
 use crate::error::{Error, Result, invalid, not_found};
 use crate::kinds::{Column, ColumnKind, FILTERS, Kind, LINKS};
 
@@ -40,7 +41,11 @@ pub fn title_of(doc: &Value) -> String {
 }
 
 pub struct Repo<'a> {
-    tx: Transaction<'static, Sqlite>,
+    /// A connection from the pool, inside this unit of work's transaction.
+    conn: Option<Connection>,
+    pool: &'a Pool,
+    /// The writers' turn, for a unit of work that writes; given up after the connection.
+    _turn: Option<tokio::sync::MutexGuard<'a, ()>>,
     columns: &'a HashMap<Kind, Vec<Column>>,
     /// Where handout images live.
     pub files_dir: PathBuf,
@@ -49,19 +54,31 @@ pub struct Repo<'a> {
 }
 
 impl<'a> Repo<'a> {
-    pub(crate) fn new(
-        tx: Transaction<'static, Sqlite>,
+    /// Start a unit of work with `begin` (`BEGIN`, or `BEGIN IMMEDIATE` to write).
+    pub(crate) fn begin(
+        pool: &'a Pool,
+        begin: &str,
+        turn: Option<tokio::sync::MutexGuard<'a, ()>>,
         columns: &'a HashMap<Kind, Vec<Column>>,
         files_dir: PathBuf,
-    ) -> Self {
-        Repo { tx, columns, files_dir, remove_on_commit: Vec::new() }
+    ) -> Result<Self> {
+        let conn = pool.get()?;
+        if let Err(e) = conn.execute_batch(begin) {
+            pool.put(conn);
+            return Err(e.into());
+        }
+        Ok(Repo { conn: Some(conn), pool, _turn: turn, columns, files_dir, remove_on_commit: Vec::new() })
+    }
+
+    fn conn(&self) -> &Connection {
+        self.conn.as_ref().expect("a unit of work has its connection until it's dropped")
     }
 
     /// Save everything done in this unit of work, then remove the files it no longer uses.
-    pub async fn commit(self) -> Result<()> {
-        self.tx.commit().await?;
-        for path in self.remove_on_commit {
-            let _ = std::fs::remove_file(path); // already gone is fine
+    pub async fn commit(mut self) -> Result<()> {
+        self.conn().execute_batch("COMMIT")?;
+        for path in std::mem::take(&mut self.remove_on_commit) {
+            crate::files::remove(&path);
         }
         Ok(())
     }
@@ -93,14 +110,11 @@ impl<'a> Repo<'a> {
         }
         let filter = if conditions.is_empty() { String::new() } else { format!(" WHERE {}", conditions.join(" AND ")) };
         let sql = format!("SELECT * FROM {}{filter} ORDER BY {}", kind.table(), kind.order_by());
-        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
-        for value in values {
-            query = query.bind(value);
-        }
-        let rows = query.fetch_all(&mut *self.tx).await?;
+        let mut statement = self.conn().prepare_cached(&sql)?;
+        let mut rows = statement.query(params_from_iter(values))?;
         // One unreadable record (e.g. edited by hand) shouldn't hide all the others.
-        let mut docs = Vec::with_capacity(rows.len());
-        for row in &rows {
+        let mut docs = Vec::new();
+        while let Some(row) = rows.next()? {
             match to_doc(kind, columns, row) {
                 Ok(doc) => docs.push(doc),
                 Err(e) => eprintln!("questodian: skipping a {} that can't be read: {e}", kind.singular()),
@@ -117,9 +131,11 @@ impl<'a> Repo<'a> {
         if !valid_id(id) {
             return Ok(None);
         }
+        let columns = self.columns(kind);
         let sql = format!("SELECT * FROM {} WHERE id = ?", kind.table());
-        let row = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).fetch_optional(&mut *self.tx).await?;
-        row.map(|row| to_doc(kind, self.columns(kind), &row)).transpose()
+        let mut statement = self.conn().prepare_cached(&sql)?;
+        let mut rows = statement.query([id])?;
+        rows.next()?.map(|row| to_doc(kind, columns, row)).transpose()
     }
 
     pub async fn exists(&mut self, kind: Kind, id: &str) -> Result<bool> {
@@ -127,7 +143,8 @@ impl<'a> Repo<'a> {
             return Ok(false);
         }
         let sql = format!("SELECT 1 FROM {} WHERE id = ?", kind.table());
-        Ok(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).fetch_optional(&mut *self.tx).await?.is_some())
+        let found = self.conn().prepare_cached(&sql)?.query_row([id], |_| Ok(())).optional()?;
+        Ok(found.is_some())
     }
 
     /// A record as its schema type, for game logic.
@@ -179,21 +196,20 @@ impl<'a> Repo<'a> {
             vec!["?"; names.len()].join(", "),
             updates.join(", ")
         );
-        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
-        for column in columns {
+        let values = columns.iter().map(|column| {
             let value = doc.get(&column.name).cloned().unwrap_or(Value::Null);
-            query = match (column.kind, value) {
-                (ColumnKind::Link, Value::String(s)) if s.is_empty() => query.bind(None::<String>),
-                (ColumnKind::Json, value) => query.bind(value.to_string()),
-                (_, Value::Bool(b)) => query.bind(b),
-                (_, Value::Number(n)) if n.is_i64() => query.bind(n.as_i64()),
-                (_, Value::Number(n)) => query.bind(n.as_f64()),
-                (_, Value::String(s)) => query.bind(s),
-                (_, Value::Null) => query.bind(None::<String>),
-                (_, other) => query.bind(other.to_string()),
-            };
-        }
-        query.execute(&mut *self.tx).await?;
+            match (column.kind, value) {
+                (ColumnKind::Link, Value::String(s)) if s.is_empty() => ToSqlOutput::from(rusqlite::types::Null),
+                (ColumnKind::Json, value) => ToSqlOutput::from(value.to_string()),
+                (_, Value::Bool(b)) => ToSqlOutput::from(b),
+                (_, Value::Number(n)) if n.is_i64() => ToSqlOutput::from(n.as_i64().unwrap_or_default()),
+                (_, Value::Number(n)) => ToSqlOutput::from(n.as_f64().unwrap_or_default()),
+                (_, Value::String(s)) => ToSqlOutput::from(s),
+                (_, Value::Null) => ToSqlOutput::from(rusqlite::types::Null),
+                (_, other) => ToSqlOutput::from(other.to_string()),
+            }
+        });
+        self.conn().prepare_cached(&sql)?.execute(params_from_iter(values))?;
         self.get(kind, &id).await
     }
 
@@ -235,7 +251,7 @@ impl<'a> Repo<'a> {
             return Err(not_found(format!("{} {id} not found", kind.singular())));
         }
         let sql = format!("DELETE FROM {} WHERE id = ?", kind.table());
-        sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).execute(&mut *self.tx).await?;
+        self.conn().prepare_cached(&sql)?.execute([id])?;
         Ok(())
     }
 }
@@ -245,19 +261,19 @@ impl Repo<'_> {
 
     /// Every edit to the character builder's rules data.
     pub async fn rule_overrides(&mut self) -> Result<Vec<Override>> {
-        let rows: Vec<(String, String, Option<String>, String)> =
-            sqlx::query_as(r#"SELECT kind, "key", data, updated FROM rule_overrides ORDER BY kind, "key""#)
-                .fetch_all(&mut *self.tx)
-                .await?;
-        Ok(rows
-            .into_iter()
-            .map(|(kind, key, data, updated)| Override {
-                kind,
-                key,
+        let mut statement = self
+            .conn()
+            .prepare_cached(r#"SELECT kind, "key", data, updated FROM rule_overrides ORDER BY kind, "key""#)?;
+        let rows = statement.query_map([], |row| {
+            let data: Option<String> = row.get(2)?;
+            Ok(Override {
+                kind: row.get(0)?,
+                key: row.get(1)?,
                 data: data.map(parse_stored_json).filter(|v| !v.is_null()),
-                updated,
+                updated: row.get(3)?,
             })
-            .collect())
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Store an edit (`data: None` hides a bundled entry), replacing any earlier one. `updated`
@@ -269,32 +285,35 @@ impl Repo<'_> {
         data: Option<&Value>,
         updated: Option<&str>,
     ) -> Result<()> {
-        sqlx::query(
+        self.conn().execute(
             r#"INSERT INTO rule_overrides (kind, "key", data, updated) VALUES (?, ?, ?, ?)
                ON CONFLICT (kind, "key") DO UPDATE SET data = excluded.data, updated = excluded.updated"#,
-        )
-        .bind(kind)
-        .bind(key)
-        .bind(data.map(Value::to_string))
-        .bind(updated.map_or_else(now, str::to_string))
-        .execute(&mut *self.tx)
-        .await?;
+            params![kind, key, data.map(Value::to_string), updated.map_or_else(now, str::to_string)],
+        )?;
         Ok(())
     }
 
     /// Drop an edit, bringing back the bundled entry. False if there was none.
     pub async fn delete_rule_override(&mut self, kind: &str, key: &str) -> Result<bool> {
-        let done = sqlx::query(r#"DELETE FROM rule_overrides WHERE kind = ? AND "key" = ?"#)
-            .bind(kind)
-            .bind(key)
-            .execute(&mut *self.tx)
-            .await?;
-        Ok(done.rows_affected() > 0)
+        let done = self.conn().execute(r#"DELETE FROM rule_overrides WHERE kind = ? AND "key" = ?"#, [kind, key])?;
+        Ok(done > 0)
+    }
+}
+
+impl Drop for Repo<'_> {
+    /// Roll back anything not committed, and give the connection back to the pool.
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            if !conn.is_autocommit() {
+                let _ = conn.execute_batch("ROLLBACK");
+            }
+            self.pool.put(conn);
+        }
     }
 }
 
 /// A row as a normalized record.
-fn to_doc(kind: Kind, columns: &[Column], row: &SqliteRow) -> Result<Value> {
+fn to_doc(kind: Kind, columns: &[Column], row: &Row) -> Result<Value> {
     let mut doc = Map::new();
     for column in columns {
         doc.insert(column.name.clone(), read_cell(row, column)?);
@@ -305,21 +324,15 @@ fn to_doc(kind: Kind, columns: &[Column], row: &SqliteRow) -> Result<Value> {
 
 /// One cell, by what it actually holds (SQLite columns can hold any type) and what the
 /// column is for.
-fn read_cell(row: &SqliteRow, column: &Column) -> Result<Value> {
-    let name = column.name.as_str();
-    let raw = row.try_get_raw(name)?;
-    if raw.is_null() {
-        return Ok(Value::Null);
-    }
-    let storage = raw.type_info().name().to_string();
-    let value = match storage.as_str() {
-        "INTEGER" => {
-            let n: i64 = row.try_get(name)?;
-            if column.kind == ColumnKind::Boolean { Value::Bool(n != 0) } else { Value::from(n) }
-        }
-        "REAL" => Value::from(row.try_get::<f64, _>(name)?),
-        _ => {
-            let text: String = row.try_get(name)?;
+fn read_cell(row: &Row, column: &Column) -> Result<Value> {
+    let value = match row.get_ref(column.name.as_str())? {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(n) if column.kind == ColumnKind::Boolean => Value::Bool(n != 0),
+        ValueRef::Integer(n) => Value::from(n),
+        ValueRef::Real(f) => Value::from(f),
+        ValueRef::Text(bytes) | ValueRef::Blob(bytes) => {
+            let text = String::from_utf8(bytes.to_vec())
+                .map_err(|_| Error::Internal(format!("{} isn't text", column.name)))?;
             match column.kind {
                 ColumnKind::Json => parse_stored_json(text),
                 _ => Value::String(text),

@@ -5,6 +5,7 @@ src-tauri/gen/
 # Frontend
 node_modules/
 frontend/dist/
+frontend/dist-web/
 frontend/*.tsbuildinfo
 
 # Local databases

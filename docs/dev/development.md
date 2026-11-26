@@ -14,6 +14,24 @@ make install
 
 That installs the frontend and Tauri CLI packages; Rust crates download on the first build.
 
+The web build (the core in WebAssembly, for the browser version) and `make check`, which lints
+it, also need the wasm32 target, `wasm-bindgen` at the version in `Cargo.lock`, and clang, which
+compiles SQLite's C code:
+
+```bash
+rustup target add wasm32-unknown-unknown
+```
+
+```bash
+cargo install wasm-bindgen-cli --version 0.2.130
+```
+
+```bash
+sudo apt install clang llvm
+```
+
+(On macOS, Xcode's clang works.)
+
 ## Everyday tasks
 
 Run `make` to list them all. The main ones:
@@ -25,6 +43,8 @@ Run `make` to list them all. The main ones:
 | `make run` | Build the UI and serve the app in your browser |
 | `make app` | The desktop app (debug build) |
 | `make desktop` | The desktop app and its installers for this OS, into `target/release/bundle/` |
+| `make wasm` | The core built for a browser, into `target/web-pkg/` |
+| `make pwa` | The web version (installable, works offline) into `frontend/dist-web/`. `QUESTODIAN_BASE=/Questodian/` builds it for GitHub Pages |
 
 `make api` and `make web` run the two dev servers on their own.
 
@@ -35,9 +55,12 @@ first. Setting `QUESTODIAN_LOG=1` makes the desktop app log every request.
 
 A Cargo workspace plus a React app:
 
-- `crates/core/`: everything but the windows, shared by the desktop app and the command line
+- `crates/core/`: everything but the windows, shared by the desktop app, the command line and the
+  web build
   - `server.rs`: the HTTP API (axum) and serving the built UI
-  - `db.rs`, `migrations/`: opening the database, backups and schema upgrades
+  - `db.rs`, `migrations/`: opening the database, backups and schema upgrades. The same code
+    runs in a browser, with one connection and no write-ahead log there (see the top of `db.rs`)
+  - `files.rs`: handout images: the `handouts/` folder, or in a browser, `handouts.db`
   - `repo.rs`, `kinds.rs`: reading and writing records, the same way for every kind
   - `schemas.rs`: every record and request body, with defaults and lenient input
   - `game.rs`: initiative tracker, rewards and rests
@@ -47,6 +70,9 @@ A Cargo workspace plus a React app:
   - `srd.rs`: the bundled SRD, loading and search
   - `transfer.rs`: import and export (JSON bundles, Markdown)
 - `crates/cli/`: the `questodian` command
+- `crates/web/`: the core for a browser (WebAssembly): the API answered inside a Web Worker, with
+  the database in the browser's own storage (OPFS). Only one tab or window can have it open at a
+  time.
 - `src-tauri/`: the desktop app. It serves the UI and API to its window through its own
   `questodian://` address, with nothing listening on the network. `updates.rs` is the update check.
 - `frontend/src/`: the React UI
@@ -62,6 +88,16 @@ A Cargo workspace plus a React app:
     - `hooks.ts`: shared hooks (saved preferences, drafts that save themselves, drag to reorder,
       pan and zoom);
     - `desktop.ts`: the desktop app's own addresses.
+  - `web/`: the web version's start-up (only in `make pwa` builds). The first window to open
+    becomes the host: its worker (`db-worker.ts`) runs the core from `crates/web`. The service
+    worker (`sw.js`) passes every window's `/api/...` requests to the host, so images, the
+    players' window and other tabs all work, and keeps the app's files for offline use. When the
+    host window closes, the next window takes over (a Web Lock queues them). A new build
+    installs in the background and takes over once every window of the old one has closed, so
+    two versions never share the database; API writes that arrive as page navigations (a form
+    on another site) are refused. Icons and the
+    manifest are in `frontend/web-public/`; `vite.config.ts` writes `sw.js` with the list of
+    files to keep.
 - `data/`: the bundled SRD and the builder's rules data: see [Bundled data](data.md)
 - `scripts/`: the scripts that build `data/`
 
@@ -78,6 +114,11 @@ characters and handbook entries.
   [Database and migrations](database.md));
 - the frontend's Vitest tests (`*.test.ts` next to the code they test).
 
+The web version has two tests in a real browser, not part of `make check`:
+- the core alone: after `make wasm`, `uv run --with playwright python crates/web/smoke/smoke.py`;
+- the whole app (the service worker, a second window taking over, offline): after
+  `make pwa QUESTODIAN_BASE=/Questodian/`, `uv run --with playwright python crates/web/smoke/pwa.py`.
+
 UI changes should also be tried in a real browser, and in the desktop window for anything that
 drags, scrolls or uses the system: some webviews behave differently from Chromium. Pointer events
 work everywhere, HTML drag and drop doesn't, so reordering uses `useDragReorder` (`lib/hooks.ts`).
@@ -86,6 +127,8 @@ work everywhere, HTML drag and drop doesn't, so reordering uses `useDragReorder`
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
 - the Rust format check, lint and tests;
+- the web build, and its lint ("Web build": not required for merging into `main`, but releases
+  need it, since the Release workflow runs all of these checks first);
 - the frontend typecheck and tests;
 - a release build of the `questodian` command, which is started to check the UI, SRD search and
   saving work. The binary is attached to each run.

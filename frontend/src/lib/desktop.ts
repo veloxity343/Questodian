@@ -5,7 +5,7 @@
 export const isDesktop = () => location.protocol === "questodian:" || location.hostname === "questodian.localhost";
 
 /** Open the players' window at `path`, or point the open one there: a second window to drag onto a projector or TV. */
-export function openPlayersWindow(path = "/project") {
+export function openPlayersWindow(path = `${import.meta.env.BASE_URL}project`) {
   if (isDesktop()) void fetch("/desktop/players", { method: "POST", body: path });
   else window.open(path, "questodian-players", "popup,width=1280,height=800");
 }
@@ -22,6 +22,7 @@ export async function togglePlayersFullscreen() {
 
 /** A request to the desktop app's update check (`/desktop/updates...`); null in a browser or on failure. */
 export async function desktopUpdates<T>(method: string, path = "", body?: unknown): Promise<T | null> {
+  if (!isDesktop()) return null;
   try {
     const res = await fetch(`/desktop/updates${path}`, {
       method,

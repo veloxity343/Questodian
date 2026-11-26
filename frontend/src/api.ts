@@ -6,6 +6,9 @@ import type {
 } from "./types";
 import type { Rules } from "./lib/builder";
 
+/** Where the app is served from: `/`, or for the web version on GitHub Pages, `/Questodian/`. */
+const API = `${import.meta.env.BASE_URL}api/`;
+
 type Params = Record<string, string | number | boolean | undefined | null>;
 
 function errorMessage(data: unknown, res: Response): string {
@@ -24,7 +27,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(`/api/${path}`, opts);
+  const res = await fetch(`${API}${path}`, opts);
   const text = await res.text();
   let data: unknown;
   try {
@@ -71,7 +74,7 @@ export const api = {
   encounter: (encounterId: string, action: EncounterAction) =>
     request<Encounter>("POST", `encounters/${encounterId}/action`, action),
   uploadHandout: async (id: string, file: File) => {
-    const res = await fetch(`/api/handouts/${id}/file`, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+    const res = await fetch(`${API}handouts/${id}/file`, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(errorMessage(data, res));
     return data as Handout;
@@ -82,7 +85,7 @@ export const api = {
   project: (p: Omit<Projection, "seq">) => request<Projection>("PUT", "projection", p),
   /** Move tokens on a map handout (the players' screen): positions only, the rest of the map is left alone. */
   moveTokens: (id: string, moves: { id: string; c: number; r: number }[]) => request<Handout>("POST", `handouts/${id}/tokens`, { moves }),
-  handoutUrl: (h: Handout) => (h.filename ? `/api/handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
+  handoutUrl: (h: Handout) => (h.filename ? `${API}handouts/${h.id}/file?v=${encodeURIComponent(h.filename)}` : ""),
   award: (sessionId: string, body: { xp: number; character_ids: string[] } | { loot_index: number; character_id: string }) =>
     request<Session>("POST", `sessions/${sessionId}/award`, body),
   log: (sessionId: string, text: string, kind = "note") => request<Session>("POST", `sessions/${sessionId}/log`, { text, kind }),
@@ -98,7 +101,7 @@ export const api = {
   exportAll: (campaign_id?: string) => request<unknown>("GET", `export${qs({ campaign_id })}`),
   exportOne: (kind: Kind, id: string) => request<unknown>("GET", `export/${kind}/${id}`),
   exportMarkdown: async (kind: Kind, id: string) => {
-    const res = await fetch(`/api/export/${kind}/${id}?format=md`);
+    const res = await fetch(`${API}export/${kind}/${id}?format=md`);
     if (!res.ok) throw new Error(errorMessage(await res.json().catch(() => ({})), res));
     return res.text();
   },
