@@ -71,11 +71,11 @@ def main():
     with sync_playwright() as p:
         engine = os.environ.get("BROWSER", "chromium")
         print("     browser:", engine)
-        if engine == "chromium":
-            browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None)
-        else:
-            browser = getattr(p, engine).launch()
-        context = browser.new_context()
+        # A profile on disk, as a real browser has: Playwright's WebKit gives a throwaway one no
+        # file storage (OPFS), so the database can't open there.
+        profile = tempfile.mkdtemp()
+        context = getattr(p, engine).launch_persistent_context(
+            profile, executable_path=(os.environ.get("CHROMIUM") if engine == "chromium" else None) or None)
         errors = []
         messages = []  # everything the pages log, shown if the database doesn't open
         context.on("console", lambda m: messages.append(f"{m.type}: {m.text}"))
@@ -259,9 +259,10 @@ def main():
         check("... with the same data", len(json.loads(api(fresh, "GET", "campaigns")["text"])["campaigns"]) == 1)
 
         check("no console errors", not errors, errors)
-        browser.close()
+        context.close()
     server.shutdown()
     shutil.rmtree(site)
+    shutil.rmtree(profile, ignore_errors=True)
     sys.exit(1 if failures else 0)
 
 
