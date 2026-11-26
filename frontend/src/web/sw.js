@@ -40,7 +40,7 @@ self.addEventListener("fetch", (event) => {
     // Only the app's own pages may write. A form on another website that posts here arrives as
     // a navigation; the desktop app refuses those by their Origin, and so does this.
     const write = event.request.method !== "GET" && event.request.method !== "HEAD";
-    event.respondWith(write && event.request.mode === "navigate" ? problem(403, "cross-origin request refused") : relay(event.request));
+    event.respondWith(write && event.request.mode === "navigate" ? problem(403, "cross-origin request refused") : relay(event.request, event.clientId));
   } else if (event.request.method === "GET" && url.startsWith(SCOPE)) {
     event.respondWith(fromCache(event.request));
   }
@@ -82,14 +82,14 @@ self.addEventListener("message", (event) => {
 
 /** The host window, asking the open windows if it isn't known (this worker may have been
  *  stopped and started again since). Null if none answers in time. */
-async function findHost() {
+async function findHost(asker) {
   if (hostId) {
     const client = await self.clients.get(hostId);
     if (client) return client;
     hostId = null;
   }
   const deadline = Date.now() + HOST_WAIT;
-  while (!hostId && !hostError && Date.now() < deadline) {
+  while (!hostId && !hostError && Date.now() < deadline && !(await gone(asker))) {
     for (const client of await self.clients.matchAll({ type: "window" })) client.postMessage({ type: "who-hosts" });
     await new Promise((resolve) => {
       const wake = () => resolve();
@@ -103,35 +103,58 @@ async function findHost() {
   return hostId ? (await self.clients.get(hostId)) || null : null;
 }
 
+/** Whether the window (or worker) with this id has closed. Requests without one never are. */
+async function gone(id) {
+  return !!id && !(await self.clients.get(id));
+}
+
 function problem(status, detail) {
   return new Response(JSON.stringify({ detail }), { status, headers: { "content-type": "application/json" } });
 }
 
-async function relay(request) {
+async function relay(request, asker) {
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   const headers = [];
   const type = request.headers.get("content-type");
   if (type) headers.push(["content-type", type]);
   const path = "/" + request.url.slice(SCOPE.length); // the API's own address: /api/...
   const read = request.method === "GET" || request.method === "HEAD";
+  // A read for a page that has closed can stop; a write is sent anyway, so it's saved.
+  const reader = read ? asker : "";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const host = await findHost();
+    const host = await findHost(reader);
+    if (await gone(reader)) return problem(499, "the page that asked has closed");
     if (!host) {
       return problem(
         503,
         hostError ? `Questodian couldn't open its data in this browser: ${hostError}` : "Questodian's data isn't open yet. Try again in a moment.",
       );
     }
-    const reply = await new Promise((resolve) => {
+    const reply = await new Promise((settle) => {
       const channel = new MessageChannel();
+      let limit, watch;
+      const resolve = (value) => {
+        clearTimeout(limit);
+        clearInterval(watch);
+        settle(value);
+      };
       channel.port1.onmessage = (e) => resolve(e.data);
-      // No answer (the window closed mid-request, say): a read is asked again; a write is
-      // reported rather than sent again, since it may have happened.
-      setTimeout(() => resolve(read ? { notHost: true } : { timedOut: true }), read ? READ_WAIT : REPLY_WAIT);
       // A copy of the body each try, since sending it hands it over.
       const copy = body && body.slice(0);
       host.postMessage({ type: "api", method: request.method, url: path, headers, body: copy }, [channel.port2, ...(copy ? [copy] : [])]);
+      // No answer (the window closed mid-request, say): a read is asked again; a write is
+      // reported rather than sent again, since it may have happened.
+      const noAnswer = () => resolve(read ? { notHost: true } : { timedOut: true });
+      limit = setTimeout(noAnswer, read ? READ_WAIT : REPLY_WAIT);
+      // A closed host never answers, and nobody waits for a closed page's answer (a sent write
+      // still finishes): stop waiting for either, since an unfinished request also holds up a
+      // new version taking over.
+      watch = setInterval(async () => {
+        if (await gone(host.id)) noAnswer();
+        else if (await gone(asker)) resolve({ abandoned: true });
+      }, 1000);
     });
+    if (reply.abandoned) return problem(499, "the page that asked has closed");
     if (reply.timedOut) return problem(504, "Questodian didn't answer in time. Check that your change was saved.");
     if (reply.notHost) {
       hostId = null;

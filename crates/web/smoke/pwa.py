@@ -93,7 +93,7 @@ def main():
         check("an <img> shows it", width == 1, width)
 
         host.goto(url + "campaigns")
-        host.get_by_text("Web campaign").first.wait_for(timeout=10000)
+        host.locator("main").get_by_text("Web campaign").first.wait_for(timeout=10000)  # not the header's campaign menu
         check("the UI shows the data", True)
         host.get_by_role("link", name="Characters").first.click()
         host.wait_for_url("**/characters", timeout=10000)
@@ -119,6 +119,14 @@ def main():
         players.wait_for_function("document.getElementById('root').childElementCount > 0", timeout=30000)
         check("the players' view loads", True)
         players.close()
+        quick = context.new_page()  # saves, then closes without waiting for the answer
+        quick.goto(url + "characters")
+        quick.wait_for_selector("main", timeout=30000)
+        quick.evaluate("u => { fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({title: 'Quick'})}); }", url + "api/handouts")
+        quick.close()
+        guest.wait_for_timeout(1500)
+        names = [e.get("title") for e in json.loads(api(guest, "GET", "handouts")["text"]).get("handouts", [])]
+        check("a save from a window that closes straight away is kept", "Quick" in names, names)
 
         host.close()
         guest.wait_for_timeout(2500)
