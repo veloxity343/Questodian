@@ -91,13 +91,24 @@ A Cargo workspace plus a React app:
   - `web/`: the web version's start-up (only in `make pwa` builds). The first window to open
     becomes the host: its worker (`db-worker.ts`) runs the core from `crates/web`. The service
     worker (`sw.js`) passes every window's `/api/...` requests to the host, so images, the
-    players' window and other tabs all work, and keeps the app's files for offline use. When the
-    host window closes, the next window takes over (a Web Lock queues them). A new build
-    installs in the background and takes over once every window of the old one has closed, so
-    two versions never share the database; API writes that arrive as page navigations (a form
-    on another site) are refused. Icons and the
-    manifest are in `frontend/web-public/`; `vite.config.ts` writes `sw.js` with the list of
-    files to keep.
+    players' window and other tabs all work, and keeps the app's files for offline use.
+    - **Taking over:** when the host window closes, the next window takes over (a Web Lock
+      queues them). A host that goes into the background while another window waits hands over
+      and queues again, since a browser may pause a background window.
+    - **Saves sent again:** a request with no answer (its host closed) is sent again to the
+      next host. Each save carries an id (`x-questodian-save`), and `crates/web` makes a save
+      whose id it has seen only once, answering with the first answer (the `saved_requests`
+      table, kept a day).
+    - **Updates:** a new build installs in the background and takes over once every window of
+      the old one has closed, so two versions never share the database.
+    - **Refused:** API writes that arrive as page navigations (a form on another site).
+    - **Self-test:** `selftest.ts` is the Data page's **Check this browser**: what the web version
+      relies on, tried in the browser it runs in, with a report to copy.
+    - **Backups:** `backup.ts`. On a touch screen, exports open the Share sheet (Save to Files)
+      instead of downloading, and the Data link shows a dot a week after the last full backup.
+
+    Icons and the manifest are in `frontend/web-public/`; `vite.config.ts` writes `sw.js` with
+    the list of files to keep.
 - `data/`: the bundled SRD and the builder's rules data: see [Bundled data](data.md)
 - `scripts/`: the scripts that build `data/`
 
@@ -116,8 +127,10 @@ characters and handbook entries.
 
 The web version has two tests in a real browser, not part of `make check`:
 - the core alone: after `make wasm`, `uv run --with playwright python crates/web/smoke/smoke.py`;
-- the whole app (the service worker, a second window taking over, offline): after
-  `make pwa QUESTODIAN_BASE=/Questodian/`, `uv run --with playwright python crates/web/smoke/pwa.py`.
+- the whole app (the service worker, a second window taking over, handing over from the
+  background, a save cut off by its host closing, the self-test, offline, an update deployed
+  while it's open): after `make pwa QUESTODIAN_BASE=/Questodian/`,
+  `uv run --with playwright python crates/web/smoke/pwa.py`.
 
 UI changes should also be tried in a real browser, and in the desktop window for anything that
 drags, scrolls or uses the system: some webviews behave differently from Chromium. Pointer events

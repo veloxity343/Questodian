@@ -6,7 +6,9 @@
 //   window) by passing it to the host window, which passes it to its worker. It also keeps the
 //   app's files, so the app opens offline.
 // - Every window queues for the "host" Web Lock; the one holding it opens the database. When
-//   that window closes, the next in the queue takes over.
+//   that window closes, the next in the queue takes over. A host that goes into the background
+//   while another window waits hands over and queues again (a browser may pause a background
+//   window, which would leave the others waiting).
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -14,6 +16,8 @@ interface WorkerReply {
   id: number;
   ok: boolean;
   error?: string;
+  /** Never answered: the worker was stopped to hand the database over. Sent again elsewhere. */
+  handedOver?: boolean;
   status?: number;
   headers?: [string, string][];
   body?: Uint8Array;
@@ -53,14 +57,15 @@ function startWorker(): Worker {
 const tellServiceWorker = (message: Record<string, unknown>) => navigator.serviceWorker.controller?.postMessage(message);
 
 /** Open the database in a worker of this window. A window that just closed may still be letting
- *  go of the storage, so a few tries. */
-async function host(): Promise<boolean> {
+ *  go of the storage, so a few tries. Only the `last` round tells the service worker it failed. */
+async function host(last = true): Promise<boolean> {
   let error = "";
   for (let attempt = 0; attempt < 5; attempt++) {
     const w = startWorker();
     const reply = await ask(w, { type: "open" });
     if (reply.ok) {
       worker = w;
+      document.documentElement.dataset.host = "yes"; // for the browser tests
       tellServiceWorker({ type: "host" });
       // Ask the browser not to clear the data when space runs low (it decides).
       void navigator.storage?.persist?.().catch(() => false);
@@ -70,8 +75,71 @@ async function host(): Promise<boolean> {
     error = reply.error || "unknown error";
     await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
   }
-  tellServiceWorker({ type: "host-failed", error });
+  if (last) tellServiceWorker({ type: "host-failed", error });
   return false;
+}
+
+/** Resolves the wait of a host holding the lock, to hand the database over. */
+let handOver: (() => void) | null = null;
+const HOST_LOCK = "questodian-host";
+/** Windows tell each other when one comes into view without the database. */
+const windows = "BroadcastChannel" in self ? new BroadcastChannel("questodian-windows") : null;
+
+/** Whether another window is queued for the database. */
+async function othersWaiting(): Promise<boolean> {
+  const state = await navigator.locks.query?.().catch(() => null);
+  return !!state?.pending?.some((lock) => lock.name === HOST_LOCK);
+}
+
+/** Rounds of opening the database a window tries before giving up (each one, a few tries). The
+ *  window handing over may take a moment to let go of the storage. */
+const HOST_ROUNDS = 3;
+
+/** Hold the database while this window has the lock, until it's handed over. */
+async function hostWhileHeld(round: number): Promise<"handed over" | "failed" | "gave up"> {
+  if (!(await host(round === HOST_ROUNDS))) return round < HOST_ROUNDS ? "failed" : "gave up";
+  // Taken over while hidden, a visible window may be waiting already: it says so in a moment.
+  await new Promise<void>((resolve) => (handOver = resolve));
+  handOver = null;
+  const w = worker!;
+  worker = null; // new requests now go to the next host (the service worker asks again)
+  delete document.documentElement.dataset.host;
+  // Let the requests already sent finish, for a moment; any still unanswered are sent again by
+  // the service worker to the next host (each save once: see sw.js).
+  for (let i = 0; i < 10 && [...waiting.values()].some((entry) => entry.worker === w); i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  w.terminate();
+  let cut = 0;
+  for (const [id, entry] of waiting) {
+    if (entry.worker !== w) continue;
+    entry.resolve({ id, ok: false, handedOver: true });
+    waiting.delete(id);
+    cut++;
+  }
+  document.documentElement.dataset.cutOff = String(cut); // for the browser tests
+  return "handed over";
+}
+
+/** In the queue for the database (not holding it, pausing between rounds, or given up). */
+let queued = false;
+
+function queueToHost(round = 1) {
+  queued = true;
+  void navigator.locks.request(HOST_LOCK, () => {
+    queued = false;
+    return hostWhileHeld(round);
+  }).then((held) => {
+    // Queue again: after a handover, to host later; after a failure, for another round (the lock
+    // is free meanwhile, so another window may open it first).
+    if (held === "handed over") queueToHost();
+    else if (held === "failed") setTimeout(() => queueToHost(round + 1), 2000);
+  });
+}
+
+/** In the background with another window waiting: hand over. */
+async function handOverIfOthersWait() {
+  if (handOver && document.hidden && (await othersWaiting())) handOver();
 }
 
 /** A request from the service worker: answer it if this window is the host. */
@@ -89,6 +157,10 @@ async function onServiceWorkerMessage(event: MessageEvent) {
   }
   const reply = await ask(worker, { type: "request", method: data.method, url: data.url, headers: data.headers, body: data.body },
     data.body ? [data.body] : []);
+  if (reply.handedOver) {
+    port.postMessage({ notHost: true });
+    return;
+  }
   if (!reply.ok) {
     port.postMessage({ status: 500, headers: [["content-type", "application/json"]], body: new TextEncoder().encode(JSON.stringify({ detail: reply.error })) });
     return;
@@ -148,9 +220,19 @@ export async function boot() {
   // Host now, or once the window holding the lock closes. The app starts either way: until a
   // window hosts, the service worker holds API requests for a few seconds.
   if (navigator.locks) {
-    void navigator.locks.request("questodian-host", async () => {
-      if (await host()) await new Promise(() => {}); // hold the lock while this window is open
+    queueToHost();
+    // Going into the background hands over at once if a window waits (the browser may pause
+    // this one soon after); a window coming into view asks a background host to.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) void handOverIfOthersWait();
+      else if (queued) windows?.postMessage("in view");
     });
+    // A window in view, queued for the database, keeps saying so, in case the host only got it
+    // (or went into the background) after the last time. Only such windows say it, so the next in
+    // the queue is one that wants it, and two in the background never pass it back and forth.
+    setInterval(() => !document.hidden && queued && windows?.postMessage("in view"), 2000);
+    if (windows) windows.onmessage = () => void handOverIfOthersWait();
+    if (!document.hidden && queued) windows?.postMessage("in view");
   } else {
     void host();
   }

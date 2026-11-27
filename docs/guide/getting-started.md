@@ -68,7 +68,9 @@ with `--data-dir`.
 
 ## In a browser instead
 
-The same app runs as a local web server, for any browser. From a copy of the source code (you need
+On an iPad, or to try it without installing anything, use [the web version](web-version.md).
+
+The same app also runs as a local web server, for any browser. From a copy of the source code (you need
 [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/)):
 
 ```bash

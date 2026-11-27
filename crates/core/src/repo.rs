@@ -51,6 +51,9 @@ pub struct Repo<'a> {
     pub files_dir: PathBuf,
     /// Files no record uses once this unit of work is saved (images of replaced handouts).
     remove_on_commit: Vec<PathBuf>,
+    /// For a unit of work that writes: the id of the save being made, if it has one, to
+    /// record with it (see [`crate::db::Database::saving`]).
+    saving: Option<&'a std::sync::Mutex<Option<String>>>,
 }
 
 impl<'a> Repo<'a> {
@@ -59,6 +62,7 @@ impl<'a> Repo<'a> {
         pool: &'a Pool,
         begin: &str,
         turn: Option<tokio::sync::MutexGuard<'a, ()>>,
+        saving: Option<&'a std::sync::Mutex<Option<String>>>,
         columns: &'a HashMap<Kind, Vec<Column>>,
         files_dir: PathBuf,
     ) -> Result<Self> {
@@ -67,15 +71,21 @@ impl<'a> Repo<'a> {
             pool.put(conn);
             return Err(e.into());
         }
-        Ok(Repo { conn: Some(conn), pool, _turn: turn, columns, files_dir, remove_on_commit: Vec::new() })
+        Ok(Repo { conn: Some(conn), pool, _turn: turn, columns, files_dir, remove_on_commit: Vec::new(), saving })
     }
 
-    fn conn(&self) -> &Connection {
+    pub(crate) fn conn(&self) -> &Connection {
         self.conn.as_ref().expect("a unit of work has its connection until it's dropped")
     }
 
     /// Save everything done in this unit of work, then remove the files it no longer uses.
     pub async fn commit(mut self) -> Result<()> {
+        let id = self.saving.and_then(|s| s.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
+        if let Some(id) = id {
+            self.conn()
+                .prepare_cached("INSERT OR REPLACE INTO saved_requests (id, saved) VALUES (?, ?)")?
+                .execute(params![id, now()])?;
+        }
         self.conn().execute_batch("COMMIT")?;
         for path in std::mem::take(&mut self.remove_on_commit) {
             crate::files::remove(&path);

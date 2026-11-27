@@ -47,7 +47,7 @@ mod imp {
 
 #[cfg(target_family = "wasm")]
 mod imp {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
 
     use rusqlite::{Connection, OptionalExtension};
@@ -93,7 +93,26 @@ mod imp {
     pub fn remove(path: &Path) {
         let _ = with(|conn| conn.execute("DELETE FROM files WHERE path = ?", [key(path)]));
     }
+
+    /// Remove every file but these. With none to keep, nothing goes: an empty list more likely
+    /// means the database was lost or started afresh than that every image is unused.
+    pub fn keep_only(keep: &[PathBuf]) -> Result<()> {
+        if keep.is_empty() {
+            return Ok(());
+        }
+        let keep: std::collections::HashSet<String> = keep.iter().map(|p| key(p)).collect();
+        with(|conn| {
+            let stored: Vec<String> = conn
+                .prepare("SELECT path FROM files")?
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            for path in stored.iter().filter(|p| !keep.contains(*p)) {
+                conn.execute("DELETE FROM files WHERE path = ?", [path])?;
+            }
+            Ok(())
+        })
+    }
 }
 
 #[cfg(target_family = "wasm")]
-pub(crate) use imp::open;
+pub(crate) use imp::{keep_only, open};

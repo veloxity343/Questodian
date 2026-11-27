@@ -21,7 +21,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
@@ -33,17 +33,20 @@ pub const DB_FILENAME: &str = "questodian.db";
 const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
-pub const HEAD: &str = "0004";
+pub const HEAD: &str = "0005";
 /// What a database made before migrations existed contains.
 const BASELINE: &str = "0001";
 
 const SCHEMA_0002: &str = include_str!("migrations/0002_schema.sql");
 const UPGRADE_0001_TO_0002: &str = include_str!("migrations/0001_to_0002.sql");
 /// The upgrades written in SQL, in order: from, and what takes it to the next revision.
-const STEPS: [(&str, &str); 2] =
-    [("0002", include_str!("migrations/0002_to_0003.sql")), ("0003", include_str!("migrations/0003_to_0004.sql"))];
+const STEPS: [(&str, &str); 3] = [
+    ("0002", include_str!("migrations/0002_to_0003.sql")),
+    ("0003", include_str!("migrations/0003_to_0004.sql")),
+    ("0004", include_str!("migrations/0004_to_0005.sql")),
+];
 /// Every revision this app can upgrade from, oldest first.
-const KNOWN: [&str; 4] = [BASELINE, "0002", "0003", HEAD];
+const KNOWN: [&str; 5] = [BASELINE, "0002", "0003", "0004", HEAD];
 
 /// How long a statement waits for another copy of the app to finish writing.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -53,6 +56,10 @@ const WEB: bool = cfg!(target_family = "wasm");
 const IDLE_CONNECTIONS: usize = if WEB { 1 } else { 4 };
 /// Prepared statements kept per connection (each kind has a few; sqlx kept 100 too).
 const STATEMENT_CACHE: usize = 100;
+/// How long a save's id is remembered (see [`Database::saving`]).
+const SAVES_KEPT: chrono::TimeDelta = chrono::TimeDelta::days(1);
+/// Answers larger than this aren't kept (a save sent again then gets "saved: reload").
+const ANSWER_KEPT_UP_TO: usize = 64 * 1024;
 
 /// `$QUESTODIAN_DATA`, else the usual per-user data folder for this OS.
 pub fn default_data_dir() -> PathBuf {
@@ -92,6 +99,8 @@ pub struct Database {
     /// The copy saved before an upgrade, if this open upgraded the schema.
     pub backup: Option<PathBuf>,
     columns: HashMap<Kind, Vec<Column>>,
+    /// The id of the save being made, recorded with it when it's committed.
+    saving: Mutex<Option<String>>,
     /// Held (shared) while the database is open; see [`Database::open`]. `None` where the
     /// folder doesn't support file locks.
     _lock: Option<std::fs::File>,
@@ -123,10 +132,20 @@ impl Database {
         let pool = Pool { path: path.clone(), idle: Mutex::new(Vec::new()) };
         let conn = pool.get()?;
         let columns = read_columns(&conn)?;
-        pool.put(conn);
         #[cfg(target_family = "wasm")]
-        crate::files::open()?;
-        Ok(Database { pool, turns: tokio::sync::Mutex::new(()), data_dir, path, backup, columns, _lock: lock })
+        {
+            crate::files::open()?;
+            // Only this copy has the data open here, so no upload is under way: an image no
+            // handout points to was left by a save cut off part way, and goes. Tidying only, so
+            // a failure doesn't stop the app.
+            if let Ok(names) = strings(&conn, "SELECT filename FROM handouts WHERE filename != ''") {
+                let dir = data_dir.join("handouts");
+                let _ = crate::files::keep_only(&names.iter().map(|n| dir.join(n)).collect::<Vec<_>>());
+            }
+        }
+        pool.put(conn);
+        let (turns, saving) = (tokio::sync::Mutex::new(()), Mutex::new(None));
+        Ok(Database { pool, turns, data_dir, path, backup, columns, saving, _lock: lock })
     }
 
     /// A unit of work that may write: nothing is saved unless [`Repo::commit`] is called.
@@ -134,13 +153,55 @@ impl Database {
     /// Writers take turns, so a task holding one must not ask for another: it would wait forever.
     pub async fn write(&self) -> Result<Repo<'_>> {
         let turn = self.turns.lock().await;
-        Repo::begin(&self.pool, "BEGIN IMMEDIATE", Some(turn), &self.columns, self.files_dir())
+        Repo::begin(&self.pool, "BEGIN IMMEDIATE", Some(turn), Some(&self.saving), &self.columns, self.files_dir())
     }
 
     /// A unit of work that only reads.
     pub async fn read(&self) -> Result<Repo<'_>> {
         let turn = if WEB { Some(self.turns.lock().await) } else { None };
-        Repo::begin(&self.pool, "BEGIN", turn, &self.columns, self.files_dir())
+        Repo::begin(&self.pool, "BEGIN", turn, None, &self.columns, self.files_dir())
+    }
+
+    // A save sent twice happens once. The web version's service worker gives each save an id
+    // and sends it again if no answer came (the window holding the database closed, say).
+    // The web build asks [`Database::saved`] first; if it hasn't happened, it calls
+    // [`Database::saving`], makes the save (whose commit records the id), then keeps the
+    // answer with [`Database::answered`]. It makes one such save at a time.
+
+    /// What became of the save with this id: `None` if it hasn't happened.
+    pub async fn saved(&self, id: &str) -> Result<Option<Saved>> {
+        let repo = self.read().await?;
+        let sql = "SELECT status, headers, body FROM saved_requests WHERE id = ?";
+        let found = repo.conn().prepare_cached(sql)?.query_row([id], |row| {
+            let status: Option<u16> = row.get(0)?;
+            let headers: Option<String> = row.get(1)?;
+            let body: Option<Vec<u8>> = row.get(2)?;
+            Ok(Saved { answer: status.map(|s| (s, headers.unwrap_or_default(), body.unwrap_or_default())) })
+        });
+        Ok(found.optional()?)
+    }
+
+    /// The next unit of work committed is the save with this id (or none: `None`).
+    pub fn saving(&self, id: Option<String>) {
+        *self.saving.lock().unwrap_or_else(PoisonError::into_inner) = id;
+    }
+
+    /// Keep the answer to the save with this id, if it was made, and forget saves older than
+    /// [`SAVES_KEPT`].
+    pub async fn answered(&self, id: &str, status: u16, headers: &str, body: &[u8]) -> Result<()> {
+        let unsaved = self.saving.lock().unwrap_or_else(PoisonError::into_inner).take().is_some();
+        if unsaved {
+            return Ok(()); // no commit took the id: nothing was saved
+        }
+        let repo = self.write().await?;
+        let conn = repo.conn();
+        if body.len() <= ANSWER_KEPT_UP_TO {
+            conn.prepare_cached("UPDATE saved_requests SET status = ?, headers = ?, body = ? WHERE id = ?")?
+                .execute(params![status, headers, body, id])?;
+        }
+        let cutoff = (chrono::Utc::now() - SAVES_KEPT).format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
+        conn.prepare_cached("DELETE FROM saved_requests WHERE saved < ?")?.execute([cutoff])?;
+        repo.commit().await
     }
 
     /// Where handout images live.
@@ -153,6 +214,13 @@ impl Database {
     pub async fn close(&self) {
         self.pool.idle().clear();
     }
+}
+
+/// A save that has happened, and its answer (status, headers as JSON, body) once that was
+/// kept. A save without one finished but its answer was lost before it could be kept.
+#[derive(Debug, PartialEq)]
+pub struct Saved {
+    pub answer: Option<(u16, String, Vec<u8>)>,
 }
 
 /// Connections to the database file, kept open and reused between units of work.

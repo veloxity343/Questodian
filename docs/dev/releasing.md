@@ -32,7 +32,8 @@ version tag.
    2. it creates a draft release;
    3. it builds the desktop app for Windows x64, macOS (Apple Silicon and Intel) and Linux x64, and
       attaches each one's installers to the draft;
-   4. it checks `latest.json` (see below).
+   4. it checks `latest.json` (see below);
+   5. it builds the web version and puts it on GitHub Pages (see [The web version](#the-web-version)).
 
    If a build job is cancelled or fails, for instance because no macOS machine was free, use
    **Re-run failed jobs**. The re-run uploads into the same draft.
@@ -40,6 +41,28 @@ version tag.
    (**Check latest.json lists every platform**) passed.
 6. **Write the release notes** and **publish**, with **Set as the latest release** ticked. Installed
    copies only see published releases, so a draft is never offered as an update.
+
+## The web version
+
+The Release workflow's last two jobs build the web version (`make pwa
+QUESTODIAN_BASE=/Questodian/`) from the release's commit and deploy it to GitHub Pages, at
+https://veloxity343.github.io/Questodian/. They run only once every desktop build is in the draft,
+and the site changes as soon as they finish, so **publish the release soon after**: until then,
+the web version is newer than the desktop download. Open copies of the web version switch to the
+new one once all their windows have been closed.
+
+One-time setup in the repository's settings, before the first release that deploys:
+1. **Settings → Pages → Build and deployment → Source:** "GitHub Actions". The `gh-pages` branch
+   (deployed by hand before this) is then no longer what's served; keep it until the first
+   deployment from Actions has worked, then it can be deleted.
+2. **Settings → Environments → `github-pages` → Deployment branches and tags:** add a rule for
+   tags matching `v*`. The environment may allow only the default branch to deploy, and the
+   release runs from a tag.
+
+The deploy is part of the Release workflow rather than waiting for the release to be published:
+the draft is created by the workflow's own token, GitHub doesn't start workflows from events that
+token causes, and whether publishing such a draft by hand starts one isn't clear from GitHub's
+documentation.
 
 ## Update signing
 

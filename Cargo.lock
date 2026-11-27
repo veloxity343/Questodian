@@ -3322,6 +3322,7 @@ dependencies = [
  "serde_json",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
+ "tokio",
  "tower",
  "wasm-bindgen",
  "wasm-bindgen-futures",

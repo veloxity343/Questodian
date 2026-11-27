@@ -31,6 +31,12 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 .modes a.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); }
 .search-btn { display: flex; gap: 8px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); padding: 4px 10px; cursor: pointer; }
 .search-btn kbd { font-size: 0.72rem; }
+.search-btn { flex: none; white-space: nowrap; }
+/* Narrower windows and touch screens (an iPad): room for every link; no shortcut hint to tap. */
+@media (max-width: 1280px), (pointer: coarse) {
+  .search-btn kbd { display: none; }
+  .modes a { padding: 5px 9px; }
+}
 .campaign-chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px 2px 10px; background: var(--surface); }
 .campaign-chip select { border: 0; background: transparent; font-family: var(--serif); font-weight: 700; max-width: 220px; padding: 3px 4px; }
 .edition-badge { font-family: var(--mono); font-size: 0.72rem; color: var(--accent); padding: 2px 6px; border-left: 1px solid var(--border); white-space: nowrap; }
@@ -330,4 +336,6 @@ h1, h2, h3 { font-weight: 700; letter-spacing: 0.005em; }
 .projection .map-stage { width: 100vw; }
 .fullscreen-btn { position: fixed; top: 10px; right: 10px; z-index: 5; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; background: rgba(255, 255, 255, 0.12); color: #ddd; cursor: pointer; opacity: 0.25; transition: opacity 0.2s; }
 .fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
+.players-back-btn { position: fixed; top: 10px; left: 10px; z-index: 5; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; background: rgba(255, 255, 255, 0.12); color: #ddd; cursor: pointer; opacity: 0.35; transition: opacity 0.2s; }
+.players-back-btn:hover, .players-back-btn:focus-visible { opacity: 1; }
 .map-toolbar .tool-btn:disabled { opacity: 0.35; cursor: default; }

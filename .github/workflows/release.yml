@@ -1,5 +1,6 @@
 # Runs every CI check, creates one draft GitHub release, then builds the desktop app for each
-# OS on that OS and attaches the installers to it. Nothing is built if a check fails.
+# OS on that OS and attaches the installers to it. Nothing is built if a check fails. Last, it
+# builds the web version and puts it on GitHub Pages.
 # Run it by pushing a version tag (v0.2.0) or by hand.
 # Based on https://v2.tauri.app/distribute/pipelines/github/
 name: Release
@@ -131,3 +132,45 @@ jobs:
             echo "::error::latest.json is missing:$missing. Re-run the failed or overwritten build job before publishing."
             exit 1
           fi
+
+  # The web version, from the same commit, once every desktop build is in the draft. GitHub Pages
+  # serves it straight away, so publish the release soon after (docs/dev/releasing.md).
+  web-build:
+    name: Build the web version
+    needs: updater-json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: swatinem/rust-cache@v2
+      # SQLite's C code is compiled for WebAssembly with clang.
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: make pwa QUESTODIAN_BASE=/Questodian/
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: frontend/dist-web
+
+  web-deploy:
+    name: Put the web version on GitHub Pages
+    needs: web-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

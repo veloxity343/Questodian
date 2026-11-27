@@ -10,6 +10,18 @@ export function openPlayersWindow(path = `${import.meta.env.BASE_URL}project`) {
   else window.open(path, "questodian-players", "popup,width=1280,height=800");
 }
 
+/** Show the players' view in this window instead of a second one: in the web version on a
+ *  touch screen or from the Home Screen, where a second window may open in Safari, which keeps
+ *  separate data (and with screen mirroring, this window is what the TV shows anyway). */
+export function playersInThisWindow() {
+  if (import.meta.env.MODE !== "web") return false;
+  const homeScreen = matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
+  return homeScreen || matchMedia("(pointer: coarse)").matches;
+}
+
+/** Whether `path` is a page of this app (for a "back" link from the players' view), not another site. */
+export const isAppPath = (path: string) => path.startsWith("/") && !path.startsWith("//") && !path.includes("\\");
+
 /** Toggle full screen on the players' window: the desktop app's own, else the browser's. */
 export async function togglePlayersFullscreen() {
   if (isDesktop()) {

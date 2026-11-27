@@ -5,6 +5,10 @@
 //! The page's worker calls [`open`] once, then [`request`] for each API call the UI makes.
 //! Only one worker (one tab or window) can have the database open at a time: [`open`] fails
 //! in a second one until the first closes.
+//!
+//! The service worker gives each save (any request but GET and HEAD) an id in the
+//! `x-questodian-save` header, and sends it again if no answer came. A save with an id that
+//! was already made isn't made again: it gets the first answer (see `Database::saved`).
 
 #![cfg(target_family = "wasm")]
 
@@ -15,11 +19,14 @@ use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
 use questodian_core::db::Database;
-use questodian_core::server::{self, App, Ui};
+use questodian_core::server::{self, App, Shared, Ui};
 use tower::ServiceExt;
 use wasm_bindgen::prelude::*;
 
-static ROUTER: OnceLock<Router> = OnceLock::new();
+static ROUTER: OnceLock<(Router, Shared)> = OnceLock::new();
+/// Saves with an id take turns, so each id is recorded with its own save's commit.
+static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const SAVE_ID: &str = "x-questodian-save";
 
 /// Free storage slots kept for new files: the journals of the database and the handouts store
 /// while they write, and a backup before an upgrade. The storage holds one file per slot and
@@ -41,7 +48,8 @@ pub async fn open() -> Result<String, JsError> {
     storage.reduce_capacity(usize::MAX).await.map_err(storage_error)?;
     storage.add_capacity(FREE_SLOTS).await.map_err(storage_error)?;
     let db = Database::open("").await.map_err(|e| JsError::new(&e.to_string()))?;
-    let _ = ROUTER.set(server::router(App::new(db, Ui::Missing)));
+    let app = App::new(db, Ui::Missing);
+    let _ = ROUTER.set((server::router(app.clone()), app));
     Ok(rusqlite_version())
 }
 
@@ -62,14 +70,46 @@ pub struct Reply {
 /// `headers` is `[[name, value], ...]` as JSON.
 #[wasm_bindgen]
 pub async fn request(method: String, url: String, headers: String, body: Option<Vec<u8>>) -> Result<Reply, JsError> {
-    let router = ROUTER.get().ok_or_else(|| JsError::new("the database isn't open"))?.clone();
+    let (router, app) = ROUTER.get().ok_or_else(|| JsError::new("the database isn't open"))?;
     let pairs: Vec<(String, String)> = serde_json::from_str(&headers).map_err(|e| JsError::new(&e.to_string()))?;
+    let save = pairs.iter().find(|(name, _)| name.eq_ignore_ascii_case(SAVE_ID)).map(|(_, id)| id.clone());
+    let save = save.filter(|_| method != "GET" && method != "HEAD");
     let mut builder = Request::builder().method(method.as_str()).uri(url);
     for (name, value) in pairs {
         builder = builder.header(name, value);
     }
     let req = builder.body(Body::from(body.unwrap_or_default())).map_err(|e| JsError::new(&e.to_string()))?;
-    let res = match router.oneshot(req).await {
+    let Some(id) = save else {
+        return answer(router, req).await;
+    };
+    let _turn = SAVES.lock().await;
+    let failed = |e: questodian_core::error::Error| JsError::new(&e.to_string());
+    match app.db.saved(&id).await.map_err(failed)? {
+        Some(saved) => Ok(match saved.answer {
+            Some((status, headers, body)) => Reply { status, headers, body },
+            // Made, but the window closed before its answer was kept.
+            None => Reply {
+                status: 409,
+                headers: r#"[["content-type","application/json"]]"#.into(),
+                body: br#"{"detail":"This change was saved. Reload to see it."}"#.to_vec(),
+            },
+        }),
+        None => {
+            app.db.saving(Some(id.clone()));
+            let reply = answer(router, req).await;
+            let (status, headers, body) = match &reply {
+                Ok(r) => (r.status, r.headers.as_str(), r.body.as_slice()),
+                Err(_) => (500, "[]", &[][..]),
+            };
+            // The save stands even if its answer can't be kept: a resend then gets "saved".
+            let _ = app.db.answered(&id, status, headers, body).await;
+            reply
+        }
+    }
+}
+
+async fn answer(router: &Router, req: Request<Body>) -> Result<Reply, JsError> {
+    let res = match router.clone().oneshot(req).await {
         Ok(res) => res,
         Err(never) => match never {},
     };

@@ -43,6 +43,39 @@ jobs:
       - run: cargo clippy -p questodian-core -p questodian-web --target wasm32-unknown-unknown -- -D warnings
       - run: cargo build -p questodian-web --target wasm32-unknown-unknown --profile web
 
+  # The whole web version in real browsers: crates/web/smoke/pwa.py. WebKit (the engine Safari is
+  # built on, though not Safari) doesn't block merging while we learn how it does.
+  web-browsers:
+    name: Web version in ${{ matrix.browser }}
+    needs: web
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.browser == 'webkit' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: make pwa QUESTODIAN_BASE=/Questodian/
+      - run: pip install playwright && python -m playwright install --with-deps ${{ matrix.browser }}
+      - run: python crates/web/smoke/pwa.py
+        env:
+          BROWSER: ${{ matrix.browser }}
+
   frontend:
     name: Frontend typecheck
     runs-on: ubuntu-latest

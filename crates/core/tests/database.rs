@@ -90,6 +90,12 @@ async fn revision_0003_upgrades_and_keeps_rule_edits() {
     db.close().await;
 }
 
+/// Made by the 0.2.1 release at 0004: the 0003 fixture upgraded, plus a drawn map and an image.
+#[tokio::test]
+async fn revision_0004_upgrades_with_its_maps() {
+    check_fixture("v0004", true).await;
+}
+
 #[tokio::test]
 async fn revision_0001_upgrades_and_moves_session_encounters() {
     check_fixture("v0001", true).await;
@@ -104,7 +110,7 @@ async fn database_from_before_migrations_upgrades() {
 async fn schema_shape(path: &Path) -> Vec<String> {
     let conn = rusqlite::Connection::open(path).unwrap();
     let mut out = Vec::new();
-    let tables = Kind::ALL.iter().map(|kind| kind.table()).chain(["rule_overrides"]);
+    let tables = Kind::ALL.iter().map(|kind| kind.table()).chain(["rule_overrides", "saved_requests"]);
     for t in tables {
         for pragma in ["table_info", "foreign_key_list", "index_list"] {
             let mut statement = conn.prepare(&format!("PRAGMA {pragma}({t})")).unwrap();
@@ -138,7 +144,8 @@ async fn upgraded_schema_matches_a_new_database() {
     Database::open(fresh.path()).await.unwrap().close().await;
     let fresh = schema_shape(&fresh.path().join(DB_FILENAME)).await;
     assert!(fresh.iter().any(|line| line.starts_with("rule_overrides table_info")));
-    for name in ["pre_alembic", "v0001", "v0002", "v0003"] {
+    assert!(fresh.iter().any(|line| line.starts_with("saved_requests table_info")));
+    for name in ["pre_alembic", "v0001", "v0002", "v0003", "v0004"] {
         let upgraded = tempfile::tempdir().unwrap();
         open_fixture(name, upgraded.path()).await.close().await;
         assert_eq!(schema_shape(&upgraded.path().join(DB_FILENAME)).await, fresh, "{name}");
@@ -423,5 +430,44 @@ async fn an_old_backup_isnt_reused_after_the_database_changed() {
     let backup = db.backup.clone().expect("a backup");
     assert_ne!(backup, stale, "a fresh copy of the current data");
     assert!(std::fs::metadata(&backup).unwrap().len() > 0);
+    db.close().await;
+}
+
+/// The web version's saves sent twice: the first is recorded with its commit, a failed one
+/// isn't, and answers are kept for a day.
+#[tokio::test]
+async fn a_save_is_recorded_with_its_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path()).await.unwrap();
+    assert_eq!(db.saved("a").await.unwrap(), None);
+
+    db.saving(Some("a".into()));
+    let mut repo = db.write().await.unwrap();
+    repo.create(Kind::Campaigns, None).await.unwrap();
+    repo.commit().await.unwrap();
+    assert_eq!(db.saved("a").await.unwrap(), Some(db::Saved { answer: None }), "made, answer not kept yet");
+    db.answered("a", 201, "[]", b"{}").await.unwrap();
+    assert_eq!(db.saved("a").await.unwrap(), Some(db::Saved { answer: Some((201, "[]".into(), b"{}".to_vec())) }));
+
+    db.saving(Some("b".into()));
+    let mut repo = db.write().await.unwrap();
+    repo.create(Kind::Campaigns, None).await.unwrap();
+    drop(repo); // fails: rolled back
+    db.answered("b", 500, "[]", b"").await.unwrap();
+    assert_eq!(db.saved("b").await.unwrap(), None, "a save that failed can be made again");
+
+    db::load_sql(&db.path, "UPDATE saved_requests SET saved = '2000-01-01T00:00:00+00:00' WHERE id = 'a';")
+        .await
+        .unwrap();
+    db.saving(Some("c".into()));
+    let repo = db.write().await.unwrap();
+    repo.commit().await.unwrap();
+    db.answered("c", 200, "[]", &vec![b'x'; 70_000]).await.unwrap();
+    assert_eq!(db.saved("a").await.unwrap(), None, "forgotten after a day");
+    assert_eq!(db.saved("c").await.unwrap(), Some(db::Saved { answer: None }), "a large answer isn't kept");
+
+    db.saving(Some("d".into()));
+    db.answered("d", 200, "[]", b"{}").await.unwrap(); // nothing was saved (a dice roll, say)
+    assert_eq!(db.saved("d").await.unwrap(), None);
     db.close().await;
 }
