@@ -615,3 +615,22 @@ async fn a_database_restored_from_a_copy_doesnt_reuse_its_file_names() {
     sync(&b, &mut folder).await;
     assert_eq!(everything(&b).await, everything(&a).await);
 }
+
+#[tokio::test]
+async fn restoring_a_backup_on_one_device_restores_it_on_the_others() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    create(&a, Kind::Notes, json!({"title": "In the backup"})).await;
+    let backup = transfer::export_bundle(&mut a.db.read().await.unwrap(), None).await.unwrap();
+    create(&a, Kind::Notes, json!({"title": "Made after it"})).await;
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+
+    let mut repo = a.db.write().await.unwrap();
+    transfer::import_data(&mut repo, &backup, transfer::Mode::Replace).await.unwrap();
+    repo.commit().await.unwrap();
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+    let titles = |v: Value| v["notes"].as_array().unwrap().iter().map(|n| n["title"].clone()).collect::<Vec<_>>();
+    assert_eq!(titles(everything(&b).await), vec![json!("In the backup")]);
+}

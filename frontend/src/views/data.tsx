@@ -3,12 +3,12 @@ import { api } from "../api";
 import { Board } from "../components/board";
 import { LoadError, Loading, Select, type Option } from "../components/ui";
 import { useApp } from "../context/app";
-import { useToast } from "../context/ui";
+import { useDialogs, useToast } from "../context/ui";
 import { useLoad } from "../lib/hooks";
 import { pickFiles, slug, today } from "../lib/util";
 import { daysSince, saveFile, useLastBackup } from "../web/backup";
 import { loadGoogle } from "../sync/google";
-import { connectGoogleDrive, disconnect, resumeSync, syncNow, useSyncStatus } from "../sync/runner";
+import { backUpNow, connectGoogleDrive, disconnect, restoreBackup, resumeSync, syncNow, useSyncStatus } from "../sync/runner";
 import { checkThisBrowser, reportText, type Check } from "../web/selftest";
 import type { Kind } from "../types";
 
@@ -152,6 +152,7 @@ function ago(time: number): string {
 /** Sync through the user's own Google Drive (sync/runner.ts). */
 function SyncPanel() {
   const toast = useToast();
+  const { confirm } = useDialogs();
   const status = useSyncStatus();
   const [busy, setBusy] = useState(false);
   const [, tick] = useState(0);
@@ -161,12 +162,15 @@ function SyncPanel() {
     const timer = setInterval(() => tick((n) => n + 1), 30000); // keep "… minutes ago" current
     return () => clearInterval(timer);
   }, []);
+  /** True if it worked (a failure is shown). */
   const act = async (what: () => Promise<void>) => {
     setBusy(true);
     try {
       await what();
+      return true;
     } catch (e) {
       toast(`Sync: ${(e as Error).message}`);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -208,6 +212,32 @@ function SyncPanel() {
             <button type="button" className="btn ghost" disabled={busy} onClick={() => act(disconnect)}>Disconnect</button>
           </div>
           {!!status.replaced && <p className="muted small">{status.replaced} version{status.replaced === 1 ? "" : "s"} replaced by another device's are kept for 30 days.</p>}
+          <h3>Backups in Google Drive</h3>
+          <p className="muted small">
+            A full backup is saved there once a day when something changed. The last 14 days' are kept, and one a week for 8 weeks before.
+            Restoring makes this device's data what the backup holds, and sync takes it to your other devices; what's here now is backed up first.
+          </p>
+          {status.backupError && <p className="bad small">Couldn't back up: {status.backupError}</p>}
+          {status.backups?.length ? (
+            <ul className="backup-list small">
+              {status.backups.map((b) => (
+                <li key={b.name}>
+                  <span>
+                    {b.made ? b.made.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : new Date(`${b.date}T12:00:00Z`).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                    {b.name.includes("before-restore") ? " (before a restore)" : ""}
+                  </span>
+                  <button type="button" className="btn ghost small" disabled={busy || status.phase === "syncing" || status.phase === "paused"} onClick={async () => {
+                    if (await confirm(`Restore the backup from ${b.made ? b.made.toLocaleString() : b.date}? This device's data becomes what it holds (what's here now is backed up first), and sync takes it to your other devices.`, { label: "Restore", danger: true })) {
+                      if (await act(() => restoreBackup(b.name))) toast("Restored");
+                    }
+                  }}>Restore</button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted small">None yet: the first is made at the next sync.</p>
+          )}
+          <button type="button" className="btn small" disabled={busy || status.phase === "syncing" || status.phase === "paused"} onClick={() => act(backUpNow)}>Back up now</button>
         </>
       )}
     </section>

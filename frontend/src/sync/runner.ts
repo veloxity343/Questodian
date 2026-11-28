@@ -6,6 +6,7 @@
 // into the background. Offline, or signed out, nothing happens and changes wait.
 
 import { useSyncExternalStore } from "react";
+import { backUp, backUpIfDue, backupsIn, noteChanged, restore, type CloudBackup } from "./backups";
 import { DriveError, googleDrive } from "./drive";
 import type { Folder } from "./folder";
 import { currentGoogleToken, forgetGoogleToken, signInToGoogle, signOutOfGoogle } from "./google";
@@ -36,6 +37,10 @@ export interface SyncStatus {
   error?: string;
   /** Records that couldn't be written by the last sync, and why. */
   skipped?: string[];
+  /** The cloud backups in the folder, newest first. */
+  backups?: CloudBackup[];
+  /** Why the last cloud backup couldn't be made, if it couldn't. */
+  backupError?: string;
 }
 
 interface Settings {
@@ -160,6 +165,7 @@ async function receive(cloud: Folder, listing: string[]): Promise<{ received: nu
     if (!skipped.length || !progress) break;
   }
   if (received) {
+    noteChanged();
     window.dispatchEvent(new Event("questodian:synced"));
     channel?.postMessage("synced");
   }
@@ -192,9 +198,19 @@ async function syncOnce(cloud: Folder): Promise<void> {
   const listing = await cloud.list();
   const { received, skipped } = await receive(cloud, listing);
   await send(cloud, listing);
+  // A day's backup (after sending, so it has everything); a failure doesn't stop sync.
+  let backupError: string | undefined;
+  try {
+    await backUpIfDue(cloud, listing);
+  } catch (e) {
+    backupError = (e as Error).message;
+  }
   const counts = await call<{ waiting: number; replaced: number }>("GET", "sync");
   const phase = settings() ? "idle" : "off"; // disconnected meanwhile
-  update({ phase, last: Date.now(), received, skipped, waiting: counts.waiting, replaced: counts.replaced, error: undefined });
+  update({
+    phase, last: Date.now(), received, skipped, waiting: counts.waiting, replaced: counts.replaced, error: undefined,
+    backups: backupsIn(listing), backupError,
+  });
 }
 
 let running: Promise<void> | null = null;
@@ -225,6 +241,31 @@ export function syncNow(): Promise<void> {
     });
   return running;
 }
+
+/** Run `job` with the folder, one at a time with syncs; then sync. */
+async function withFolder(job: (cloud: Folder) => Promise<void>) {
+  await running;
+  const cloud = folder();
+  if (!cloud) throw new Error("sign in to Google Drive again first");
+  update({ phase: "syncing" });
+  try {
+    await (navigator.locks ? navigator.locks.request("questodian-sync", () => job(cloud)) : job(cloud));
+  } finally {
+    update({ phase: "idle" });
+  }
+  await syncNow();
+}
+
+/** Back up to the folder now, whether or not one is due. */
+export const backUpNow = () => withFolder(async (cloud) => void (await backUp(cloud, await cloud.list())));
+
+/** Make this device's data what a cloud backup holds; sync takes it to the other devices. */
+export const restoreBackup = (name: string) =>
+  withFolder(async (cloud) => {
+    await restore(cloud, name);
+    window.dispatchEvent(new Event("questodian:synced"));
+    channel?.postMessage("synced");
+  });
 
 /** Connect Google Drive: call straight from a tap. */
 export async function connectGoogleDrive() {
@@ -272,7 +313,10 @@ export function startSync() {
       counts();
     };
   }
-  window.addEventListener("questodian:changed", () => soon(AFTER_CHANGE_MS));
+  window.addEventListener("questodian:changed", () => {
+    noteChanged();
+    soon(AFTER_CHANGE_MS);
+  });
   window.addEventListener("online", () => soon(1000));
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) void syncNow();

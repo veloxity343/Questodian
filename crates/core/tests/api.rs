@@ -413,3 +413,48 @@ async fn sync_through_the_api_moves_records_and_images() {
         raw(&b, Method::PUT, "/api/sync/images/..%2Fescape.png", vec![1], "application/octet-stream").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{}", String::from_utf8_lossy(&refused));
 }
+
+#[tokio::test]
+async fn replacing_with_a_full_backup_makes_the_data_exactly_that() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, campaign) = call(&router, Method::POST, "/api/campaigns", Some(json!({"name": "Kept"}))).await;
+    let cid = campaign["id"].as_str().unwrap().to_string();
+    let (_, note) = call(&router, Method::POST, "/api/notes", Some(json!({"title": "Before"}))).await;
+    let (_, backup) = call(&router, Method::GET, "/api/export", None).await;
+
+    // After the backup: an edit, new records (one with an image) and a rules edit.
+    call(
+        &router,
+        Method::PUT,
+        &format!("/api/notes/{}", note["id"].as_str().unwrap()),
+        Some(json!({"title": "After"})),
+    )
+    .await;
+    call(&router, Method::POST, "/api/sessions", Some(json!({"campaign_id": cid}))).await;
+    let (_, handout) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "New map"}))).await;
+    raw(
+        &router,
+        Method::PUT,
+        &format!("/api/handouts/{}/file", handout["id"].as_str().unwrap()),
+        vec![137, 80, 78, 71, 1],
+        "image/png",
+    )
+    .await;
+    call(&router, Method::PUT, "/api/rules/settings/score_cap", Some(json!(22))).await;
+
+    let (_, scoped) = call(&router, Method::GET, &format!("/api/export?campaign_id={cid}"), None).await;
+    let (status, refused) = call(&router, Method::POST, "/api/import?mode=replace", Some(scoped)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a campaign's export can't stand for everything: {refused}");
+
+    let (status, report) = call(&router, Method::POST, "/api/import?mode=replace", Some(backup.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["mode"], "replace");
+    let (_, now) = call(&router, Method::GET, "/api/export", None).await;
+    assert_eq!(now["collections"], backup["collections"]);
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("handouts")).unwrap().count(),
+        0,
+        "the new handout's image went with it"
+    );
+}

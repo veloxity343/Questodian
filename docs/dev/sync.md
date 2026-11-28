@@ -14,6 +14,13 @@ whatever the cloud allows (Google Drive has no conditional writes: tried with th
   deletion), each with a stamp: when the change was made, in milliseconds.
 - `image-<sha256>.<ext>`: handout images, named by their content, sent once.
 
+- `backup-<date>-<time>[-before-restore].json.gz`: cloud backups (`frontend/src/sync/backups.ts`):
+  the full export, gzipped, with each handout's image as `sync_image` (an image file above)
+  instead of `file_b64`. Made once a day when something changed, after a sync's sends; kept for
+  the last 14 days that have one and one a week for 8 weeks before. The only files ever removed.
+  Restoring re-embeds the images and imports with `mode=replace` (`transfer.rs`), which removes
+  what the backup doesn't have; the triggers note it all, so sync carries the restore.
+
 ## Which change wins
 
 Per record, the latest stamp, then the device id. A change is always stamped later than the

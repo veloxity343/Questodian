@@ -32,6 +32,9 @@ pub enum Mode {
     Skip,
     /// Give every record a new id (rewriting links between them), so nothing is replaced.
     Copy,
+    /// Make the data exactly what a full backup holds: overwrite, and remove every record (and
+    /// rules-data edit) the backup doesn't have. Restoring a cloud backup.
+    Replace,
 }
 
 impl Mode {
@@ -40,7 +43,8 @@ impl Mode {
             "overwrite" => Ok(Mode::Overwrite),
             "skip" => Ok(Mode::Skip),
             "copy" => Ok(Mode::Copy),
-            _ => Err(invalid("mode must be one of overwrite, skip, copy")),
+            "replace" => Ok(Mode::Replace),
+            _ => Err(invalid("mode must be one of overwrite, skip, copy, replace")),
         }
     }
 
@@ -49,6 +53,7 @@ impl Mode {
             Mode::Overwrite => "overwrite",
             Mode::Skip => "skip",
             Mode::Copy => "copy",
+            Mode::Replace => "replace",
         }
     }
 }
@@ -112,6 +117,33 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
         }
     }
     Ok(json!({"format": FORMAT, "version": VERSION, "exported": now(), "collections": collections}))
+}
+
+/// Remove every record and rules-data edit that isn't in `docs` and `edits` (for [`Mode::Replace`]).
+/// What's in them goes later kinds first, so a campaign's own records go before it does.
+async fn remove_all_but(repo: &mut Repo<'_>, docs: &Checked, edits: &[RuleEdit]) -> Result<()> {
+    for kind in Kind::ALL.iter().rev() {
+        let keep: std::collections::HashSet<&str> =
+            docs.get(kind).into_iter().flatten().map(|(doc, _)| text(doc, "id")).collect();
+        for doc in repo.list(*kind, &[]).await? {
+            let id = text(&doc, "id");
+            if keep.contains(id) || !repo.exists(*kind, id).await? {
+                continue;
+            }
+            if *kind == Kind::Handouts
+                && let Some(path) = handout_file(&repo.files_dir, text(&doc, "filename"))
+            {
+                repo.remove_on_commit(path);
+            }
+            repo.delete(*kind, id).await?;
+        }
+    }
+    for edit in repo.rule_overrides().await? {
+        if !edits.iter().any(|e| e.kind == edit.kind && e.key == edit.key) {
+            repo.delete_rule_override(&edit.kind, &edit.key).await?;
+        }
+    }
+    Ok(())
 }
 
 /// One record in an envelope that says what it is.
@@ -232,6 +264,12 @@ type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
 /// Import a bundle or single-record export. Everything is checked before anything is
 /// written, and the caller's unit of work makes it all-or-nothing.
 pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Result<Value> {
+    let asked = mode;
+    // Only a full backup (which has the rules-data edits, even none) can stand for everything.
+    if mode == Mode::Replace && payload.get("collections").and_then(|c| c.get(RULE_EDITS)).is_none() {
+        return Err(invalid("only a full backup can replace everything"));
+    }
+    let mode = if mode == Mode::Replace { Mode::Overwrite } else { mode };
     let collections = collections_from(payload)?;
     let (rule_edits, unusable_edits) = rule_edits_from(payload)?;
     let mut docs: Checked = HashMap::new();
@@ -259,6 +297,9 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
     let mut skipped = Map::new();
     let mut written_files = Vec::new();
     let result = async {
+        if asked == Mode::Replace {
+            remove_all_but(repo, &docs, &rule_edits).await?;
+        }
         for kind in Kind::ALL {
             let (mut done, mut passed) = (0, 0);
             for (mut doc, image) in docs.remove(&kind).unwrap_or_default() {
@@ -333,7 +374,7 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
         }
         return Err(e);
     }
-    Ok(json!({"imported": imported, "skipped": skipped, "mode": mode.name()}))
+    Ok(json!({"imported": imported, "skipped": skipped, "mode": asked.name()}))
 }
 
 pub(crate) fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {

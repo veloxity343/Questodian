@@ -8,4 +8,6 @@ export interface Folder {
   get(name: string): Promise<ArrayBuffer>;
   /** Add a file (its type is the blob's). */
   put(name: string, body: Blob): Promise<void>;
+  /** Remove a file (only old cloud backups are ever removed). */
+  remove(name: string): Promise<void>;
 }

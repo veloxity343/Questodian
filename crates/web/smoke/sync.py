@@ -12,6 +12,7 @@ Safari itself was tried with the real Google on an iPad. Exits non-zero if a che
 """
 
 import functools
+import gzip
 import http.server
 import json
 import re
@@ -93,6 +94,10 @@ class Drive:
                 token = uuid.uuid4().hex
                 self.uploads[token] = json.loads(request.post_data)["name"]
                 return reply(200, b"{}", {"Location": f"https://www.googleapis.com/upload/resumable/{token}"})
+            match = re.search(r"/drive/v3/files/([^?/]+)$", url)
+            if method == "DELETE" and match:
+                self.files.pop(match.group(1), None)
+                return reply(204)
             match = re.search(r"/upload/resumable/(\w+)", url)
             if method == "PUT" and match:
                 return reply(200, json.dumps({"id": self.add(self.uploads.pop(match.group(1)), request.post_data_buffer)}))
@@ -159,6 +164,14 @@ def main():
         names = drive.names()
         check("connecting sends A's records and image to Drive",
               any(n.startswith("changes-") for n in names) and any(n.startswith("image-") for n in names), names)
+        backups = [n for n in names if n.startswith("backup-")]
+        check("... and makes the first cloud backup", len(backups) == 1 and backups[0].endswith(".json.gz"), backups)
+        if backups:
+            content = next(c for n, c in drive.files.values() if n == backups[0])
+            bundle = json.loads(gzip.decompress(content))
+            shared = bundle["collections"]["handouts"][0]
+            check("... whose image is the folder's, not a copy",
+                  "file_b64" not in shared and shared.get("sync_image", "").startswith("image-"), list(shared))
 
         b_context, b = device()
         panel = sync_panel(b)
@@ -232,6 +245,32 @@ def main():
         b.get_by_role("button", name="Carry on syncing").click()
         synced(b)
         check("after an hour it pauses, and one tap signs in again and syncs", b.evaluate("window.__signIns || 0") == before + 1)
+
+        # A cloud backup restored on B undoes what came after it, on B and then on A.
+        api(b, "POST", "notes", {"title": "Made after the backup"})
+        panel = sync_panel(b)
+        b.get_by_role("button", name="Back up now").click()
+        synced(b)
+        made = [n for n in drive.names() if n.startswith("backup-")]
+        check("Back up now adds a backup, under a name of its own", len(made) == 2 and len(set(made)) == 2, made)
+        first = [n for n in drive.names() if n.startswith("backup-")][0]
+        api(b, "POST", "notes", {"title": "Made after both backups"})
+        sync_panel(b)
+        b.locator(".backup-list li").last.get_by_role("button", name="Restore").click()
+        b.get_by_role("dialog").get_by_role("button", name="Restore").click()
+        b.get_by_text("Restored").first.wait_for(timeout=30000)
+        titles = lambda page: [n["title"] for n in api(page, "GET", "notes")["body"]["notes"]]
+        check("restoring the oldest backup on B removes the notes made since", "Made after the backup" not in titles(b), titles(b))
+        check("... and keeps a backup of what was there", any("before-restore" in n for n in drive.names()), drive.names())
+        a.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        gone = False
+        for _ in range(20):
+            a.wait_for_timeout(1000)
+            if "Made after the backup" not in titles(a) and "Made on A" not in titles(a):
+                gone = True
+                break
+        check("... and sync takes the restore to A", gone, titles(a))
+        print("     restored", first)
 
         b.get_by_role("button", name="Disconnect").click()
         b.get_by_role("button", name="Connect Google Drive").wait_for(timeout=10000)

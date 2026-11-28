@@ -38,9 +38,24 @@ edit one of its sessions on another keeps that session, out of the campaign.
 A page you have open (a character sheet, the DM screen) shows the other device's changes when
 they arrive, unless you're in the middle of changing it: then your change is the later one.
 
+## Backups in Google Drive
+
+With sync connected, a full backup is saved to the same hidden folder once a day when something
+changed (and the first time you connect). The last 14 days' backups are kept, and one a week for
+the 8 weeks before; older ones are removed. **Back up now** saves one straight away.
+
+**Restore** (next to each backup in the Sync panel) makes that device's data exactly what the
+backup holds: records made since are removed, changed ones go back. Sync then takes it to your
+other devices. Just before restoring, what's there is backed up, so a restore can be undone by
+restoring that one ("before a restore").
+
+Handout images are kept once in the folder and shared by every backup, so a day's backup is
+small unless something big changed.
+
 ## Disconnecting
 
 **Disconnect** stops syncing on that device. Everything on it stays; so does the folder in your
 Drive, for your other devices.
 
-Sync isn't a backup: a deletion syncs too. Keep making [full backups](data-and-backups.md).
+A deletion syncs to every device, like any change: to undo one, restore a backup from before it.
+The Data page's **⬇ Full backup** still works as before, for a copy outside Google Drive.

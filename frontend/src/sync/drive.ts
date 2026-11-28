@@ -67,6 +67,14 @@ export function googleDrive(token: () => string): Folder {
       return (await check(await send(`${DRIVE}files/${id}?alt=media`), `fetching ${name}`)).arrayBuffer();
     },
 
+    async remove(name) {
+      const id = ids.get(name);
+      if (!id) return;
+      const res = await send(`${DRIVE}files/${id}`, { method: "DELETE" });
+      if (res.status !== 404) await check(res, `removing ${name}`);
+      ids.delete(name);
+    },
+
     async put(name, body) {
       const type = body.type || "application/octet-stream";
       const metadata = JSON.stringify({ name, parents: ["appDataFolder"] });

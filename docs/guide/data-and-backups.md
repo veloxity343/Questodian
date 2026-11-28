@@ -30,6 +30,9 @@ Choose how records already in your data are treated:
 | **Skip** | Adding what's new and keeping your existing records |
 | **Copy** | Sharing between DMs: everything comes in as new records |
 
+With sync on, backups are also kept in your Google Drive and restored from the Sync panel (see
+[Sync](sync.md#backups-in-google-drive)).
+
 Each import happens all at once: if a file has a problem, nothing changes. Rules-data edits that
 no longer fit the builder are skipped, and the import says how many.
 
