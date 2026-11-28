@@ -262,7 +262,10 @@ export const backUpNow = () => withFolder(async (cloud) => void (await backUp(cl
 /** Make this device's data what a cloud backup holds; sync takes it to the other devices. */
 export const restoreBackup = (name: string) =>
   withFolder(async (cloud) => {
-    await restore(cloud, name);
+    // Take in what other devices sent first, so the restore covers it too.
+    const listing = await cloud.list();
+    await receive(cloud, listing);
+    await restore(cloud, name, listing);
     window.dispatchEvent(new Event("questodian:synced"));
     channel?.postMessage("synced");
   });

@@ -255,18 +255,23 @@ def main():
         check("Back up now adds a backup, under a name of its own", len(made) == 2 and len(set(made)) == 2, made)
         first = [n for n in drive.names() if n.startswith("backup-")][0]
         api(b, "POST", "notes", {"title": "Made after both backups"})
+        # Sent by A just before B restores, B not having synced since: the restore covers it too.
+        api(a, "POST", "notes", {"title": "Sent by A just before"})
+        sync_panel(a).get_by_role("button", name="Sync now").click()
+        synced(a)
         sync_panel(b)
         b.locator(".backup-list li").last.get_by_role("button", name="Restore").click()
         b.get_by_role("dialog").get_by_role("button", name="Restore").click()
         b.get_by_text("Restored").first.wait_for(timeout=30000)
         titles = lambda page: [n["title"] for n in api(page, "GET", "notes")["body"]["notes"]]
-        check("restoring the oldest backup on B removes the notes made since", "Made after the backup" not in titles(b), titles(b))
+        check("restoring the oldest backup on B removes the notes made since, waiting ones too",
+              not {"Made after the backup", "Sent by A just before"} & set(titles(b)), titles(b))
         check("... and keeps a backup of what was there", any("before-restore" in n for n in drive.names()), drive.names())
         a.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
         gone = False
         for _ in range(20):
             a.wait_for_timeout(1000)
-            if "Made after the backup" not in titles(a) and "Made on A" not in titles(a):
+            if not {"Made after the backup", "Made on A", "Sent by A just before"} & set(titles(a)):
                 gone = True
                 break
         check("... and sync takes the restore to A", gone, titles(a))

@@ -201,6 +201,21 @@ fn local_image(repo: &Repo<'_>, handout: &Value) -> Option<String> {
 
 // ------------------------------------------------------------------ fetching
 
+/// Where an image fetched from the folder waits to be used (by [`apply`], or a restore's import).
+/// Only names sync gives are accepted.
+pub fn fetched_image(files_dir: &Path, name: &str) -> Result<std::path::PathBuf> {
+    let valid = name.strip_prefix("image-").and_then(|rest| rest.split_once('.')).is_some_and(|(hash, extension)| {
+        hash.len() == 64
+            && hash.bytes().all(|b| b.is_ascii_hexdigit())
+            && !extension.is_empty()
+            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+    });
+    if !valid {
+        return Err(invalid(format!("not a sync image name: {name}")));
+    }
+    Ok(files_dir.join("sync-fetched").join(name))
+}
+
 /// A change file's name: `changes-<device>-<seq>.json`.
 fn change_file(device: &str, seq: u64) -> String {
     format!("changes-{device}-{seq:09}.json")

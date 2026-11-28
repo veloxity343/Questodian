@@ -119,9 +119,10 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
     Ok(json!({"format": FORMAT, "version": VERSION, "exported": now(), "collections": collections}))
 }
 
-/// Remove every record and rules-data edit that isn't in `docs` and `edits` (for [`Mode::Replace`]).
-/// What's in them goes later kinds first, so a campaign's own records go before it does.
-async fn remove_all_but(repo: &mut Repo<'_>, docs: &Checked, edits: &[RuleEdit]) -> Result<()> {
+/// Remove every record that isn't in `docs`, and every rules-data edit the backup doesn't have
+/// (for [`Mode::Replace`]). Records go later kinds first, so a campaign's own records go before
+/// it does. An edit in the backup that this version can't use stays (a newer version's).
+async fn remove_all_but(repo: &mut Repo<'_>, docs: &Checked, payload: &Value) -> Result<()> {
     for kind in Kind::ALL.iter().rev() {
         let keep: std::collections::HashSet<&str> =
             docs.get(kind).into_iter().flatten().map(|(doc, _)| text(doc, "id")).collect();
@@ -138,8 +139,14 @@ async fn remove_all_but(repo: &mut Repo<'_>, docs: &Checked, edits: &[RuleEdit])
             repo.delete(*kind, id).await?;
         }
     }
+    let in_backup: Vec<(&str, &str)> = payload["collections"][RULE_EDITS]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| (e["kind"].as_str().unwrap_or(""), e["key"].as_str().unwrap_or("")))
+        .collect();
     for edit in repo.rule_overrides().await? {
-        if !edits.iter().any(|e| e.kind == edit.kind && e.key == edit.key) {
+        if !in_backup.contains(&(edit.kind.as_str(), edit.key.as_str())) {
             repo.delete_rule_override(&edit.kind, &edit.key).await?;
         }
     }
@@ -258,8 +265,16 @@ fn upgrade_v1(collections: &mut HashMap<Kind, Vec<Value>>) {
     }
 }
 
-/// Validated records by kind, each with its embedded image (handouts only).
-type Checked = HashMap<Kind, Vec<(Value, Option<Vec<u8>>)>>;
+/// A handout's image in an import.
+enum Image {
+    /// Its bytes.
+    Bytes(Vec<u8>),
+    /// The file made it couldn't read its image (a cloud backup's `keep_image`): keep the one here.
+    Keep,
+}
+
+/// Validated records by kind, each with its image (handouts only).
+type Checked = HashMap<Kind, Vec<(Value, Option<Image>)>>;
 
 /// Import a bundle or single-record export. Everything is checked before anything is
 /// written, and the caller's unit of work makes it all-or-nothing.
@@ -276,12 +291,23 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
     for kind in Kind::ALL {
         let mut checked = Vec::new();
         for raw in collections.get(&kind).into_iter().flatten() {
-            let image = match raw.get("file_b64") {
-                Some(b64) if kind == Kind::Handouts && truthy(b64) => {
+            let title = || python_repr(raw.get("title").unwrap_or(&json!("")));
+            let image = match (raw.get("file_b64"), raw.get("sync_image").and_then(Value::as_str)) {
+                (Some(b64), _) if kind == Kind::Handouts && truthy(b64) => {
                     let decoded = b64.as_str().and_then(|s| BASE64.decode(s).ok());
-                    let title = python_repr(raw.get("title").unwrap_or(&json!("")));
-                    Some(decoded.ok_or_else(|| invalid(format!("handout {title} has a broken image")))?)
+                    Some(Image::Bytes(
+                        decoded.ok_or_else(|| invalid(format!("handout {} has a broken image", title())))?,
+                    ))
                 }
+                // A cloud backup's: the image was fetched from the folder first (it's gone once saved).
+                (_, Some(name)) if kind == Kind::Handouts => {
+                    let path = crate::sync::fetched_image(&repo.files_dir, name)?;
+                    let bytes = files::read(&path)
+                        .ok_or_else(|| invalid(format!("handout {}'s image wasn't fetched", title())))?;
+                    repo.remove_on_commit(path);
+                    Some(Image::Bytes(bytes))
+                }
+                _ if kind == Kind::Handouts && raw.get("keep_image") == Some(&json!(true)) => Some(Image::Keep),
                 _ => None,
             };
             let doc = kind.normalize(raw.clone()).map_err(|e| invalid(format!("invalid record: {e}")))?;
@@ -298,7 +324,7 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
     let mut written_files = Vec::new();
     let result = async {
         if asked == Mode::Replace {
-            remove_all_but(repo, &docs, &rule_edits).await?;
+            remove_all_but(repo, &docs, payload).await?;
         }
         for kind in Kind::ALL {
             let (mut done, mut passed) = (0, 0);
@@ -319,18 +345,20 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
                     }
                 }
                 if kind == Kind::Handouts {
+                    let old = if mode == Mode::Overwrite { repo.find(kind, &id).await? } else { None };
+                    let old_name = old.as_ref().map(|o| text(o, "filename").to_string()).unwrap_or_default();
                     // Overwriting a handout replaces its image; the old file goes once the import is saved.
-                    if mode == Mode::Overwrite && repo.exists(kind, &id).await? {
-                        let old = repo.get(kind, &id).await?;
-                        if let Some(path) = handout_file(&repo.files_dir, text(&old, "filename")) {
-                            repo.remove_on_commit(path);
-                        }
+                    if !matches!(image, Some(Image::Keep))
+                        && let Some(path) = handout_file(&repo.files_dir, &old_name)
+                    {
+                        repo.remove_on_commit(path);
                     }
                     let name = match image {
-                        Some(bytes) => store_image(&repo.files_dir, &doc, &bytes)?,
+                        Some(Image::Bytes(bytes)) => store_image(&repo.files_dir, &doc, &bytes)?,
+                        Some(Image::Keep) => old_name,
                         None => String::new(),
                     };
-                    if !name.is_empty() {
+                    if !name.is_empty() && !matches!(old.as_ref(), Some(o) if text(o, "filename") == name) {
                         written_files.push(repo.files_dir.join(&name));
                     }
                     doc["filename"] = json!(name);

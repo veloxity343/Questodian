@@ -634,3 +634,19 @@ async fn restoring_a_backup_on_one_device_restores_it_on_the_others() {
     let titles = |v: Value| v["notes"].as_array().unwrap().iter().map(|n| n["title"].clone()).collect::<Vec<_>>();
     assert_eq!(titles(everything(&b).await), vec![json!("In the backup")]);
 }
+
+#[tokio::test]
+async fn a_restore_keeps_a_rules_edit_this_version_cant_use() {
+    let a = device().await;
+    // As a newer version's edit arrives by sync: not checked against this version's rules data.
+    sql(
+        &a,
+        r#"INSERT INTO rule_overrides (kind, "key", data, updated) VALUES ('feats', 'From A Later Version', NULL, '2026-11-28T00:00:00+00:00')"#,
+    );
+    let backup = transfer::export_bundle(&mut a.db.read().await.unwrap(), None).await.unwrap();
+    let mut repo = a.db.write().await.unwrap();
+    transfer::import_data(&mut repo, &backup, transfer::Mode::Replace).await.unwrap();
+    repo.commit().await.unwrap();
+    let edits = a.db.read().await.unwrap().rule_overrides().await.unwrap();
+    assert_eq!(edits.len(), 1, "{edits:?}");
+}

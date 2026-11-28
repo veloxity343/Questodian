@@ -107,20 +107,10 @@ function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-async function toBase64(bytes: ArrayBuffer): Promise<string> {
-  const url = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(new Blob([bytes]));
-  });
-  return url.slice(url.indexOf(",") + 1);
-}
-
 const compresses = typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
 
 interface Bundle {
-  collections: { handouts?: { filename?: string; file_b64?: string; sync_image?: string }[] };
+  collections: { handouts?: { filename?: string; file_b64?: string; sync_image?: string; keep_image?: boolean }[] };
 }
 
 /** Save a full backup to the folder now. `what` names one made for a reason ("before-restore"). */
@@ -129,7 +119,11 @@ export async function backUp(cloud: Folder, listing: string[], what = ""): Promi
   if (!res.ok) throw new Error(`making the backup: ${res.status}`);
   const bundle = (await res.json()) as Bundle;
   for (const handout of bundle.collections.handouts ?? []) {
-    if (!handout.file_b64) continue;
+    if (!handout.file_b64) {
+      // It has an image, but its file couldn't be read here: a restore keeps the one it finds.
+      if (handout.filename) handout.keep_image = true;
+      continue;
+    }
     const bytes = fromBase64(handout.file_b64);
     const name = `image-${await sha256(bytes.buffer)}.${extension(handout.filename || "")}`;
     if (!listing.includes(name)) {
@@ -140,8 +134,8 @@ export async function backUp(cloud: Folder, listing: string[], what = ""): Promi
     handout.sync_image = name;
   }
   const json = new Blob([JSON.stringify(bundle)], { type: "application/json" });
-  const time = new Date().toISOString().slice(11, 19).replaceAll(":", "");
-  const base = `backup-${today()}-${time}${what ? `-${what}` : ""}`;
+  const now = new Date().toISOString(); // one reading, so a name made at midnight is one day's
+  const base = `backup-${now.slice(0, 10)}-${now.slice(11, 19).replaceAll(":", "")}${what ? `-${what}` : ""}`;
   const name = compresses ? `${base}.json.gz` : `${base}.json`;
   const body = compresses ? await new Response(json.stream().pipeThrough(new CompressionStream("gzip"))).blob() : json;
   await cloud.put(name, new Blob([body], { type: compresses ? "application/gzip" : "application/json" }));
@@ -162,9 +156,9 @@ export async function backUpIfDue(cloud: Folder, listing: string[]) {
 }
 
 /** Make this device's data exactly what the backup holds (the current state is backed up first,
- *  so it can be undone). Sync then takes it to the other devices. */
-export async function restore(cloud: Folder, name: string) {
-  const listing = await cloud.list();
+ *  so it can be undone). Call after taking in the folder's waiting changes, so they're in that
+ *  backup and the restore removes them too. Sync then takes it to the other devices. */
+export async function restore(cloud: Folder, name: string, listing: string[]) {
   await backUp(cloud, listing, "before-restore");
   let blob = new Blob([await cloud.get(name)]);
   if (name.endsWith(".gz")) {
@@ -172,10 +166,14 @@ export async function restore(cloud: Folder, name: string) {
     blob = await new Response(blob.stream().pipeThrough(new DecompressionStream("gzip"))).blob();
   }
   const bundle = JSON.parse(await blob.text()) as Bundle;
+  // Images go ahead, one at a time, and the import takes them by name (a request has a size limit).
+  const sent = new Set<string>();
   for (const handout of bundle.collections.handouts ?? []) {
-    if (!handout.sync_image) continue;
-    handout.file_b64 = await toBase64(await cloud.get(handout.sync_image));
-    delete handout.sync_image;
+    const image = handout.sync_image;
+    if (!image || sent.has(image)) continue;
+    const res = await fetch(`${API}sync/images/${encodeURIComponent(image)}`, { method: "PUT", body: await cloud.get(image) });
+    if (!res.ok) throw new Error(`fetching an image to restore: ${res.status}`);
+    sent.add(image);
   }
   const res = await fetch(`${API}import?mode=replace`, {
     method: "POST",

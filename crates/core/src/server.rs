@@ -771,18 +771,8 @@ fn names(list: Vec<Value>) -> Vec<String> {
     list.into_iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
 }
 
-/// Where an image fetched for [`sync_apply`] waits. Only names sync gives are accepted.
 fn fetched_image(app: &App, name: &str) -> Result<PathBuf> {
-    let valid = name.strip_prefix("image-").and_then(|rest| rest.split_once('.')).is_some_and(|(hash, extension)| {
-        hash.len() == 64
-            && hash.bytes().all(|b| b.is_ascii_hexdigit())
-            && !extension.is_empty()
-            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
-    });
-    if !valid {
-        return Err(invalid(format!("not a sync image name: {name}")));
-    }
-    Ok(app.db.files_dir().join("sync-fetched").join(name))
+    sync::fetched_image(&app.db.files_dir(), name)
 }
 
 async fn sync_status(State(app): State<Shared>) -> Result<Json<Value>> {

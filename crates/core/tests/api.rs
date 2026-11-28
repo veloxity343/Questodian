@@ -458,3 +458,60 @@ async fn replacing_with_a_full_backup_makes_the_data_exactly_that() {
         "the new handout's image went with it"
     );
 }
+
+#[tokio::test]
+async fn a_cloud_backups_images_come_by_name_so_large_ones_restore() {
+    use sha2::Digest;
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, big) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Big map"}))).await;
+    let (_, gone) = call(&router, Method::POST, "/api/handouts", Some(json!({"title": "Its file went"}))).await;
+    let mut png = vec![137u8, 80, 78, 71];
+    png.resize(15 * 1024 * 1024 - 10, 7); // just under the image limit; with base64, over the request limit
+    for (handout, bytes) in [(&big, png.clone()), (&gone, vec![137, 80, 78, 71, 2])] {
+        let (status, _) = raw(
+            &router,
+            Method::PUT,
+            &format!("/api/handouts/{}/file", handout["id"].as_str().unwrap()),
+            bytes,
+            "image/png",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // As frontend/src/sync/backups.ts makes it: images by name, and one whose file couldn't be read.
+    let (_, mut backup) = call(&router, Method::GET, "/api/export", None).await;
+    let hash: String = sha2::Sha256::digest(&png).iter().map(|b| format!("{b:02x}")).collect();
+    let name = format!("image-{hash}.png");
+    for handout in backup["collections"]["handouts"].as_array_mut().unwrap() {
+        let handout = handout.as_object_mut().unwrap();
+        handout.remove("file_b64");
+        if handout["title"] == "Big map" {
+            handout.insert("sync_image".into(), json!(name));
+        } else {
+            handout.insert("keep_image".into(), json!(true));
+        }
+    }
+    call(&router, Method::DELETE, &format!("/api/handouts/{}", big["id"].as_str().unwrap()), None).await;
+
+    let (status, _) =
+        raw(&router, Method::PUT, &format!("/api/sync/images/{name}"), png.clone(), "application/octet-stream").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, report) = call(&router, Method::POST, "/api/import?mode=replace", Some(backup)).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let (_, restored) =
+        raw(&router, Method::GET, &format!("/api/handouts/{}/file", big["id"].as_str().unwrap()), vec![], "").await;
+    assert_eq!(restored.len(), png.len());
+    let (_, kept) =
+        raw(&router, Method::GET, &format!("/api/handouts/{}/file", gone["id"].as_str().unwrap()), vec![], "").await;
+    assert_eq!(kept, vec![137, 80, 78, 71, 2], "an image the backup couldn't hold is kept");
+    assert!(!dir.path().join("handouts").join("sync-fetched").join(&name).exists(), "the fetched image is used up");
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("handouts"))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_file())
+            .count(),
+        2
+    );
+}
