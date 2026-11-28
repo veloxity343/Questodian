@@ -1,0 +1,58 @@
+# Puts the web version of any branch on GitHub Pages, by hand: on GitHub, Actions → Deploy web
+# version → Run workflow, and pick the branch. For trying a branch on a device before it's
+# released; a release puts the released version back (release.yml). The site is checked in a
+# browser first (crates/web/smoke/pwa.py), so a build that doesn't work isn't published.
+# Setting it up and using it: docs/dev/releasing.md.
+name: Deploy web version
+
+on:
+  workflow_dispatch:
+
+# One deploy at a time; a newer one waits rather than cancelling one under way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check the web version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: swatinem/rust-cache@v2
+      # SQLite's C code is compiled for WebAssembly with clang.
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: make pwa QUESTODIAN_BASE=/Questodian/
+      # The check builds the site again (to try an update), so this build is set aside first.
+      - run: cp -r frontend/dist-web site
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - run: python crates/web/smoke/pwa.py
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Put it on GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

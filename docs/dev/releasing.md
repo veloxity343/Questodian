@@ -53,11 +53,32 @@ new one once all their windows have been closed.
 
 One-time setup in the repository's settings, before the first release that deploys:
 1. **Settings → Pages → Build and deployment → Source:** "GitHub Actions". The `gh-pages` branch
-   (deployed by hand before this) is then no longer what's served; keep it until the first
-   deployment from Actions has worked, then it can be deleted.
-2. **Settings → Environments → `github-pages` → Deployment branches and tags:** add a rule for
-   tags matching `v*`. The environment may allow only the default branch to deploy, and the
-   release runs from a tag.
+   (deployed by hand before this) is then not what's served (unverified in GitHub's docs: check
+   the site after the first deployment); once that has worked, the branch can be deleted.
+2. **Settings → Environments → `github-pages` → Deployment branches:** choose **Selected branches
+   and tags**, then **Add deployment branch or tag rule** twice: a **Tag** rule `v*` (releases) and
+   a **Branch** rule `*` (for trying a branch, below; `*` doesn't match names with `/`). The
+   environment appears once Pages uses GitHub Actions.
+
+### Trying a branch on the site before it's released
+
+**Actions → Deploy web version → Run workflow**, choose the branch, **Run workflow**
+(`.github/workflows/pages.yml`). It builds that branch's web version, checks it in a browser
+(`crates/web/smoke/pwa.py`; a build that fails isn't published) and replaces the site with it,
+usually within a few minutes. The next release puts the released version back. GitHub lists a
+hand-run workflow only once its file is on the default branch.
+
+By hand, without GitHub Actions (how it was done before), from a clean checkout of the branch:
+
+```bash
+make pwa QUESTODIAN_BASE=/Questodian/
+git worktree add /tmp/site gh-pages
+cd /tmp/site && git rm -rq . && cp -r -T "$OLDPWD/frontend/dist-web" . && touch .nojekyll
+git add -A && git commit -m "Web version (built from <branch>, <commit>)" && git push origin gh-pages
+cd - && git worktree remove /tmp/site
+```
+
+This only works while the Pages source is the `gh-pages` branch.
 
 The deploy is part of the Release workflow rather than waiting for the release to be published:
 the draft is created by the workflow's own token, GitHub doesn't start workflows from events that
