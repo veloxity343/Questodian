@@ -35,6 +35,12 @@ Sync panel says how many), and so is anything deleted on another device. An edit
 record was deleted on another device brings it back; deleting a campaign on one device while you
 edit one of its sessions on another keeps that session, out of the campaign.
 
+To get one back: the Sync panel's **… kept for 30 days** line opens the list: what each is, when
+it was replaced, and whether the record was deleted. **Restore** brings that version back as a
+new change, which sync takes to your other devices (the version it replaces is kept in turn, so
+a restore can be undone). A handout's image comes back from Google Drive if it's no longer on the
+device (signed in and online). **Dismiss** drops a version you don't need.
+
 A page you have open (a character sheet, the DM screen) shows the other device's changes when
 they arrive, unless you're in the middle of changing it: then your change is the later one.
 

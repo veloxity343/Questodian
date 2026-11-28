@@ -275,6 +275,26 @@ def main():
                 gone = True
                 break
         check("... and sync takes the restore to A", gone, titles(a))
+
+        # A keeps the notes B's restore deleted; one is restored from the list, and B gets it back.
+        panel = sync_panel(a)
+        panel.locator("summary", has_text="kept for 30 days").click()
+        entry = panel.locator(".kept li", has_text="Note: Sent by A just before")
+        entry.wait_for(timeout=10000)
+        check("A lists the note B's restore deleted, as deleted", "deleted" in entry.inner_text(), entry.inner_text())
+        entry.get_by_role("button", name="Restore").click()
+        a.get_by_text("Restored").first.wait_for(timeout=10000)
+        check("... restores it", "Sent by A just before" in titles(a), titles(a))
+        a.get_by_role("button", name="Sync now").click()
+        synced(a)
+        b.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        back = False
+        for _ in range(20):
+            b.wait_for_timeout(1000)
+            if "Sent by A just before" in titles(b):
+                back = True
+                break
+        check("... and sync takes it back to B", back, titles(b))
         print("     restored", first)
 
         b.get_by_role("button", name="Disconnect").click()

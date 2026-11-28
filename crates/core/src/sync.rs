@@ -399,7 +399,12 @@ async fn apply_one(
         if changed != RESEND {
             let ours: Stamp = (stamp_to_send(repo, kind, id, changed)?, me.to_string());
             if ours > *stamp {
-                keep_replaced(repo, kind, id, change.doc.as_ref(), current.as_ref())?;
+                // Another device's version, kept with the name of its image in the folder.
+                let mut theirs = change.doc.clone();
+                if let (Some(doc), Some(image)) = (theirs.as_mut(), &change.image) {
+                    doc["sync_image"] = json!(image);
+                }
+                keep_replaced(repo, kind, id, theirs.as_ref(), current.as_ref())?;
                 return Ok(false);
             }
         }
@@ -436,6 +441,15 @@ fn keep_replaced(repo: &Repo<'_>, kind: &str, id: &str, lost: Option<&Value>, wo
     let Some(lost) = lost.filter(|&lost| Some(lost) != won) else {
         return Ok(());
     };
+    // A handout's image file here goes with the version: note its name in the folder, to fetch
+    // it from there if this version is restored.
+    let mut lost = lost.clone();
+    if kind == Kind::Handouts.plural()
+        && lost.get("sync_image").is_none()
+        && let Some(image) = local_image(repo, &lost)
+    {
+        lost["sync_image"] = json!(image);
+    }
     // Once: a change put off and tried again would keep it again.
     repo.conn().execute(
         "INSERT INTO sync_replaced (kind, id, data, replaced) SELECT ?1, ?2, ?3, ?4
@@ -592,6 +606,106 @@ fn cascades(repo: &Repo<'_>, kind: Kind, field: &str) -> Result<bool> {
         .query_map([], |r| Ok((r.get::<_, String>("from")?, r.get::<_, String>("on_delete")?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(keys.iter().any(|(from, on_delete)| from == field && on_delete.eq_ignore_ascii_case("CASCADE")))
+}
+
+// ------------------------------------------------------------------ versions kept to restore
+
+/// The versions kept to restore, newest first: what each is, when it was replaced, and whether
+/// the record still exists here.
+pub async fn replaced(repo: &mut Repo<'_>) -> Result<Vec<Value>> {
+    let rows: Vec<(i64, String, String, String, String)> = repo
+        .conn()
+        .prepare("SELECT n, kind, id, data, replaced FROM sync_replaced ORDER BY n DESC")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut out = Vec::new();
+    for (n, kind, id, data, replaced) in rows {
+        let data: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
+        let title = if kind == RULES {
+            rule_key(&id).map(|(_, key)| key).unwrap_or_default()
+        } else {
+            crate::repo::title_of(&data)
+        };
+        let exists = load(repo, &kind, &id).await?.is_some();
+        out.push(json!({"n": n, "kind": kind, "id": id, "title": title, "replaced": replaced, "exists": exists,
+            "image": data.get("sync_image")}));
+    }
+    Ok(out)
+}
+
+/// Bring back a kept version, as a change made here now (so sync sends it, and it wins). What
+/// it replaces is kept in its turn. A handout's image comes from here if its file is still here,
+/// else from one fetched from the folder (`PUT /api/sync/images/<name>`); without either it comes
+/// back without its image. Says whether its image came back.
+pub async fn restore_replaced(repo: &mut Repo<'_>, n: i64) -> Result<Value> {
+    let row: Option<(String, String, String)> = repo
+        .conn()
+        .query_row("SELECT kind, id, data FROM sync_replaced WHERE n = ?", [n], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .optional()?;
+    let (kind, id, data) = row.ok_or_else(|| crate::error::not_found("that version is no longer kept"))?;
+    let mut doc: Value =
+        serde_json::from_str(&data).map_err(|e| invalid(format!("a kept version can't be read: {e}")))?;
+    let current = load(repo, &kind, &id).await?;
+    let mut image_back = true;
+    if kind == RULES {
+        let (rule_kind, key) = rule_key(&id)?;
+        let data = Some(&doc["data"]).filter(|d| !d.is_null());
+        repo.save_rule_override(&rule_kind, &key, data, None).await?;
+    } else {
+        let record = record_kind(&kind)?;
+        let image = doc.as_object_mut().and_then(|d| d.remove("sync_image"));
+        doc["id"] = json!(id);
+        for (field, target) in LINKS {
+            let link = doc.get(field).and_then(Value::as_str).unwrap_or("").to_string();
+            if !link.is_empty() && !repo.exists(target, &link).await? {
+                doc[field] = json!(""); // what it was in is gone
+            }
+        }
+        if record == Kind::Handouts {
+            let filename = doc["filename"].as_str().unwrap_or("").to_string();
+            let here = handout_file(&repo.files_dir, &filename).is_some_and(|f| crate::files::read(&f).is_some());
+            if !here {
+                let fetched = match image.as_ref().and_then(Value::as_str) {
+                    Some(name) => {
+                        let path = fetched_image(&repo.files_dir, name)?;
+                        crate::files::read(&path).map(|bytes| (path, bytes, name.to_string()))
+                    }
+                    None => None,
+                };
+                doc["filename"] = match fetched {
+                    Some((path, bytes, name)) => {
+                        doc["filename"] = json!(name); // for its extension
+                        let stored = store_image(&repo.files_dir, &doc, &bytes)?;
+                        repo.remove_on_commit(path);
+                        json!(stored)
+                    }
+                    None => {
+                        image_back = filename.is_empty();
+                        json!("")
+                    }
+                };
+            }
+            if let Some(path) =
+                current.as_ref().and_then(|c| handout_file(&repo.files_dir, c["filename"].as_str().unwrap_or("")))
+                && Some(path.file_name()) != Some(Path::new(doc["filename"].as_str().unwrap_or("")).file_name())
+            {
+                repo.remove_on_commit(path);
+            }
+        }
+        repo.save(record, doc.clone(), false).await?;
+    }
+    let restored = load(repo, &kind, &id).await?;
+    keep_replaced(repo, &kind, &id, current.as_ref(), restored.as_ref())?;
+    repo.conn().execute("DELETE FROM sync_replaced WHERE n = ?", [n])?;
+    Ok(json!({"restored": restored, "image": image_back}))
+}
+
+/// Stop keeping a version.
+pub async fn forget_replaced(repo: &mut Repo<'_>, n: i64) -> Result<()> {
+    repo.conn().execute("DELETE FROM sync_replaced WHERE n = ?", [n])?;
+    Ok(())
 }
 
 // ------------------------------------------------------------------ sending

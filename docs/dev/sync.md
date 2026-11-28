@@ -31,7 +31,10 @@ Per record, the latest stamp, then the device id. A change is always stamped lat
 version it was made to, whatever the clock says, so an edit made after seeing another wins. The
 losing version goes to `sync_replaced` for 30 days.
 
-A record replaced or deleted by another device's change is kept in `sync_replaced` too.
+A record replaced or deleted by another device's change is kept in `sync_replaced` too (a
+handout with its image's folder name as `sync_image`). `GET /api/sync/replaced` lists them;
+`POST /api/sync/replaced/<n>/restore` saves one as a change made here (the page fetches its image
+into `/api/sync/images/<name>` first if needed); `DELETE` drops one.
 
 Deleting a record takes along what its foreign keys cascade to (a campaign's sessions, say).
 Applying another device's deletion keeps those changed after it (here, or in a later version from

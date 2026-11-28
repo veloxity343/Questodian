@@ -8,7 +8,9 @@ import { useLoad } from "../lib/hooks";
 import { pickFiles, slug, today } from "../lib/util";
 import { daysSince, saveFile, useLastBackup } from "../web/backup";
 import { loadGoogle } from "../sync/google";
-import { backUpNow, connectGoogleDrive, disconnect, restoreBackup, resumeSync, syncNow, useSyncStatus } from "../sync/runner";
+import {
+  backUpNow, connectGoogleDrive, disconnect, forgetKept, keptVersions, restoreBackup, restoreKept, resumeSync, syncNow, useSyncStatus, type Kept,
+} from "../sync/runner";
 import { checkThisBrowser, reportText, type Check } from "../web/selftest";
 import type { Kind } from "../types";
 
@@ -211,7 +213,7 @@ function SyncPanel() {
             )}
             <button type="button" className="btn ghost" disabled={busy} onClick={() => act(disconnect)}>Disconnect</button>
           </div>
-          {!!status.replaced && <p className="muted small">{status.replaced} version{status.replaced === 1 ? "" : "s"} replaced by another device's are kept for 30 days.</p>}
+          {!!status.replaced && <KeptVersions count={status.replaced} />}
           <h3>Backups in Google Drive</h3>
           <p className="muted small">
             A full backup is saved there once a day when something changed. The last 14 days' are kept, and one a week for 8 weeks before.
@@ -241,6 +243,59 @@ function SyncPanel() {
         </>
       )}
     </section>
+  );
+}
+
+const KIND_NAMES: Record<string, string> = {
+  campaigns: "Campaign", sessions: "Session", characters: "Character", handbook: "Handbook entry", scenes: "Scene", npcs: "NPC",
+  monsters: "Monster", notes: "Note", encounters: "Encounter", trackers: "Tracker", handouts: "Handout", rule_overrides: "Rules data edit",
+};
+
+/** Versions replaced (or deleted) by another device's change, kept 30 days to restore. */
+function KeptVersions({ count }: { count: number }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<Kept[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) keptVersions().then(setList, (e: Error) => toast(e.message, "error"));
+  }, [open, count, toast]);
+  const act = async (what: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await what();
+      setList(await keptVersions());
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <details className="kept" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="small">
+        {count} version{count === 1 ? "" : "s"} replaced or deleted by another device, kept for 30 days
+      </summary>
+      {list && (
+        <ul className="backup-list small">
+          {list.map((k) => (
+            <li key={k.n}>
+              <span>
+                {KIND_NAMES[k.kind] ?? k.kind}: {k.title || "(untitled)"}
+                <span className="muted"> · {new Date(k.replaced).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{k.exists ? "" : " · deleted"}</span>
+              </span>
+              <span className="row gap">
+                <button type="button" className="btn ghost small" disabled={busy} onClick={() => act(async () => {
+                  const image = await restoreKept(k);
+                  toast(image ? "Restored" : "Restored, without its image (it couldn't be fetched)");
+                })}>Restore</button>
+                <button type="button" className="btn ghost small" disabled={busy} onClick={() => act(() => forgetKept(k))}>Dismiss</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }
 

@@ -270,6 +270,55 @@ export const restoreBackup = (name: string) =>
     channel?.postMessage("synced");
   });
 
+/** A version replaced by another device's (or deleted there), kept 30 days to restore. */
+export interface Kept {
+  n: number;
+  kind: string;
+  id: string;
+  title: string;
+  /** When it was replaced. */
+  replaced: string;
+  /** Whether the record is still here (it isn't if the other device deleted it). */
+  exists: boolean;
+  /** A handout's image, by its name in the folder. */
+  image?: string | null;
+}
+
+export async function keptVersions(): Promise<Kept[]> {
+  return (await call<{ replaced: Kept[] }>("GET", "sync/replaced")).replaced;
+}
+
+async function afterKeptChanged() {
+  const counts = await call<{ waiting: number; replaced: number }>("GET", "sync");
+  update({ waiting: counts.waiting, replaced: counts.replaced });
+}
+
+/** Bring a kept version back; sync then sends it. False if a handout came back without its image
+ *  (not here, and Drive couldn't be reached). */
+export async function restoreKept(kept: Kept): Promise<boolean> {
+  const cloud = kept.image ? folder() : null;
+  if (cloud && kept.image) {
+    try {
+      if ((await cloud.list()).includes(kept.image)) {
+        await fetch(`${API}sync/images/${encodeURIComponent(kept.image)}`, { method: "PUT", body: await cloud.get(kept.image) });
+      }
+    } catch {
+      // offline: it comes back without its image
+    }
+  }
+  const out = await call<{ image: boolean }>("POST", `sync/replaced/${kept.n}/restore`);
+  window.dispatchEvent(new Event("questodian:synced")); // show it
+  channel?.postMessage("synced");
+  window.dispatchEvent(new Event("questodian:changed")); // and send it
+  await afterKeptChanged();
+  return out.image;
+}
+
+export async function forgetKept(kept: Kept) {
+  await call("DELETE", `sync/replaced/${kept.n}`);
+  await afterKeptChanged();
+}
+
 /** Connect Google Drive: call straight from a tap. */
 export async function connectGoogleDrive() {
   await signInToGoogle(true);

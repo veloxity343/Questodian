@@ -650,3 +650,98 @@ async fn a_restore_keeps_a_rules_edit_this_version_cant_use() {
     let edits = a.db.read().await.unwrap().rule_overrides().await.unwrap();
     assert_eq!(edits.len(), 1, "{edits:?}");
 }
+
+// ---------------------------------------------------------------------- versions kept to restore
+
+async fn kept(device: &Device) -> Vec<Value> {
+    sync::replaced(&mut device.db.read().await.unwrap()).await.unwrap()
+}
+
+async fn restore_kept(device: &Device, n: &Value) -> Value {
+    let mut repo = device.db.write().await.unwrap();
+    let out = sync::restore_replaced(&mut repo, n.as_i64().unwrap()).await.unwrap();
+    repo.commit().await.unwrap();
+    out
+}
+
+#[tokio::test]
+async fn an_edit_that_lost_can_be_restored_and_goes_everywhere() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let id = create(&a, Kind::Npcs, json!({"name": "Mara"})).await["id"].as_str().unwrap().to_string();
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+    update(&a, Kind::Npcs, &id, json!({"name": "Mara (A)"})).await;
+    later().await;
+    update(&b, Kind::Npcs, &id, json!({"name": "Mara (B)"})).await;
+    for device in [&a, &b, &a] {
+        sync(device, &mut folder).await;
+    }
+
+    let list = kept(&a).await;
+    assert_eq!((list.len(), &list[0]["title"], &list[0]["exists"]), (1, &json!("Mara (A)"), &json!(true)), "{list:?}");
+    restore_kept(&a, &list[0]["n"]).await;
+    assert_eq!(get(&a, Kind::Npcs, &id).await.unwrap()["name"], "Mara (A)");
+    assert_eq!(kept(&a).await[0]["title"], "Mara (B)", "what the restore replaced is kept in turn");
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+    assert_eq!(get(&b, Kind::Npcs, &id).await.unwrap()["name"], "Mara (A)");
+}
+
+#[tokio::test]
+async fn a_record_deleted_on_another_device_can_be_brought_back() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let id = create(&a, Kind::Notes, json!({"title": "Clue"})).await["id"].as_str().unwrap().to_string();
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+    delete(&a, Kind::Notes, &id).await;
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+
+    let list = kept(&b).await;
+    assert_eq!((&list[0]["title"], &list[0]["exists"]), (&json!("Clue"), &json!(false)));
+    restore_kept(&b, &list[0]["n"]).await;
+    sync(&b, &mut folder).await;
+    sync(&a, &mut folder).await;
+    assert_eq!(get(&a, Kind::Notes, &id).await.unwrap()["title"], "Clue");
+
+    // Dismissed, it's gone from the list.
+    let mut repo = b.db.write().await.unwrap();
+    let n = sync::replaced(&mut repo).await.unwrap().len();
+    if n > 0 {
+        let first = sync::replaced(&mut repo).await.unwrap()[0]["n"].as_i64().unwrap();
+        sync::forget_replaced(&mut repo, first).await.unwrap();
+    }
+    repo.commit().await.unwrap();
+    assert_eq!(kept(&b).await.len(), n.saturating_sub(1));
+}
+
+#[tokio::test]
+async fn a_handouts_old_image_comes_back_from_the_folder() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let id = create(&a, Kind::Handouts, json!({"title": "Map"})).await["id"].as_str().unwrap().to_string();
+    set_image(&a, &id, b"first map").await;
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+    set_image(&b, &id, b"second map").await;
+    sync(&b, &mut folder).await;
+    sync(&a, &mut folder).await;
+    assert_eq!(image_of(&a, &id).await.unwrap(), b"second map");
+
+    let list = kept(&a).await;
+    let image = list[0]["image"].as_str().expect("the kept version names its image").to_string();
+    // The page fetches its image from the folder first.
+    files::write(&sync::fetched_image(&a.db.files_dir(), &image).unwrap(), &folder[&image]).unwrap();
+    let out = restore_kept(&a, &list[0]["n"]).await;
+    assert_eq!(out["image"], true);
+    assert_eq!(image_of(&a, &id).await.unwrap(), b"first map");
+
+    // The version that replaced, kept in turn: without its image fetched, it comes back without one, and says so.
+    let second = kept(&a).await;
+    assert_eq!(second.len(), 1, "{second:?}");
+    let out = restore_kept(&a, &second[0]["n"]).await;
+    assert_eq!(out["image"], false);
+    assert_eq!(get(&a, Kind::Handouts, &id).await.unwrap()["filename"], "");
+}

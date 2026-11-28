@@ -87,6 +87,9 @@ pub fn router(app: Shared) -> Router {
         .route("/sync/apply", post(sync_apply))
         .route("/sync/outgoing", post(sync_outgoing))
         .route("/sync/sent", post(sync_sent))
+        .route("/sync/replaced", get(sync_replaced))
+        .route("/sync/replaced/{n}", axum::routing::delete(sync_forget_replaced))
+        .route("/sync/replaced/{n}/restore", post(sync_restore_replaced))
         .route("/{kind}", get(list_records).post(create_record))
         .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
@@ -835,6 +838,25 @@ async fn sync_sent(State(app): State<Shared>, JsonBody(body): JsonBody) -> Resul
     let name = body.as_ref().and_then(|b| b["name"].as_str()).ok_or_else(|| body_error("name: required"))?.to_string();
     let mut repo = app.db.write().await?;
     sync::sent(&mut repo, &name).await?;
+    repo.commit().await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn sync_replaced(State(app): State<Shared>) -> Result<Json<Value>> {
+    let kept = sync::replaced(&mut app.db.read().await?).await?;
+    Ok(Json(json!({"replaced": kept})))
+}
+
+async fn sync_restore_replaced(State(app): State<Shared>, UrlPath((n,)): UrlPath<(i64,)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    let restored = sync::restore_replaced(&mut repo, n).await?;
+    repo.commit().await?;
+    Ok(Json(restored))
+}
+
+async fn sync_forget_replaced(State(app): State<Shared>, UrlPath((n,)): UrlPath<(i64,)>) -> Result<Json<Value>> {
+    let mut repo = app.db.write().await?;
+    sync::forget_replaced(&mut repo, n).await?;
     repo.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
