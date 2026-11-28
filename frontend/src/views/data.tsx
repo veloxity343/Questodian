@@ -9,7 +9,8 @@ import { pickFiles, slug, today } from "../lib/util";
 import { daysSince, saveFile, useLastBackup } from "../web/backup";
 import { loadGoogle } from "../sync/google";
 import {
-  backUpNow, connectGoogleDrive, disconnect, forgetKept, keptVersions, restoreBackup, restoreKept, resumeSync, syncNow, useSyncStatus, type Kept,
+  backUpNow, connectGoogleDrive, disconnect, forgetKept, keptVersions, refreshBackups, restoreBackup, restoreKept, resumeSync, syncNow, useSyncStatus,
+  type Kept,
 } from "../sync/runner";
 import { checkThisBrowser, reportText, type Check } from "../web/selftest";
 import type { Kind } from "../types";
@@ -161,6 +162,7 @@ function SyncPanel() {
   // Google's script loads before the tap that signs in, so its window opens straight away.
   useEffect(() => {
     if (navigator.onLine) loadGoogle().catch(() => {});
+    void refreshBackups();
     const timer = setInterval(() => tick((n) => n + 1), 30000); // keep "… minutes ago" current
     return () => clearInterval(timer);
   }, []);
@@ -214,7 +216,7 @@ function SyncPanel() {
             <button type="button" className="btn ghost" disabled={busy} onClick={() => act(disconnect)}>Disconnect</button>
           </div>
           {!!status.replaced && <KeptVersions count={status.replaced} />}
-          <h3>Backups in Google Drive</h3>
+          <h3 className="sync-section">Backups in Google Drive</h3>
           <p className="muted small">
             A full backup is saved there once a day when something changed. The last 14 days' are kept, and one a week for 8 weeks before.
             Restoring makes this device's data what the backup holds, and sync takes it to your other devices; what's here now is backed up first.
@@ -237,9 +239,13 @@ function SyncPanel() {
               ))}
             </ul>
           ) : (
-            <p className="muted small">None yet: the first is made at the next sync.</p>
+            <p className="muted small">
+              {status.backups ? "None yet: the first is made at the next sync." : "Listed here once signed in to Google Drive."}
+            </p>
           )}
-          <button type="button" className="btn small" disabled={busy || status.phase === "syncing" || status.phase === "paused"} onClick={() => act(backUpNow)}>Back up now</button>
+          <div className="sync-actions">
+            <button type="button" className="btn small" disabled={busy || status.phase === "syncing" || status.phase === "paused"} onClick={() => act(backUpNow)}>Back up now</button>
+          </div>
         </>
       )}
     </section>

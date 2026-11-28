@@ -435,6 +435,13 @@ textarea.rules-json.invalid { border-color: var(--bad); }
 .settings-btn.active { color: var(--accent); }
 .backup-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 4px; }
 .backup-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sync-section { margin-top: 20px; }
+.kept { margin: 12px 0; }
+.kept summary { cursor: pointer; }
+/* Big enough to tap on a tablet or phone. */
+@media (pointer: coarse) {
+  .backup-list .btn, .sync-actions .btn { min-height: 40px; }
+}
 .browser-check { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .modes .nav-dot { display: inline-block; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .settings-btn .dot { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }

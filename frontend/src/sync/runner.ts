@@ -256,6 +256,17 @@ async function withFolder(job: (cloud: Folder) => Promise<void>) {
   await syncNow();
 }
 
+/** List the folder's backups for the panel (when signed in; quietly nothing otherwise). */
+export async function refreshBackups() {
+  const cloud = settings() && navigator.onLine ? folder() : null;
+  if (!cloud) return;
+  try {
+    update({ backups: backupsIn(await cloud.list()) });
+  } catch {
+    // shown after the next sync instead
+  }
+}
+
 /** Back up to the folder now, whether or not one is due. */
 export const backUpNow = () => withFolder(async (cloud) => void (await backUp(cloud, await cloud.list())));
 
