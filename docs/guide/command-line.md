@@ -72,6 +72,11 @@ questodian import backup.json house-rules.md --mode skip
 ```
 
 `export` writes everything, or with `--campaign <id>` one campaign and its linked records; without a
-file name it prints to the screen. `import` takes JSON exports and Markdown files, in `overwrite`
+file name it prints to the screen. If any records can't be read, `export` leaves them out and prints
+a warning naming each one on stderr (see [Records that can't be read](data-and-backups.md#records-that-cant-be-read));
+it still writes the file, but exits with 2 instead of 0 so a backup script can tell it's
+incomplete (1 means the export failed). `import` warns the same way about a file that left records
+out, and exits with 0 if the import itself worked.
+`import` takes JSON exports and Markdown files, in `overwrite`
 (the default), `skip` or `copy` mode. See [Data and backups](data-and-backups.md) for what these
 mean.

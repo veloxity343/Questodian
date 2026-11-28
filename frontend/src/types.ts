@@ -347,10 +347,29 @@ export interface Meta {
   standard_array: number[];
 }
 
+/** A stored record that can't be read (e.g. edited by hand), so lists and exports leave it out. */
+export interface Unreadable {
+  kind: Kind;
+  /** Empty if even the id can't be read. */
+  id: string;
+  error: string;
+}
+
+/** A full or campaign export. `unreadable` is there only when records were left out. */
+export interface ExportBundle {
+  format: string;
+  version: number;
+  exported: string;
+  collections: Record<string, unknown[]>;
+  unreadable?: Unreadable[];
+}
+
 export interface ImportSummary {
   imported: Partial<Record<Kind, number>>;
   skipped: Partial<Record<Kind, number>>;
   mode: string;
+  /** Records the file says its export left out (they couldn't be read when it was made). */
+  unreadable: Unreadable[];
 }
 
 export type EncounterAction =

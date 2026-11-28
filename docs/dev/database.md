@@ -57,3 +57,12 @@ Exports (`transfer.rs`) are JSON bundles with a format `VERSION`:
 | 3 | Characters' builder choices, rules-data edits and drawn maps |
 
 The app imports any version up to its own, and refuses newer ones.
+
+A record that can't be read (`Repo::list_checked`: it fails normalisation, e.g. edited by hand) is
+left out of lists and exports rather than hiding the rest. Full and campaign exports then list what
+they left out under a top-level `unreadable` key: `[{"kind": "characters", "id": "…", "error": "…"}]`.
+The key is only there when something was left out. Imports pass it back as `unreadable` in their
+summary (an empty list for a complete file) and otherwise ignore it, as every earlier version
+does, so it needs no version bump. A campaign export also lists unreadable records whose
+`campaign_id` can't be read, since they might be that campaign's.
+`GET /api/unreadable` lists every such record for the Data page.
