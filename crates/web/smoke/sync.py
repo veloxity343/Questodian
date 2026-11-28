@@ -201,6 +201,27 @@ def main():
                 break
         check("a change is sent by itself shortly after it's made (15 s)", found, b_notes())
 
+        # A character sheet open on B takes A's change when it arrives, so B's next edit doesn't undo it.
+        character = api(a, "POST", "characters", {"name": "Wren"})["body"]
+        a.evaluate("window.dispatchEvent(new Event('questodian:changed'))")
+        sync_panel(a).get_by_role("button", name="Sync now").click()
+        synced(a)
+        b.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        b.wait_for_timeout(3000)
+        b.goto(url + f"characters/{character['id']}")
+        value_is = "v => [...document.querySelectorAll('main input')].some(i => i.value === v)"
+        b.wait_for_function(value_is, arg="Wren", timeout=15000)
+        api(a, "PUT", f"characters/{character['id']}", {"name": "Wren, renamed on A"})
+        sync_panel(a).get_by_role("button", name="Sync now").click()
+        synced(a)
+        b.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        try:
+            b.wait_for_function(value_is, arg="Wren, renamed on A", timeout=20000)
+            refreshed = True
+        except Exception:
+            refreshed = False
+        check("an open character sheet shows the other device's change", refreshed)
+
         # The hour's sign-in runs out: sync pauses, and one tap carries on.
         b.evaluate("""() => { const t = JSON.parse(localStorage.getItem('questodian-google-token'));
           t.expires = Date.now(); localStorage.setItem('questodian-google-token', JSON.stringify(t)); }""")

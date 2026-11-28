@@ -20,9 +20,19 @@ Per record, the latest stamp, then the device id. A change is always stamped lat
 version it was made to, whatever the clock says, so an edit made after seeing another wins. The
 losing version goes to `sync_replaced` for 30 days.
 
-Deleting a record that others link to (a campaign) keeps the records in it that were changed after
-the deletion, unlinked, and sends them on. A record linking to one that hasn't arrived yet waits:
-its file is applied again next sync (`sync_applied` holds the files applied).
+A record replaced or deleted by another device's change is kept in `sync_replaced` too.
+
+Deleting a record takes along what its foreign keys cascade to (a campaign's sessions, say).
+Applying another device's deletion keeps those changed after it (here, or in a later version from
+another device), unlinked, and sends them on so every device keeps them; a change made here
+before the deletion goes, and is kept to restore. Links that are only cleared (`ON DELETE SET
+NULL`) are left to each device. A record linking to one that hasn't arrived yet waits: its file is
+applied again next sync (`sync_applied` holds the files applied).
+
+When the folder has none of a device's files (its first sync, or a new folder), it sends every
+record: those never synced as changes, and the rest again as they are, under the stamp they have
+and the device that made them (so devices that have them ignore them), unless that device has
+files in the folder.
 
 ## Locally (schema 0006)
 
@@ -36,8 +46,11 @@ The core does no networking: the page holds the cloud's sign-in and moves the fi
 1. List the folder; `POST /api/sync/wanted` gives the change files to fetch.
 2. `POST /api/sync/images-needed` with them; fetch those images and `PUT /api/sync/images/<name>`.
 3. `POST /api/sync/apply` with the files.
+   Apply files in batches (a request takes up to 20 MB); a record waiting for one in a later
+   batch is applied when its file is applied again.
 4. `POST /api/sync/outgoing` with the current listing: a file to send and its images. Send the
-   images the folder lacks, then the file, then `POST /api/sync/sent`. Repeat until it returns
+   images the folder lacks (checking each one's bytes still match its name), then the file, then
+   `POST /api/sync/sent`. If an image can't be sent, stop: the change file goes next time. Repeat until it returns
    null. Pass the listing as it is after each send: a listing without any of this device's files
    means a new folder, and everything is queued again.
 

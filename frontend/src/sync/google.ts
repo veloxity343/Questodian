@@ -106,6 +106,16 @@ export function currentGoogleToken(): string | null {
   return stored()?.token ?? (memory && memory.expires - MARGIN_MS > Date.now() ? memory.token : null);
 }
 
+/** Forget the token (Google refused it): the next sync needs a tap to sign in again. */
+export function forgetGoogleToken() {
+  memory = null;
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // nothing kept
+  }
+}
+
 /** Forget the token, and tell Google to withdraw it. */
 export async function signOutOfGoogle() {
   const token = currentGoogleToken();

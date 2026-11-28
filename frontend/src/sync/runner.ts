@@ -1,13 +1,14 @@
 // Running sync: moves files between the cloud folder and the core's sync steps
-// (crates/core/src/sync.rs, /api/sync/...), one sync at a time, and keeps a status to show.
+// (crates/core/src/sync.rs, /api/sync/...), one sync at a time across every window, and keeps a
+// status to show.
 //
 // When: on opening the app, a little after a change, every few minutes, and when the app goes
 // into the background. Offline, or signed out, nothing happens and changes wait.
 
 import { useSyncExternalStore } from "react";
-import { googleDrive } from "./drive";
+import { DriveError, googleDrive } from "./drive";
 import type { Folder } from "./folder";
-import { currentGoogleToken, signInToGoogle, signOutOfGoogle } from "./google";
+import { currentGoogleToken, forgetGoogleToken, signInToGoogle, signOutOfGoogle } from "./google";
 
 const API = `${import.meta.env.BASE_URL}api/`;
 const SETTINGS_KEY = "questodian-sync";
@@ -15,6 +16,10 @@ const SETTINGS_KEY = "questodian-sync";
 const AFTER_CHANGE_MS = 15_000;
 /** And sync this often anyway, to get other devices' changes. */
 const EVERY_MS = 5 * 60_000;
+/** Change files are applied in batches of about this size (the API takes up to 20 MB a request). */
+const BATCH_BYTES = 8 * 1024 * 1024;
+/** Windows tell each other when a sync brought changes, or sync was connected or disconnected. */
+const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("questodian-sync");
 
 export type Phase = "off" | "idle" | "syncing" | "paused" | "error";
 
@@ -37,26 +42,30 @@ interface Settings {
   provider: "google";
 }
 
+/** Whether sync is connected, read fresh each time: another window may have changed it. */
 function settings(): Settings | null {
   try {
     return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null") as Settings | null;
   } catch {
-    return null;
+    return memorySettings;
   }
 }
 
+/** Where settings are kept if the browser keeps nothing (private browsing). */
+let memorySettings: Settings | null = null;
+
 function saveSettings(value: Settings | null) {
+  memorySettings = value;
   try {
     if (value) localStorage.setItem(SETTINGS_KEY, JSON.stringify(value));
     else localStorage.removeItem(SETTINGS_KEY);
   } catch {
-    // private browsing: sync stays on while the page is open
+    // kept in memory instead
   }
-  connected = value;
+  channel?.postMessage("settings");
 }
 
-let connected: Settings | null = settings();
-let status: SyncStatus = { phase: connected ? "idle" : "off" };
+let status: SyncStatus = { phase: settings() ? "idle" : "off" };
 const listeners = new Set<() => void>();
 
 function update(change: Partial<SyncStatus>) {
@@ -82,7 +91,12 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { detail: text };
+  }
   if (!res.ok) throw new Error((data as { detail?: string })?.detail || `${res.status}`);
   return data as T;
 }
@@ -99,46 +113,82 @@ interface Outgoing {
 }
 
 function folder(): Folder | null {
-  if (connected?.provider !== "google") return null;
+  if (settings()?.provider !== "google") return null;
   if (!currentGoogleToken()) return null;
   return googleDrive(() => currentGoogleToken() || "");
 }
 
-/** One sync: fetch and apply other devices' changes, then send this device's. */
-async function syncOnce(cloud: Folder): Promise<void> {
-  let listing = await cloud.list();
-  const { files: wanted } = await call<{ files: string[] }>("POST", "sync/wanted", { listing });
-  const decoder = new TextDecoder();
-  const files = [];
-  for (const name of wanted) files.push(JSON.parse(decoder.decode(await cloud.get(name))));
+/** The name sync gives an image with these bytes: `image-<sha256>.<ext>`. */
+async function hashOf(bytes: ArrayBuffer): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Fetch and apply other devices' change files, in batches. Returns what came in. */
+async function receive(cloud: Folder, listing: string[]): Promise<{ received: number; skipped: string[] }> {
   let received = 0;
   let skipped: string[] = [];
-  if (files.length) {
-    const { images } = await call<{ images: string[] }>("POST", "sync/images-needed", { files });
-    for (const name of images) {
-      if (!listing.includes(name)) continue; // not sent yet: that record is skipped this time
-      const res = await fetch(`${API}sync/images/${encodeURIComponent(name)}`, { method: "PUT", body: await cloud.get(name) });
-      if (!res.ok) throw new Error(`keeping ${name}: ${res.status}`);
+  // A record waiting for one from a later batch is applied in the next round.
+  for (let round = 0; round < 3; round++) {
+    const { files: wanted } = await call<{ files: string[] }>("POST", "sync/wanted", { listing });
+    if (!wanted.length) break;
+    const decoder = new TextDecoder();
+    let progress = 0;
+    skipped = [];
+    for (let start = 0; start < wanted.length; ) {
+      const batch: unknown[] = [];
+      let size = 0;
+      while (start < wanted.length && (batch.length === 0 || size < BATCH_BYTES)) {
+        const bytes = await cloud.get(wanted[start++]);
+        size += bytes.byteLength;
+        batch.push(JSON.parse(decoder.decode(bytes)));
+      }
+      const { images } = await call<{ images: string[] }>("POST", "sync/images-needed", { files: batch });
+      for (const name of images) {
+        if (!listing.includes(name)) continue; // not in the folder: that record waits
+        const res = await fetch(`${API}sync/images/${encodeURIComponent(name)}`, { method: "PUT", body: await cloud.get(name) });
+        if (!res.ok) throw new Error(`keeping ${name}: ${res.status}`);
+      }
+      const applied = await call<Applied>("POST", "sync/apply", { files: batch });
+      received += applied.changed;
+      progress += applied.changed;
+      skipped.push(...applied.skipped);
     }
-    const applied = await call<Applied>("POST", "sync/apply", { files });
-    received = applied.changed;
-    skipped = applied.skipped;
-    if (applied.changed) window.dispatchEvent(new Event("questodian:synced"));
+    if (!skipped.length || !progress) break;
   }
+  if (received) {
+    window.dispatchEvent(new Event("questodian:synced"));
+    channel?.postMessage("synced");
+  }
+  return { received, skipped };
+}
+
+/** Send this device's changes, each file after the images it uses. */
+async function send(cloud: Folder, listing: string[]) {
   for (;;) {
     const out = await call<Outgoing | null>("POST", "sync/outgoing", { listing });
-    if (!out) break;
+    if (!out) return;
     for (const image of out.images) {
       if (listing.includes(image.name)) continue;
       const res = await fetch(`${API}handouts/${encodeURIComponent(image.handout)}/file`);
-      if (!res.ok) continue; // the image went meanwhile; the next change to the handout sends it
-      await cloud.put(image.name, await res.blob());
-      listing = [...listing, image.name];
+      if (!res.ok) throw new Error(`couldn't read a handout's image (${res.status}): trying again next sync`);
+      const bytes = await res.arrayBuffer();
+      // Changed since: the change file is made again next sync, with the new image.
+      if (!image.name.startsWith(`image-${await hashOf(bytes)}.`)) throw new Error("a handout's image changed while syncing: trying again");
+      await cloud.put(image.name, new Blob([bytes], { type: res.headers.get("Content-Type") || "application/octet-stream" }));
+      listing.push(image.name);
     }
     await cloud.put(out.name, new Blob([JSON.stringify(out.file)], { type: "application/json" }));
-    listing = [...listing, out.name];
+    listing.push(out.name);
     await call("POST", "sync/sent", { name: out.name });
   }
+}
+
+/** One sync: fetch and apply other devices' changes, then send this device's. */
+async function syncOnce(cloud: Folder): Promise<void> {
+  const listing = await cloud.list();
+  const { received, skipped } = await receive(cloud, listing);
+  await send(cloud, listing);
   const counts = await call<{ waiting: number; replaced: number }>("GET", "sync");
   update({ phase: "idle", last: Date.now(), received, skipped, waiting: counts.waiting, replaced: counts.replaced, error: undefined });
 }
@@ -148,7 +198,10 @@ let running: Promise<void> | null = null;
 /** Sync now, unless sync is off, offline, or needs a tap to sign in again (then "paused"). */
 export function syncNow(): Promise<void> {
   if (running) return running;
-  if (!connected) return Promise.resolve();
+  if (!settings()) {
+    if (status.phase !== "off") update({ phase: "off" });
+    return Promise.resolve();
+  }
   if (!navigator.onLine) return Promise.resolve();
   const cloud = folder();
   if (!cloud) {
@@ -156,8 +209,13 @@ export function syncNow(): Promise<void> {
     return Promise.resolve();
   }
   update({ phase: "syncing" });
-  running = (navigator.locks ? navigator.locks.request("questodian-sync", () => syncOnce(cloud)) : syncOnce(cloud))
-    .catch((e: Error) => update({ phase: currentGoogleToken() ? "error" : "paused", error: e.message }))
+  running = navigator.locks
+    .request("questodian-sync", () => syncOnce(cloud))
+    .catch((e: Error) => {
+      if (e instanceof DriveError && e.status === 401) forgetGoogleToken(); // Google refused it: sign in again
+      if (!settings()) update({ phase: "off", error: undefined }); // disconnected meanwhile
+      else update({ phase: currentGoogleToken() ? "error" : "paused", error: e.message });
+    })
     .finally(() => {
       running = null;
     });
@@ -196,6 +254,20 @@ export function startSync() {
     clearTimeout(timer);
     timer = setTimeout(() => void syncNow(), ms);
   };
+  const counts = () =>
+    void call<{ waiting: number; replaced: number }>("GET", "sync")
+      .then((c) => update({ waiting: c.waiting, replaced: c.replaced }))
+      .catch(() => {});
+  if (channel) {
+    channel.onmessage = (e) => {
+      if (e.data === "synced") window.dispatchEvent(new Event("questodian:synced"));
+      if (e.data === "settings") {
+        update({ phase: settings() ? (status.phase === "off" ? "idle" : status.phase) : "off" });
+        if (settings()) soon(1000);
+      }
+      counts();
+    };
+  }
   window.addEventListener("questodian:changed", () => soon(AFTER_CHANGE_MS));
   window.addEventListener("online", () => soon(1000));
   document.addEventListener("visibilitychange", () => {
@@ -203,6 +275,6 @@ export function startSync() {
     else soon(1000);
   });
   setInterval(() => void syncNow(), EVERY_MS);
-  if (connected) void call<{ waiting: number; replaced: number }>("GET", "sync").then((c) => update({ waiting: c.waiting, replaced: c.replaced })).catch(() => {});
+  if (settings()) counts();
   soon(2000);
 }

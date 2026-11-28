@@ -5,8 +5,9 @@ import type { Folder } from "./folder";
 
 const DRIVE = "https://www.googleapis.com/drive/v3/";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/";
-/** Google's limit for one-request uploads; larger files go up in two steps. */
-const SIMPLE_UPLOAD_MAX = 5 * 1024 * 1024;
+/** Google's limit for one-request uploads is 5 MB; larger files (with room for the request's
+ *  other parts) go up in two steps. */
+const SIMPLE_UPLOAD_MAX = 4.5 * 1024 * 1024;
 
 /** Google Drive's answer wasn't OK: its status, and a message to show. */
 export class DriveError extends Error {
@@ -27,7 +28,11 @@ async function check(res: Response, what: string): Promise<Response> {
     // not JSON
   }
   const message =
-    res.status === 401 ? "Google sign-in has run out" : res.status === 403 || res.status === 429 ? "Google Drive is busy: trying again later" : `${what}: ${res.status} ${detail}`;
+    res.status === 401
+      ? "Google sign-in has run out"
+      : res.status === 429 || /rate limit/i.test(detail)
+        ? "Google Drive is busy: trying again later"
+        : `${what}: ${detail || res.status}`;
   throw new DriveError(res.status, message);
 }
 

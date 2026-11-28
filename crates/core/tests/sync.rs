@@ -99,6 +99,7 @@ async fn everything(device: &Device) -> Value {
     let mut out = serde_json::Map::new();
     for kind in Kind::ALL {
         let mut docs = repo.list(kind, &[]).await.unwrap();
+        docs.sort_by(|x, y| x["id"].as_str().cmp(&y["id"].as_str())); // records made in the same second list either way
         for doc in &mut docs {
             if let Some(filename) = doc.get_mut("filename") {
                 *filename = json!(!filename.as_str().unwrap_or("").is_empty());
@@ -498,4 +499,119 @@ async fn applying_between_sending_and_sent_keeps_the_later_version_ahead() {
     sync(&a, &mut folder).await;
     sync(&b, &mut folder).await;
     assert_eq!(get(&b, Kind::Npcs, &id).await.unwrap()["name"], "A2, made after seeing B");
+}
+
+#[tokio::test]
+async fn deleting_a_session_elsewhere_leaves_its_scenes_encounters_linked() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let cid = create(&a, Kind::Campaigns, json!({"name": "C"})).await["id"].as_str().unwrap().to_string();
+    let sid = create(&a, Kind::Sessions, json!({"campaign_id": cid})).await["id"].as_str().unwrap().to_string();
+    let scene = create(&a, Kind::Scenes, json!({"campaign_id": cid, "session_id": sid, "title": "X"})).await;
+    let xid = scene["id"].as_str().unwrap().to_string();
+    let eid = create(&a, Kind::Encounters, json!({"campaign_id": cid, "scene_id": xid})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+
+    update(&a, Kind::Encounters, &eid, json!({"name": "Edited on A"})).await;
+    later().await;
+    delete(&b, Kind::Sessions, &sid).await;
+    for device in [&a, &b, &a, &b] {
+        sync(device, &mut folder).await;
+    }
+    for device in [&a, &b] {
+        let encounter = get(device, Kind::Encounters, &eid).await.unwrap();
+        assert_eq!(encounter["scene_id"], xid.as_str(), "the scene is still there");
+        assert_eq!(get(device, Kind::Scenes, &xid).await.unwrap()["session_id"], "");
+    }
+    assert_eq!(everything(&a).await, everything(&b).await);
+}
+
+#[tokio::test]
+async fn a_new_folder_gets_records_another_device_made_too() {
+    let (elsewhere, a, b) = (device().await, device().await, device().await);
+    let mut first = Folder::new();
+    let cid = create(&elsewhere, Kind::Campaigns, json!({"name": "Made elsewhere"})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sync(&elsewhere, &mut first).await;
+    sync(&a, &mut first).await;
+    create(&a, Kind::Sessions, json!({"campaign_id": cid, "title": "Made on A"})).await;
+
+    let mut second = Folder::new();
+    sync(&a, &mut second).await;
+    let got = sync(&b, &mut second).await;
+    assert!(got.skipped.is_empty(), "{:?}", got.skipped);
+    assert_eq!(everything(&b).await, everything(&a).await);
+
+    // In the first folder, A doesn't send the campaign again: its maker did.
+    let before = first.len();
+    let c = device().await;
+    sync(&c, &mut first).await;
+    assert_eq!(first.len(), before, "C has nothing of its own to send");
+}
+
+#[tokio::test]
+async fn an_edit_made_before_its_campaign_was_deleted_goes_with_it_and_is_kept_to_restore() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let cid = create(&a, Kind::Campaigns, json!({"name": "C"})).await["id"].as_str().unwrap().to_string();
+    let sid = create(&a, Kind::Sessions, json!({"campaign_id": cid, "title": "One"})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+
+    update(&a, Kind::Sessions, &sid, json!({"title": "One, edited first"})).await;
+    later().await;
+    delete(&b, Kind::Campaigns, &cid).await;
+    for device in [&b, &a, &b, &a] {
+        sync(device, &mut folder).await;
+    }
+    assert!(get(&a, Kind::Sessions, &sid).await.is_none());
+    assert!(get(&b, Kind::Sessions, &sid).await.is_none());
+    // The campaign, deleted on B, and A's edit to its session, are kept to restore.
+    assert_eq!(status(&a).await.replaced, 2);
+}
+
+#[tokio::test]
+async fn a_handout_moved_out_of_a_campaign_then_deleted_with_it_arrives_in_one_sync() {
+    let (a, b) = (device().await, device().await);
+    let mut folder = Folder::new();
+    let cid = create(&a, Kind::Campaigns, json!({"name": "C"})).await["id"].as_str().unwrap().to_string();
+    let hid = create(&a, Kind::Handouts, json!({"campaign_id": cid, "title": "Map"})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    set_image(&a, &hid, b"map image").await;
+    sync(&a, &mut folder).await;
+    sync(&b, &mut folder).await;
+
+    update(&a, Kind::Handouts, &hid, json!({"campaign_id": ""})).await;
+    later().await;
+    delete(&a, Kind::Campaigns, &cid).await;
+    sync(&a, &mut folder).await;
+    let got = sync(&b, &mut folder).await;
+    assert!(got.skipped.is_empty(), "{:?}", got.skipped);
+    assert_eq!(get(&b, Kind::Handouts, &hid).await.unwrap()["campaign_id"], "");
+    assert_eq!(image_of(&b, &hid).await.unwrap(), b"map image");
+}
+
+#[tokio::test]
+async fn a_database_restored_from_a_copy_doesnt_reuse_its_file_names() {
+    let a = device().await;
+    let mut folder = Folder::new();
+    create(&a, Kind::Notes, json!({"title": "one"})).await;
+    sync(&a, &mut folder).await;
+    sql(&a, r#"DELETE FROM sync_state WHERE "key" = 'seq'"#); // as it was before that sync
+    create(&a, Kind::Notes, json!({"title": "two"})).await;
+    sync(&a, &mut folder).await; // the helper fails if a name is written twice
+    let b = device().await;
+    sync(&b, &mut folder).await;
+    assert_eq!(everything(&b).await, everything(&a).await);
 }

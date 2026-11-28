@@ -31,9 +31,12 @@ meanwhile wait, and nothing is lost.
 
 If the same record (a campaign, an NPC, a note…) was changed on two devices before they synced,
 the later change wins on every device. The other version isn't lost: it's kept for 30 days (the
-Sync panel says how many). An edit made after a record was deleted on another device brings it
-back; deleting a campaign on one device while you edit one of its sessions on another keeps that
-session, out of the campaign.
+Sync panel says how many), and so is anything deleted on another device. An edit made after a
+record was deleted on another device brings it back; deleting a campaign on one device while you
+edit one of its sessions on another keeps that session, out of the campaign.
+
+A page you have open (a character sheet, the DM screen) shows the other device's changes when
+they arrive, unless you're in the middle of changing it: then your change is the later one.
 
 ## Disconnecting
 

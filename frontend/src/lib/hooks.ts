@@ -109,6 +109,15 @@ export function useDraft<T>(
     setDocState(next);
   }, []);
 
+  // A fresh copy from the page (another device's changes arrived by sync, say) replaces the draft,
+  // unless it has edits not saved yet: those are saved over it, as the later change.
+  const base = useRef(initial);
+  useEffect(() => {
+    if (initial === base.current) return;
+    base.current = initial;
+    if (!pending.current) setDoc(initial);
+  }, [initial, setDoc]);
+
   const edit = useCallback(
     (fn: (draft: T) => void) => {
       if (!docRef.current) return;

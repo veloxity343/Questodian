@@ -134,6 +134,12 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
     setLists(EMPTY);
     void reload();
   }, [reload]);
+  // Another device's changes arrived (sync/runner.ts).
+  useEffect(() => {
+    const refresh = () => void reload();
+    window.addEventListener("questodian:synced", refresh);
+    return () => window.removeEventListener("questodian:synced", refresh);
+  }, [reload]);
 
   // Drop tabs whose records no longer exist (deleted elsewhere, or a stale saved layout).
   useEffect(() => {

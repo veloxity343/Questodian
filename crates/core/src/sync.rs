@@ -43,6 +43,12 @@ const KEEP_REPLACED: chrono::TimeDelta = chrono::TimeDelta::days(30);
 
 /// When a version of a record was made, and on which device; later wins.
 type Stamp = (i64, String);
+/// The latest version of each record in the files being applied (its stamp, and the record or
+/// None if deleted), by kind and id.
+type Batch = HashMap<(String, String), (i64, Option<Value>)>;
+/// In `sync_outbox`, for a record waiting only to be sent again (to a new folder) as it is, under
+/// the stamp it has: not a change made here.
+const RESEND: i64 = 0;
 
 // ------------------------------------------------------------------ state
 
@@ -311,7 +317,11 @@ pub async fn apply(repo: &mut Repo<'_>, files: &[Value], images: &HashMap<String
             let change = Change {
                 kind: c["kind"].as_str().unwrap_or("").to_string(),
                 id: c["id"].as_str().unwrap_or("").to_string(),
-                stamp: (c["stamp"].as_i64().unwrap_or(0), device.clone()),
+                // Sent on by another device (to a new folder), it keeps the device that made it.
+                stamp: (
+                    c["stamp"].as_i64().unwrap_or(0),
+                    c["device"].as_str().map_or_else(|| device.clone(), str::to_string),
+                ),
                 doc: Some(c["doc"].clone()).filter(|d| !d.is_null()),
                 image: c.get("image").and_then(Value::as_str).map(str::to_string),
                 keep_image: c["keep_image"] == true,
@@ -326,6 +336,7 @@ pub async fn apply(repo: &mut Repo<'_>, files: &[Value], images: &HashMap<String
 
     // Linked records first (campaigns before what's in them), so links resolve.
     let order = |kind: &str| Kind::ALL.iter().position(|k| k.plural() == kind).unwrap_or(Kind::ALL.len());
+    let batch: Batch = latest.iter().map(|(key, change)| (key.clone(), (change.stamp.0, change.doc.clone()))).collect();
     let mut changes: Vec<Change> = latest.into_values().collect();
     changes.sort_by(|a, b| (order(&a.kind), &a.id).cmp(&(order(&b.kind), &b.id)));
 
@@ -334,7 +345,7 @@ pub async fn apply(repo: &mut Repo<'_>, files: &[Value], images: &HashMap<String
     set_state(repo, "applying", "1")?; // the triggers don't note these writes as local changes
     for change in &changes {
         repo.conn().execute_batch("SAVEPOINT change")?;
-        match apply_one(repo, &me, change, images).await {
+        match apply_one(repo, &me, change, images, &batch).await {
             Ok(true) => applied.changed += 1,
             Ok(false) => applied.older += 1,
             Err(NotYet(why)) => {
@@ -360,6 +371,7 @@ async fn apply_one(
     me: &str,
     change: &Change,
     images: &HashMap<String, Vec<u8>>,
+    batch: &Batch,
 ) -> Result<bool, NotYet> {
     let Change { kind, id, stamp, .. } = change;
     let held = stamp_of(repo, kind, id)?;
@@ -369,17 +381,38 @@ async fn apply_one(
     let current = load(repo, kind, id).await?;
     if let Some(changed) = waiting_since(repo, kind, id)? {
         // Changed here too, and not sent yet: the later change wins.
-        let ours: Stamp = (stamp_to_send(repo, kind, id, changed)?, me.to_string());
-        if ours > *stamp {
-            keep_replaced(repo, kind, id, change.doc.as_ref(), current.as_ref())?;
-            return Ok(false);
+        if changed != RESEND {
+            let ours: Stamp = (stamp_to_send(repo, kind, id, changed)?, me.to_string());
+            if ours > *stamp {
+                keep_replaced(repo, kind, id, change.doc.as_ref(), current.as_ref())?;
+                return Ok(false);
+            }
         }
         repo.conn().execute("DELETE FROM sync_outbox WHERE kind = ? AND id = ?", [kind, id])?;
     }
-    write(repo, change, current.as_ref(), images).await?;
-    keep_replaced(repo, kind, id, current.as_ref(), change.doc.as_ref())?;
-    set_stamp(repo, kind, id, stamp)?;
+    let written = write(repo, change, current.as_ref(), images, batch).await?;
+    let rest = keep_replaced(repo, kind, id, current.as_ref(), change.doc.as_ref())
+        .and_then(|()| set_stamp(repo, kind, id, stamp));
+    if let Err(e) = rest {
+        if let Some(path) = &written.new_file {
+            crate::files::remove(path);
+        }
+        return Err(e.into());
+    }
+    // Only now, with everything for this change done: an image the record no longer uses.
+    if let Some(path) = written.old_file {
+        repo.remove_on_commit(path);
+    }
     Ok(true)
+}
+
+/// The image files a write made and left unused.
+#[derive(Default)]
+struct Written {
+    /// Made for the new version (removed if the change is undone).
+    new_file: Option<std::path::PathBuf>,
+    /// No longer used (removed when the sync is saved).
+    old_file: Option<std::path::PathBuf>,
 }
 
 /// Keep `lost` to restore, unless it's no different from the version that won. A deletion
@@ -388,8 +421,10 @@ fn keep_replaced(repo: &Repo<'_>, kind: &str, id: &str, lost: Option<&Value>, wo
     let Some(lost) = lost.filter(|&lost| Some(lost) != won) else {
         return Ok(());
     };
+    // Once: a change put off and tried again would keep it again.
     repo.conn().execute(
-        "INSERT INTO sync_replaced (kind, id, data, replaced) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sync_replaced (kind, id, data, replaced) SELECT ?1, ?2, ?3, ?4
+         WHERE NOT EXISTS (SELECT 1 FROM sync_replaced WHERE kind = ?1 AND id = ?2 AND data = ?3)",
         params![kind, id, lost.to_string(), now()],
     )?;
     Ok(())
@@ -401,7 +436,8 @@ async fn write(
     change: &Change,
     current: Option<&Value>,
     images: &HashMap<String, Vec<u8>>,
-) -> Result<(), NotYet> {
+    batch: &Batch,
+) -> Result<Written, NotYet> {
     if change.kind == RULES {
         let (rule_kind, key) = rule_key(&change.id)?;
         match &change.doc {
@@ -413,21 +449,19 @@ async fn write(
                 repo.delete_rule_override(&rule_kind, &key).await?;
             }
         }
-        return Ok(());
+        return Ok(Written::default());
     }
     let kind = record_kind(&change.kind)?;
     let old_file = current
         .filter(|_| kind == Kind::Handouts)
         .and_then(|c| handout_file(&repo.files_dir, c["filename"].as_str().unwrap_or("")));
     let Some(doc) = &change.doc else {
-        if current.is_some() {
-            keep_what_was_changed_since(repo, kind, &change.id, change.stamp.0).await?;
-            repo.delete(kind, &change.id).await?;
-            if let Some(path) = old_file {
-                repo.remove_on_commit(path);
-            }
+        if current.is_none() {
+            return Ok(Written::default());
         }
-        return Ok(());
+        keep_what_was_changed_since(repo, kind, &change.id, change.stamp.0, batch).await?;
+        repo.delete(kind, &change.id).await?;
+        return Ok(Written { new_file: None, old_file });
     };
     let mut doc = doc.clone();
     doc["id"] = json!(change.id);
@@ -461,34 +495,41 @@ async fn write(
             (None, None) => json!(""),
         };
     }
-    if let Err(e) = repo.save(kind, doc.clone(), true).await {
-        if let Some(path) = new_file {
-            crate::files::remove(&path);
+    let saved = repo.save(kind, doc.clone(), true).await;
+    let queued = match saved {
+        Ok(_) if unlinked => queue(repo, &change.kind, &change.id, change.stamp.0 + 1),
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = queued {
+        if let Some(path) = &new_file {
+            crate::files::remove(path);
         }
         return Err(e.into());
     }
-    if let Some(path) =
-        old_file.filter(|old| doc["filename"].as_str().is_none_or(|f| !old.ends_with(f) || f.is_empty()))
-    {
-        repo.remove_on_commit(path);
-    }
-    if unlinked {
-        queue(repo, &change.kind, &change.id, change.stamp.0 + 1)?;
-    }
-    Ok(())
+    let filename = doc["filename"].as_str().unwrap_or("");
+    let old_file = old_file.filter(|old| filename.is_empty() || !old.ends_with(filename));
+    Ok(Written { new_file, old_file })
 }
 
-/// Before deleting a record another device deleted: the records in it (a campaign's sessions,
-/// say) that were changed here since, or by another device after the deletion, are kept,
-/// unlinked, and sent on, so every device keeps them. The rest go with it, as deleting it here
-/// would take them.
-async fn keep_what_was_changed_since(repo: &mut Repo<'_>, kind: Kind, id: &str, deleted: i64) -> Result<()> {
+/// Before deleting a record another device deleted: the records that would go with it (a
+/// campaign's sessions, say) that were changed after the deletion (here, or by another device)
+/// are kept, unlinked, and sent on, so every device keeps them. The others go with it; a change
+/// to one made here before the deletion is kept to restore.
+async fn keep_what_was_changed_since(
+    repo: &mut Repo<'_>,
+    kind: Kind,
+    id: &str,
+    deleted: i64,
+    batch: &Batch,
+) -> Result<()> {
     for (field, target) in LINKS {
         if target != kind {
             continue;
         }
         for child_kind in Kind::ALL {
-            if !repo.has_column(child_kind, field) {
+            // Only what deleting it takes along: other links are just cleared, by every device.
+            if !repo.has_column(child_kind, field) || !cascades(repo, child_kind, field)? {
                 continue;
             }
             let children: Vec<String> = repo
@@ -498,20 +539,44 @@ async fn keep_what_was_changed_since(repo: &mut Repo<'_>, kind: Kind, id: &str, 
                 .collect::<rusqlite::Result<_>>()?;
             for child in children {
                 let plural = child_kind.plural();
-                let changed_here = waiting_since(repo, plural, &child)?.is_some();
-                let changed_after = stamp_of(repo, plural, &child)?.is_some_and(|(stamp, _)| stamp > deleted);
-                if changed_here || changed_after {
+                let incoming = batch.get(&(plural.to_string(), child.clone()));
+                // Moved out of it in a version about to be applied: that version is the one to keep.
+                if incoming.is_some_and(|(_, doc)| doc.as_ref().is_some_and(|d| d[field].as_str() != Some(id))) {
+                    let mut doc = repo.get(child_kind, &child).await?;
+                    doc[field] = json!("");
+                    repo.save(child_kind, doc, true).await?;
+                    continue;
+                }
+                let waiting = waiting_since(repo, plural, &child)?.filter(|&c| c != RESEND);
+                let later = waiting.is_some_and(|c| c > deleted)
+                    || stamp_of(repo, plural, &child)?.is_some_and(|(stamp, _)| stamp > deleted)
+                    || incoming.is_some_and(|(stamp, _)| *stamp > deleted);
+                if later {
                     let mut doc = repo.get(child_kind, &child).await?;
                     doc[field] = json!("");
                     repo.save(child_kind, doc, true).await?;
                     queue(repo, plural, &child, deleted + 1)?;
-                } else {
-                    Box::pin(keep_what_was_changed_since(repo, child_kind, &child, deleted)).await?;
+                    continue;
                 }
+                if waiting.is_some() {
+                    let doc = repo.get(child_kind, &child).await?;
+                    keep_replaced(repo, plural, &child, Some(&doc), None)?;
+                }
+                Box::pin(keep_what_was_changed_since(repo, child_kind, &child, deleted, batch)).await?;
             }
         }
     }
     Ok(())
+}
+
+/// Whether deleting what `field` links to deletes records of this kind too (rather than
+/// clearing their link).
+fn cascades(repo: &Repo<'_>, kind: Kind, field: &str) -> Result<bool> {
+    let mut statement = repo.conn().prepare(&format!("PRAGMA foreign_key_list({})", kind.table()))?;
+    let keys = statement
+        .query_map([], |r| Ok((r.get::<_, String>("from")?, r.get::<_, String>("on_delete")?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(keys.iter().any(|(from, on_delete)| from == field && on_delete.eq_ignore_ascii_case("CASCADE")))
 }
 
 // ------------------------------------------------------------------ sending
@@ -537,8 +602,10 @@ pub struct OutgoingImage {
 /// once it's in the folder; until then, the same changes stay waiting.
 pub async fn outgoing(repo: &mut Repo<'_>, listing: &[String]) -> Result<Option<Outgoing>> {
     let me = device(repo)?;
-    if !listing.iter().any(|name| parse_change_file(name).is_some_and(|(device, _)| device == me)) {
-        queue_everything(repo)?;
+    let in_folder: std::collections::HashSet<&str> =
+        listing.iter().filter_map(|n| parse_change_file(n)).map(|(d, _)| d).collect();
+    if !in_folder.contains(me.as_str()) {
+        queue_everything(repo, &in_folder)?;
     }
     let rows: Vec<(String, String, i64)> = repo
         .conn()
@@ -553,9 +620,15 @@ pub async fn outgoing(repo: &mut Repo<'_>, listing: &[String]) -> Result<Option<
     let mut images: Vec<OutgoingImage> = Vec::new();
     let mut size = 0;
     for (kind, id, changed) in rows {
-        let stamp = stamp_to_send(repo, &kind, &id, changed)?;
+        let (stamp, made_by) = match stamp_of(repo, &kind, &id)? {
+            Some(held) if changed == RESEND => held,
+            _ => (stamp_to_send(repo, &kind, &id, changed)?, me.clone()),
+        };
         let doc = load(repo, &kind, &id).await?;
         let mut change = json!({"kind": kind, "id": id, "stamp": stamp, "doc": doc});
+        if made_by != me {
+            change["device"] = json!(made_by);
+        }
         if kind == Kind::Handouts.plural()
             && let Some(doc) = &doc
             && !doc["filename"].as_str().unwrap_or("").is_empty()
@@ -573,12 +646,15 @@ pub async fn outgoing(repo: &mut Repo<'_>, listing: &[String]) -> Result<Option<
         }
         size += change.to_string().len();
         changes.push(change);
-        plan.push(json!([kind, id, changed, stamp]));
+        plan.push(json!([kind, id, changed, stamp, made_by]));
         if size > MAX_BYTES {
             break;
         }
     }
-    let seq = state(repo, "seq")?.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0) + 1;
+    // After the last this device sent, here or (for a database restored from a copy) in the folder.
+    let in_listing =
+        listing.iter().filter_map(|n| parse_change_file(n)).filter(|(d, _)| *d == me).map(|(_, seq)| seq).max();
+    let seq = state(repo, "seq")?.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0).max(in_listing.unwrap_or(0)) + 1;
     set_state(repo, "seq", &seq.to_string())?;
     let name = change_file(&me, seq);
     set_state(repo, "sending", &json!({"name": name, "changes": plan}).to_string())?;
@@ -598,48 +674,46 @@ pub async fn sent(repo: &mut Repo<'_>, name: &str) -> Result<()> {
     for entry in plan["changes"].as_array().into_iter().flatten() {
         let (kind, id) = (entry[0].as_str().unwrap_or(""), entry[1].as_str().unwrap_or(""));
         let (changed, stamp) = (entry[2].as_i64().unwrap_or(0), entry[3].as_i64().unwrap_or(0));
+        let made_by = entry[4].as_str().unwrap_or(&me).to_string();
         let done = repo
             .conn()
             .execute("DELETE FROM sync_outbox WHERE kind = ? AND id = ? AND changed = ?", params![kind, id, changed])?;
         // Unless it changed again meanwhile, or another device's later version was applied.
         if done > 0 {
-            set_stamp(repo, kind, id, &(stamp, me.clone()))?;
+            set_stamp(repo, kind, id, &(stamp, made_by))?;
         }
     }
     clear_state(repo, "sending")
 }
 
-/// Note every record this device made or last changed as changed (when it was last updated),
-/// to send them all: the folder doesn't have this device's files. Records last changed on
-/// another device are that device's to send.
-fn queue_everything(repo: &Repo<'_>) -> Result<()> {
-    let me = device(repo)?;
-    // Never synced, or last changed here.
-    let own = |kind: &str, id: &str| {
-        format!("NOT EXISTS (SELECT 1 FROM sync_stamps s WHERE s.kind = {kind} AND s.id = {id} AND s.device <> ?1)")
-    };
+/// The folder has none of this device's files (the first sync, or a new folder): queue every
+/// record to send. Records never synced go as changes made when they were last updated; the
+/// others go again as they are, under the stamp they have, unless the device that made that
+/// version has files in the folder (it sent them).
+fn queue_everything(repo: &Repo<'_>, in_folder: &std::collections::HashSet<&str>) -> Result<()> {
+    let devices = json!(in_folder.iter().collect::<Vec<_>>()).to_string();
     let millis = |column: &str| format!("COALESCE(CAST((julianday({column}) - 2440587.5) * 86400000 AS INTEGER), 0)");
-    for kind in Kind::ALL {
+    let mut sources: Vec<(String, String, String, String)> = Kind::ALL
+        .iter()
+        .map(|k| (format!("'{}'", k.plural()), k.table().to_string(), "t.id".to_string(), millis("t.updated")))
+        .collect();
+    sources.push((
+        format!("'{RULES}'"),
+        "rule_overrides".into(),
+        r#"json_array(t.kind, t."key")"#.into(),
+        millis("t.updated"),
+    ));
+    for (kind, table, id, time) in sources {
         repo.conn().execute(
             &format!(
-                "INSERT INTO sync_outbox (kind, id, changed) SELECT '{plural}', id, {time} FROM {table}
-                 WHERE {own} ON CONFLICT (kind, id) DO NOTHING",
-                plural = kind.plural(),
-                table = kind.table(),
-                time = millis("updated"),
-                own = own(&format!("'{}'", kind.plural()), "id"),
+                "INSERT INTO sync_outbox (kind, id, changed)
+                 SELECT {kind}, {id}, CASE WHEN s.stamp IS NULL THEN {time} ELSE {RESEND} END
+                 FROM {table} t LEFT JOIN sync_stamps s ON s.kind = {kind} AND s.id = {id}
+                 WHERE s.stamp IS NULL OR s.device NOT IN (SELECT value FROM json_each(?))
+                 ON CONFLICT (kind, id) DO NOTHING"
             ),
-            [&me],
+            [&devices],
         )?;
     }
-    repo.conn().execute(
-        &format!(
-            r#"INSERT INTO sync_outbox (kind, id, changed) SELECT '{RULES}', json_array(kind, "key"), {time} FROM rule_overrides
-               WHERE {own} ON CONFLICT (kind, id) DO NOTHING"#,
-            time = millis("updated"),
-            own = own(&format!("'{RULES}'"), r#"json_array(kind, "key")"#),
-        ),
-        [&me],
-    )?;
     Ok(())
 }
