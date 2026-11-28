@@ -20,6 +20,7 @@ The screenshots in these pages show an invented demo campaign, *The Drowned Abbe
 | [Library, Handbook, Tools and Settings](guide/other-pages.md) | The SRD library, your own documents, calculators, arranging any page, the theme |
 | [Data and backups](guide/data-and-backups.md) | Exports and imports, automatic backups, moving to another computer |
 | [The web version](guide/web-version.md) | Questodian in a browser, on an iPad: the Home Screen, backups, moving data, players' view |
+| [Sync](guide/sync.md) | Keeping the web version's devices up to date through your own Google Drive |
 | [Updates](guide/updates.md) | How the desktop app finds and installs new versions |
 | [Command line](guide/command-line.md) | The `questodian` command: serve, roll, calc, srd, export, import |
 | [Troubleshooting and known issues](guide/troubleshooting.md) | First-launch warnings, common problems, mistakes in the bundled data |
@@ -30,6 +31,7 @@ The screenshots in these pages show an invented demo campaign, *The Drowned Abbe
 |---|---|
 | [Development](dev/development.md) | Setting up, `make` tasks, how the code is laid out, tests and CI |
 | [Database and migrations](dev/database.md) | The schema, upgrading old databases, fixtures |
+| [Sync](dev/sync.md) | How sync works: the folder, change files, which change wins, the page's part |
 | [Releasing](dev/releasing.md) | Version bumps, the Release workflow, update signing, publishing |
 | [Bundled data](dev/data.md) | Where the SRD and the character builder's rules data come from, and how to rebuild them |
 

@@ -336,7 +336,7 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
     Ok(json!({"imported": imported, "skipped": skipped, "mode": mode.name()}))
 }
 
-fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
+pub(crate) fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
     // The old file's extension, like Python's `Path.suffix` (".png" alone has none).
     let extension = Path::new(text(doc, "filename"))
         .extension()

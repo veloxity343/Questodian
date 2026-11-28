@@ -36,6 +36,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     data = { detail: text };
   }
   if (!res.ok) throw new Error(errorMessage(data, res));
+  // Something was saved: sync sends it soon (sync/runner.ts).
+  if (method !== "GET" && path !== "projection") window.dispatchEvent(new Event("questodian:changed"));
   return data as T;
 }
 
@@ -77,6 +79,7 @@ export const api = {
     const res = await fetch(`${API}handouts/${id}/file`, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(errorMessage(data, res));
+    window.dispatchEvent(new Event("questodian:changed"));
     return data as Handout;
   },
   /** Take a handout's image away; the server deletes the file. */

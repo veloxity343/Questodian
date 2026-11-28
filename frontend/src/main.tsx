@@ -36,7 +36,11 @@ function render() {
 if (import.meta.env.MODE === "web") {
   import("./web/boot")
     .then(({ boot }) => boot())
-    .then(render, (e: unknown) => {
+    .then(() => {
+      render();
+      // Sync, if it's been connected (Data page).
+      void import("./sync/runner").then(({ startSync }) => startSync());
+    }, (e: unknown) => {
       document.getElementById("root")!.textContent = `Questodian can't start in this browser: ${e instanceof Error ? e.message : e}`;
     });
 } else {

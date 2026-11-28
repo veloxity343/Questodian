@@ -4,6 +4,7 @@
 //! serve` puts it behind a real HTTP server for browsers and the players' screen.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -23,7 +24,7 @@ use crate::kinds::Kind;
 use crate::schemas::{
     self, Award, Character, Check, ClassesIn, EncounterAction, Expression, Lenient, LogIn, Projection, RestIn,
 };
-use crate::{builder, dice, files, game, rules, srd, transfer};
+use crate::{builder, dice, files, game, rules, srd, sync, transfer};
 
 /// Request bodies above this are refused with 413 (imports with images can be large).
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
@@ -79,6 +80,13 @@ pub fn router(app: Shared) -> Router {
         .route("/export/{kind}/{id}", get(export_one))
         .route("/import", post(import_data))
         .route("/import/markdown", post(import_markdown))
+        .route("/sync", get(sync_status))
+        .route("/sync/wanted", post(sync_wanted))
+        .route("/sync/images-needed", post(sync_images_needed))
+        .route("/sync/images/{name}", axum::routing::put(sync_fetched_image))
+        .route("/sync/apply", post(sync_apply))
+        .route("/sync/outgoing", post(sync_outgoing))
+        .route("/sync/sent", post(sync_sent))
         .route("/{kind}", get(list_records).post(create_record))
         .route("/{kind}/{id}", get(read_record).put(update_record).delete(delete_record))
         .fallback(|| async { not_found("not found") });
@@ -743,6 +751,102 @@ async fn import_markdown(
     }
     repo.commit().await?;
     Ok(Json(json!({"created": created})))
+}
+
+// --------------------------------------------------------------------------- sync
+//
+// The page moves the files between the cloud folder and here (it holds the sign-in); these
+// routes are the engine's steps (sync.rs, which explains the order).
+
+/// The body's `field`, as a list of strings or JSON values.
+fn body_list(body: &Option<Value>, field: &str) -> Result<Vec<Value>> {
+    body.as_ref()
+        .and_then(|b| b.get(field))
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| body_error(format!("{field}: a list is required")))
+}
+
+fn names(list: Vec<Value>) -> Vec<String> {
+    list.into_iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+}
+
+/// Where an image fetched for [`sync_apply`] waits. Only names sync gives are accepted.
+fn fetched_image(app: &App, name: &str) -> Result<PathBuf> {
+    let valid = name.strip_prefix("image-").and_then(|rest| rest.split_once('.')).is_some_and(|(hash, extension)| {
+        hash.len() == 64
+            && hash.bytes().all(|b| b.is_ascii_hexdigit())
+            && !extension.is_empty()
+            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+    });
+    if !valid {
+        return Err(invalid(format!("not a sync image name: {name}")));
+    }
+    Ok(app.db.files_dir().join("sync-fetched").join(name))
+}
+
+async fn sync_status(State(app): State<Shared>) -> Result<Json<Value>> {
+    let status = sync::status(&mut app.db.read().await?).await?;
+    Ok(Json(json!(status)))
+}
+
+async fn sync_wanted(State(app): State<Shared>, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let listing = names(body_list(&body, "listing")?);
+    let wanted = sync::wanted(&mut app.db.read().await?, &listing).await?;
+    Ok(Json(json!({"files": wanted})))
+}
+
+async fn sync_images_needed(State(app): State<Shared>, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let files = body_list(&body, "files")?;
+    let needed = sync::images_needed(&mut app.db.read().await?, &files).await?;
+    Ok(Json(json!({"images": needed})))
+}
+
+async fn sync_fetched_image(
+    State(app): State<Shared>,
+    UrlPath((name,)): UrlPath<(String,)>,
+    body: Bytes,
+) -> Result<Json<Value>> {
+    let path = fetched_image(&app, &name)?;
+    files::write(&path, &body)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Apply change files with the images fetched for them, then drop those images.
+async fn sync_apply(State(app): State<Shared>, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let files = body_list(&body, "files")?;
+    let mut repo = app.db.write().await?;
+    let mut images = HashMap::new();
+    let mut fetched = Vec::new();
+    for name in sync::images_needed(&mut repo, &files).await? {
+        let path = fetched_image(&app, &name)?;
+        if let Some(bytes) = files::read(&path) {
+            images.insert(name, bytes);
+        }
+        fetched.push(path);
+    }
+    let applied = sync::apply(&mut repo, &files, &images).await?;
+    repo.commit().await?;
+    for path in fetched {
+        files::remove(&path);
+    }
+    Ok(Json(json!(applied)))
+}
+
+async fn sync_outgoing(State(app): State<Shared>, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let listing = names(body_list(&body, "listing")?);
+    let mut repo = app.db.write().await?;
+    let outgoing = sync::outgoing(&mut repo, &listing).await?;
+    repo.commit().await?;
+    Ok(Json(json!(outgoing)))
+}
+
+async fn sync_sent(State(app): State<Shared>, JsonBody(body): JsonBody) -> Result<Json<Value>> {
+    let name = body.as_ref().and_then(|b| b["name"].as_str()).ok_or_else(|| body_error("name: required"))?.to_string();
+    let mut repo = app.db.write().await?;
+    sync::sent(&mut repo, &name).await?;
+    repo.commit().await?;
+    Ok(Json(json!({"ok": true})))
 }
 
 // --------------------------------------------------------------------------- write guard

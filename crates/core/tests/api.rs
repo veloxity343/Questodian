@@ -322,3 +322,94 @@ async fn files_from_a_newer_version_are_refused() {
     let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
     assert_eq!(bundle["version"], 3);
 }
+
+async fn raw(router: &Router, method: Method, path: &str, body: Vec<u8>, content_type: &str) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", content_type)
+        .body(Body::from(body))
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    (status, axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec())
+}
+
+/// One sync through the API, as the page does it, with `folder` standing in for the cloud.
+async fn sync_through_api(router: &Router, folder: &mut std::collections::BTreeMap<String, Vec<u8>>) -> Value {
+    let listing: Vec<&String> = folder.keys().collect();
+    let (status, wanted) = call(router, Method::POST, "/api/sync/wanted", Some(json!({"listing": listing}))).await;
+    assert_eq!(status, StatusCode::OK, "{wanted}");
+    let files: Vec<Value> = wanted["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| serde_json::from_slice(&folder[n.as_str().unwrap()]).unwrap())
+        .collect();
+    let (_, needed) = call(router, Method::POST, "/api/sync/images-needed", Some(json!({"files": files}))).await;
+    for name in needed["images"].as_array().unwrap() {
+        let name = name.as_str().unwrap();
+        let (status, _) = raw(
+            router,
+            Method::PUT,
+            &format!("/api/sync/images/{name}"),
+            folder[name].clone(),
+            "application/octet-stream",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, applied) = call(router, Method::POST, "/api/sync/apply", Some(json!({"files": files}))).await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    loop {
+        let listing: Vec<String> = folder.keys().cloned().collect();
+        let (status, out) = call(router, Method::POST, "/api/sync/outgoing", Some(json!({"listing": listing}))).await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+        if out.is_null() {
+            break;
+        }
+        for image in out["images"].as_array().unwrap() {
+            let (status, bytes) = raw(
+                router,
+                Method::GET,
+                &format!("/api/handouts/{}/file", image["handout"].as_str().unwrap()),
+                vec![],
+                "",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            folder.insert(image["name"].as_str().unwrap().to_string(), bytes);
+        }
+        folder.insert(out["name"].as_str().unwrap().to_string(), out["file"].to_string().into_bytes());
+        let (status, _) = call(router, Method::POST, "/api/sync/sent", Some(json!({"name": out["name"]}))).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    applied
+}
+
+#[tokio::test]
+async fn sync_through_the_api_moves_records_and_images() {
+    let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (app(one.path()).await, app(two.path()).await);
+    let mut folder = std::collections::BTreeMap::new();
+    let (_, handout) = call(&a, Method::POST, "/api/handouts", Some(json!({"title": "Map"}))).await;
+    let id = handout["id"].as_str().unwrap().to_string();
+    let png = vec![137u8, 80, 78, 71, 9, 9, 9];
+    raw(&a, Method::PUT, &format!("/api/handouts/{id}/file"), png.clone(), "image/png").await;
+
+    sync_through_api(&a, &mut folder).await;
+    let (_, status) = call(&a, Method::GET, "/api/sync", None).await;
+    assert_eq!((status["started"].clone(), status["waiting"].clone()), (json!(true), json!(0)));
+    let applied = sync_through_api(&b, &mut folder).await;
+    assert_eq!(applied["changed"], 1, "{applied}");
+    let (_, copy) = raw(&b, Method::GET, &format!("/api/handouts/{id}/file"), vec![], "").await;
+    assert_eq!(copy, png);
+    assert!(
+        !two.path().join("handouts").join("sync-fetched").read_dir().unwrap().any(|_| true),
+        "fetched images are cleared"
+    );
+
+    let (status, refused) =
+        raw(&b, Method::PUT, "/api/sync/images/..%2Fescape.png", vec![1], "application/octet-stream").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{}", String::from_utf8_lossy(&refused));
+}

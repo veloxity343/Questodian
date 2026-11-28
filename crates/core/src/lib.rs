@@ -13,4 +13,5 @@ pub mod rules;
 pub mod schemas;
 pub mod server;
 pub mod srd;
+pub mod sync;
 pub mod transfer;

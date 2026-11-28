@@ -75,6 +75,9 @@ jobs:
       - run: python crates/web/smoke/pwa.py
         env:
           BROWSER: ${{ matrix.browser }}
+      # Sync between two browsers, with Google stood in for (Chromium only: see the script).
+      - if: matrix.browser == 'chromium'
+        run: python crates/web/smoke/sync.py
 
   frontend:
     name: Frontend typecheck

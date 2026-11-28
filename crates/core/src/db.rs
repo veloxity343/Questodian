@@ -33,20 +33,21 @@ pub const DB_FILENAME: &str = "questodian.db";
 const LOCK_FILENAME: &str = "questodian.lock";
 
 /// The newest schema this app understands.
-pub const HEAD: &str = "0005";
+pub const HEAD: &str = "0006";
 /// What a database made before migrations existed contains.
 const BASELINE: &str = "0001";
 
 const SCHEMA_0002: &str = include_str!("migrations/0002_schema.sql");
 const UPGRADE_0001_TO_0002: &str = include_str!("migrations/0001_to_0002.sql");
 /// The upgrades written in SQL, in order: from, and what takes it to the next revision.
-const STEPS: [(&str, &str); 3] = [
+const STEPS: [(&str, &str); 4] = [
     ("0002", include_str!("migrations/0002_to_0003.sql")),
     ("0003", include_str!("migrations/0003_to_0004.sql")),
     ("0004", include_str!("migrations/0004_to_0005.sql")),
+    ("0005", include_str!("migrations/0005_to_0006.sql")),
 ];
 /// Every revision this app can upgrade from, oldest first.
-const KNOWN: [&str; 5] = [BASELINE, "0002", "0003", "0004", HEAD];
+const KNOWN: [&str; 6] = [BASELINE, "0002", "0003", "0004", "0005", HEAD];
 
 /// How long a statement waits for another copy of the app to finish writing.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -132,6 +133,9 @@ impl Database {
         let pool = Pool { path: path.clone(), idle: Mutex::new(Vec::new()) };
         let conn = pool.get()?;
         let columns = read_columns(&conn)?;
+        // Sync marks its own writes while it applies another device's changes, inside one
+        // transaction; a mark that was somehow saved would stop every change here being sent.
+        conn.execute(r#"DELETE FROM sync_state WHERE "key" = 'applying'"#, [])?;
         #[cfg(target_family = "wasm")]
         {
             crate::files::open()?;

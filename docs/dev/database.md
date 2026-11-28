@@ -19,6 +19,7 @@ opens. Keep writing the version there.
 | `0003` | Characters' builder choices (`characters.build`) and the user's rules-data edits (`rule_overrides`) |
 | `0004` | Drawn maps on handouts (`handouts.map`) |
 | `0005` | The web version's record of saves already made (`saved_requests`), so a save sent twice happens once. Unused by the desktop app |
+| `0006` | Sync (`sync.rs`): which records changed since they were last sent (`sync_outbox`, kept by triggers on every record table), the version of each record this device holds (`sync_stamps`), versions replaced by another device's (`sync_replaced`, kept 30 days), and this device's sync state (`sync_state`) |
 
 When the app opens a database:
 - **Older than it knows:** it saves a backup (`questodian.db.backup-<old version>-<time>`, made with

@@ -102,6 +102,11 @@ impl<'a> Repo<'a> {
         &self.columns[&kind]
     }
 
+    /// Whether records of this kind have this field.
+    pub(crate) fn has_column(&self, kind: Kind, name: &str) -> bool {
+        self.columns(kind).iter().any(|c| c.name == name)
+    }
+
     // ------------------------------------------------------------------ reads
 
     /// All records of a kind, optionally filtered (empty values are ignored).
@@ -137,7 +142,7 @@ impl<'a> Repo<'a> {
         self.find(kind, id).await?.ok_or_else(|| not_found(format!("{} {id} not found", kind.singular())))
     }
 
-    async fn find(&mut self, kind: Kind, id: &str) -> Result<Option<Value>> {
+    pub(crate) async fn find(&mut self, kind: Kind, id: &str) -> Result<Option<Value>> {
         if !valid_id(id) {
             return Ok(None);
         }

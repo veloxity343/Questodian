@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Board } from "../components/board";
 import { LoadError, Loading, Select, type Option } from "../components/ui";
@@ -7,6 +7,8 @@ import { useToast } from "../context/ui";
 import { useLoad } from "../lib/hooks";
 import { pickFiles, slug, today } from "../lib/util";
 import { daysSince, saveFile, useLastBackup } from "../web/backup";
+import { loadGoogle } from "../sync/google";
+import { connectGoogleDrive, disconnect, resumeSync, syncNow, useSyncStatus } from "../sync/runner";
 import { checkThisBrowser, reportText, type Check } from "../web/selftest";
 import type { Kind } from "../types";
 
@@ -126,7 +128,9 @@ export function DataPage() {
           )}
         </section>
         ) },
-        ...(import.meta.env.MODE === "web" ? [{ id: "browser", title: "This browser", node: <BrowserCheck /> }] : []),
+        ...(import.meta.env.MODE === "web"
+          ? [{ id: "sync", title: "Sync", node: <SyncPanel /> }, { id: "browser", title: "This browser", node: <BrowserCheck /> }]
+          : []),
         { id: "about", title: "About the rules content", width: "full", node: (
         <section className="panel">
           <h2>About the rules content</h2>
@@ -137,6 +141,76 @@ export function DataPage() {
         ) },
       ]} />
     </>
+  );
+}
+
+function ago(time: number): string {
+  const minutes = Math.round((Date.now() - time) / 60000);
+  return minutes < 1 ? "just now" : minutes === 1 ? "a minute ago" : minutes < 60 ? `${minutes} minutes ago` : new Date(time).toLocaleString();
+}
+
+/** Sync through the user's own Google Drive (sync/runner.ts). */
+function SyncPanel() {
+  const toast = useToast();
+  const status = useSyncStatus();
+  const [busy, setBusy] = useState(false);
+  const [, tick] = useState(0);
+  // Google's script loads before the tap that signs in, so its window opens straight away.
+  useEffect(() => {
+    if (navigator.onLine) loadGoogle().catch(() => {});
+    const timer = setInterval(() => tick((n) => n + 1), 30000); // keep "… minutes ago" current
+    return () => clearInterval(timer);
+  }, []);
+  const act = async (what: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await what();
+    } catch (e) {
+      toast(`Sync: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const waiting = status.waiting ? `${status.waiting} change${status.waiting === 1 ? "" : "s"} waiting to be sent.` : "";
+  return (
+    <section className="panel">
+      <h2>Sync</h2>
+      {status.phase === "off" ? (
+        <>
+          <p className="small">
+            Keep this device and your others up to date through your own Google Drive. Questodian uses a hidden folder there that only it
+            can see, and can't see anything else in your Drive. Without internet, everything works as before and changes wait.
+          </p>
+          <button type="button" className="btn primary" disabled={busy || !navigator.onLine} onClick={() => act(connectGoogleDrive)}>
+            Connect Google Drive
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="small">
+            {status.phase === "syncing" && "Syncing…"}
+            {status.phase === "idle" && (status.last ? `Synced ${ago(status.last)}.` : "Connected to Google Drive.")}
+            {status.phase === "paused" && "Paused: Google asks Questodian to sign in again every hour. Tap to carry on."}
+            {status.phase === "error" && `Couldn't sync: ${status.error}`}
+            {status.received ? ` ${status.received} change${status.received === 1 ? "" : "s"} came in.` : ""} {waiting}
+          </p>
+          {!!status.skipped?.length && (
+            <ul className="browser-check small">
+              {status.skipped.map((s) => <li key={s} className="bad">Not synced yet: {s}</li>)}
+            </ul>
+          )}
+          <div className="row gap">
+            {status.phase === "paused" ? (
+              <button type="button" className="btn primary" disabled={busy} onClick={() => act(resumeSync)}>Carry on syncing</button>
+            ) : (
+              <button type="button" className="btn" disabled={busy || status.phase === "syncing"} onClick={() => act(syncNow)}>Sync now</button>
+            )}
+            <button type="button" className="btn ghost" disabled={busy} onClick={() => act(disconnect)}>Disconnect</button>
+          </div>
+          {!!status.replaced && <p className="muted small">{status.replaced} version{status.replaced === 1 ? "" : "s"} replaced by another device's are kept for 30 days.</p>}
+        </>
+      )}
+    </section>
   );
 }
 

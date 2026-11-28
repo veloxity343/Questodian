@@ -44,6 +44,11 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
+  // Another device's changes arrived (sync/runner.ts): show them.
+  useEffect(() => {
+    window.addEventListener("questodian:synced", reload);
+    return () => window.removeEventListener("questodian:synced", reload);
+  }, [reload]);
   return { data, setData, error, reload };
 }
 

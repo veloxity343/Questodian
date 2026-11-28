@@ -96,6 +96,21 @@ async fn revision_0004_upgrades_with_its_maps() {
     check_fixture("v0004", true).await;
 }
 
+/// Made by main at 0005 (the web version's first schema): the 0004 fixture upgraded by its CLI,
+/// plus a remembered save (written by hand: only the web build writes them).
+#[tokio::test]
+async fn revision_0005_upgrades_and_sync_sees_none_of_it_as_changed() {
+    check_fixture("v0005", true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = open_fixture("v0005", dir.path()).await;
+    db.close().await;
+    let conn = rusqlite::Connection::open(&db.path).unwrap();
+    let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+    assert_eq!(count("SELECT count(*) FROM saved_requests"), 1, "the remembered save is kept");
+    // Upgrading isn't an edit: nothing waits to be synced.
+    assert_eq!(count("SELECT count(*) FROM sync_outbox"), 0);
+}
+
 #[tokio::test]
 async fn revision_0001_upgrades_and_moves_session_encounters() {
     check_fixture("v0001", true).await;
@@ -110,7 +125,14 @@ async fn database_from_before_migrations_upgrades() {
 async fn schema_shape(path: &Path) -> Vec<String> {
     let conn = rusqlite::Connection::open(path).unwrap();
     let mut out = Vec::new();
-    let tables = Kind::ALL.iter().map(|kind| kind.table()).chain(["rule_overrides", "saved_requests"]);
+    let tables = Kind::ALL.iter().map(|kind| kind.table()).chain([
+        "rule_overrides",
+        "saved_requests",
+        "sync_state",
+        "sync_outbox",
+        "sync_stamps",
+        "sync_replaced",
+    ]);
     for t in tables {
         for pragma in ["table_info", "foreign_key_list", "index_list"] {
             let mut statement = conn.prepare(&format!("PRAGMA {pragma}({t})")).unwrap();
@@ -135,6 +157,13 @@ async fn schema_shape(path: &Path) -> Vec<String> {
             out.extend(lines);
         }
     }
+    // Sync's triggers too: rebuilding a table drops its triggers, and sync would stop noticing changes.
+    let mut statement =
+        conn.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name").unwrap();
+    let triggers = statement
+        .query_map([], |r| Ok(format!("trigger {}: {}", r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .unwrap();
+    out.extend(triggers.map(Result::unwrap));
     out
 }
 
@@ -145,7 +174,7 @@ async fn upgraded_schema_matches_a_new_database() {
     let fresh = schema_shape(&fresh.path().join(DB_FILENAME)).await;
     assert!(fresh.iter().any(|line| line.starts_with("rule_overrides table_info")));
     assert!(fresh.iter().any(|line| line.starts_with("saved_requests table_info")));
-    for name in ["pre_alembic", "v0001", "v0002", "v0003", "v0004"] {
+    for name in ["pre_alembic", "v0001", "v0002", "v0003", "v0004", "v0005"] {
         let upgraded = tempfile::tempdir().unwrap();
         open_fixture(name, upgraded.path()).await.close().await;
         assert_eq!(schema_shape(&upgraded.path().join(DB_FILENAME)).await, fresh, "{name}");
