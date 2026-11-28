@@ -49,6 +49,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void refreshCampaigns();
   }, [refreshCampaigns, toast]);
 
+  // Another device's changes arrived (sync/runner.ts): campaigns too.
+  useEffect(() => {
+    const refresh = () => void refreshCampaigns();
+    window.addEventListener("questodian:synced", refresh);
+    return () => window.removeEventListener("questodian:synced", refresh);
+  }, [refreshCampaigns]);
+
   return (
     <AppContext.Provider value={{
       meta, campaigns, refreshCampaigns, campaignId, setCampaignId, sessionId, setSessionId,

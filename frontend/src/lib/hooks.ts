@@ -84,6 +84,8 @@ export function useDraft<T>(
   const [status, setStatus] = useState<SaveStatus>("");
   const docRef = useRef(doc);
   const pending = useRef(false);
+  /** A save is on its way: a copy read before it would undo it. */
+  const saving = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -94,12 +96,15 @@ export function useDraft<T>(
     clearTimeout(timer.current);
     if (!pending.current || !docRef.current) return;
     pending.current = false;
+    saving.current = true;
     try {
       await saveRef.current(docRef.current);
       setStatus("Saved");
     } catch (e) {
       setStatus("Save failed");
       errRef.current?.(e as Error);
+    } finally {
+      saving.current = false;
     }
   }, []);
 
@@ -110,12 +115,15 @@ export function useDraft<T>(
   }, []);
 
   // A fresh copy from the page (another device's changes arrived by sync, say) replaces the draft,
-  // unless it has edits not saved yet: those are saved over it, as the later change.
+  // unless the draft has edits not saved yet, or being saved (they're the later change), or the
+  // copy is older than the draft (read before its last save).
   const base = useRef(initial);
   useEffect(() => {
     if (initial === base.current) return;
     base.current = initial;
-    if (!pending.current) setDoc(initial);
+    const updated = (d: T | null) => (d as { updated?: string } | null)?.updated ?? "";
+    if (pending.current || saving.current || updated(initial) < updated(docRef.current)) return;
+    setDoc(initial);
   }, [initial, setDoc]);
 
   const edit = useCallback(

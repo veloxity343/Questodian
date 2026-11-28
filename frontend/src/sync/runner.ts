@@ -42,8 +42,13 @@ interface Settings {
   provider: "google";
 }
 
+/** Where settings are kept if the browser won't keep them (private browsing, storage full). */
+let memorySettings: Settings | null = null;
+let stored = true;
+
 /** Whether sync is connected, read fresh each time: another window may have changed it. */
 function settings(): Settings | null {
+  if (!stored) return memorySettings;
   try {
     return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null") as Settings | null;
   } catch {
@@ -51,16 +56,14 @@ function settings(): Settings | null {
   }
 }
 
-/** Where settings are kept if the browser keeps nothing (private browsing). */
-let memorySettings: Settings | null = null;
-
 function saveSettings(value: Settings | null) {
   memorySettings = value;
   try {
     if (value) localStorage.setItem(SETTINGS_KEY, JSON.stringify(value));
     else localStorage.removeItem(SETTINGS_KEY);
+    stored = true;
   } catch {
-    // kept in memory instead
+    stored = false; // kept in memory instead
   }
   channel?.postMessage("settings");
 }
@@ -190,7 +193,8 @@ async function syncOnce(cloud: Folder): Promise<void> {
   const { received, skipped } = await receive(cloud, listing);
   await send(cloud, listing);
   const counts = await call<{ waiting: number; replaced: number }>("GET", "sync");
-  update({ phase: "idle", last: Date.now(), received, skipped, waiting: counts.waiting, replaced: counts.replaced, error: undefined });
+  const phase = settings() ? "idle" : "off"; // disconnected meanwhile
+  update({ phase, last: Date.now(), received, skipped, waiting: counts.waiting, replaced: counts.replaced, error: undefined });
 }
 
 let running: Promise<void> | null = null;
@@ -209,8 +213,8 @@ export function syncNow(): Promise<void> {
     return Promise.resolve();
   }
   update({ phase: "syncing" });
-  running = navigator.locks
-    .request("questodian-sync", () => syncOnce(cloud))
+  // One sync at a time across this browser's windows (where the browser can say so).
+  running = (navigator.locks ? navigator.locks.request("questodian-sync", () => syncOnce(cloud)) : syncOnce(cloud))
     .catch((e: Error) => {
       if (e instanceof DriveError && e.status === 401) forgetGoogleToken(); // Google refused it: sign in again
       if (!settings()) update({ phase: "off", error: undefined }); // disconnected meanwhile

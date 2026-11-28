@@ -120,7 +120,18 @@ export function DMProvider({ campaign: initial, children }: { campaign: Campaign
           const i = kinds.indexOf("monsters");
           results[i] = all.filter((m) => !m.campaign_id || m.campaign_id === cid);
         }
-        setLists((prev) => ({ ...prev, ...Object.fromEntries(kinds.map((k, i) => [k, results[i]])) }));
+        // A record saved here while these were being read keeps its newer copy.
+        const newer = <T extends { id: string; updated: string }>(fresh: T[], held: T[]) => {
+          const now = new Map(held.map((r) => [r.id, r]));
+          return fresh.map((r) => {
+            const mine = now.get(r.id);
+            return mine && mine.updated > r.updated ? mine : r;
+          });
+        };
+        setLists((prev) => ({
+          ...prev,
+          ...Object.fromEntries(kinds.map((k, i) => [k, newer(results[i] as { id: string; updated: string }[], prev[k] as { id: string; updated: string }[])])),
+        }));
       } catch (e) {
         toast((e as Error).message, "error");
       } finally {

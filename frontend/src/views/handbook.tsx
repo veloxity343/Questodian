@@ -1,4 +1,4 @@
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { Board } from "../components/board";
@@ -132,6 +132,11 @@ function Editor({ initial, campaigns }: { initial: HandbookEntry; campaigns: Opt
     onError: (err) => toast(err.message, "error"),
   });
   const [tagText, setTagText] = useState(initial.tags.join(", "));
+  // Tags changed elsewhere (another device's, by sync): show them.
+  const tags = e?.tags.join(", ") ?? "";
+  useEffect(() => {
+    setTagText((text) => (text.split(",").map((t) => t.trim()).filter(Boolean).join(", ") === tags ? text : tags));
+  }, [tags]);
   const preview = useDeferredValue(e);
   if (!e || !preview) return null;
   const set = <K extends keyof HandbookEntry>(k: K) => (v: HandbookEntry[K]) => edit((d) => void (d[k] = v));
