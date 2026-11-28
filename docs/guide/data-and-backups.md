@@ -15,6 +15,21 @@ On the **Data** page:
 
 Single characters, sessions and handbook entries export as JSON or Markdown from their own pages.
 
+### Records that can't be read
+
+A record that's been damaged, for example by editing the database by hand, can't be shown or
+exported. Questodian leaves it out instead of refusing to show everything else, but tells you:
+
+- the **Data** page lists each one at the top, with its id and what's wrong with it;
+- an export that leaves records out warns you when it downloads, and the file lists them under
+  `unreadable`;
+- `questodian export` prints them as a warning;
+- importing a file that left records out says so, and names them.
+
+Nothing is deleted: the record is still in `questodian.db`. Until it's fixed, a backup won't have
+it, so keep a copy of the database file itself as well (see [Moving to another
+computer](#moving-to-another-computer)).
+
 ## Importing
 
 The **Data** page imports:

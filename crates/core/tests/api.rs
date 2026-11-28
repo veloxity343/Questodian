@@ -1,5 +1,5 @@
 //! The HTTP API end to end: rules data edits and backups, rests, handout images (replacing and
-//! removing them), map tokens, and import rules (copying, newer files).
+//! removing them), map tokens, import rules (copying, newer files) and records that can't be read.
 
 use axum::Router;
 use axum::body::Body;
@@ -321,6 +321,98 @@ async fn files_from_a_newer_version_are_refused() {
     assert!(error.to_string().contains("newer version"), "{error}");
     let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
     assert_eq!(bundle["version"], 3);
+}
+
+#[tokio::test]
+async fn exports_say_which_records_they_leave_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, campaign) = call(&router, Method::POST, "/api/campaigns", Some(json!({"name": "Vale"}))).await;
+    let in_campaign = json!({"name": "Pip", "campaign_id": campaign["id"]});
+    let (_, pip) = call(&router, Method::POST, "/api/characters", Some(in_campaign)).await;
+    let (_, odo) = call(&router, Method::POST, "/api/characters", Some(json!({"name": "Odo"}))).await;
+    call(&router, Method::POST, "/api/characters", Some(json!({"name": "Fine"}))).await;
+    let (status, clean) = call(&router, Method::GET, "/api/unreadable", None).await;
+    assert_eq!((status, &clean), (StatusCode::OK, &json!({"unreadable": []})));
+    let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
+    assert!(bundle.get("unreadable").is_none(), "a complete backup has no list: {bundle}");
+
+    // Edited by hand into something no character can have.
+    let path = dir.path().join(questodian_core::db::DB_FILENAME);
+    let sql = format!(
+        "UPDATE characters SET ac = 10.5 WHERE id IN ('{}', '{}');",
+        pip["id"].as_str().unwrap(),
+        odo["id"].as_str().unwrap()
+    );
+    questodian_core::db::load_sql(&path, &sql).await.unwrap();
+
+    let (_, listed) = call(&router, Method::GET, "/api/characters", None).await;
+    let names: Vec<&Value> = listed["characters"].as_array().unwrap().iter().map(|c| &c["name"]).collect();
+    assert_eq!(names, [&json!("Fine")], "the others are still listed");
+    let (_, found) = call(&router, Method::GET, "/api/unreadable", None).await;
+    let ids = |list: &Value| {
+        let mut ids: Vec<String> =
+            list.as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect();
+        ids.sort();
+        ids
+    };
+    let mut both = vec![pip["id"].as_str().unwrap().to_string(), odo["id"].as_str().unwrap().to_string()];
+    both.sort();
+    assert_eq!(ids(&found["unreadable"]), both);
+    let first = &found["unreadable"][0];
+    assert_eq!(first["kind"], "characters");
+    assert!(first["error"].as_str().unwrap().contains("10.5"), "says what's wrong: {first}");
+    assert!(first.get("campaign_id").is_none());
+
+    let (_, bundle) = call(&router, Method::GET, "/api/export", None).await;
+    assert_eq!(ids(&bundle["unreadable"]), both);
+    assert_eq!(bundle["collections"]["characters"].as_array().unwrap().len(), 1);
+    // A campaign export lists only its own.
+    let (_, vale) =
+        call(&router, Method::GET, &format!("/api/export?campaign_id={}", campaign["id"].as_str().unwrap()), None)
+            .await;
+    assert_eq!(ids(&vale["unreadable"]), [pip["id"].as_str().unwrap()]);
+    assert_eq!(vale["collections"]["characters"], json!([]));
+
+    // Importing the file works, and says what it's missing.
+    let (status, report) = call(&router, Method::POST, "/api/import?mode=copy", Some(bundle)).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["imported"]["characters"], 1, "{report}");
+    assert_eq!(ids(&report["unreadable"]), both);
+    let (_, plain) = call(&router, Method::POST, "/api/import?mode=copy", Some(json!({"collections": {}}))).await;
+    assert_eq!(plain["unreadable"], json!([]));
+}
+
+#[tokio::test]
+async fn campaign_exports_list_their_unreadable_records_of_every_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path()).await;
+    let (_, vale) = call(&router, Method::POST, "/api/campaigns", Some(json!({"name": "Vale"}))).await;
+    let (_, moor) = call(&router, Method::POST, "/api/campaigns", Some(json!({"name": "Moor"}))).await;
+    let (vale, moor) = (vale["id"].as_str().unwrap(), moor["id"].as_str().unwrap());
+    let session = |campaign: &str, number| json!({"title": "Night", "campaign_id": campaign, "number": number});
+    let (_, ours) = call(&router, Method::POST, "/api/sessions", Some(session(vale, 1))).await;
+    let (_, theirs) = call(&router, Method::POST, "/api/sessions", Some(session(moor, 1))).await;
+    let (_, npc) = call(&router, Method::POST, "/api/npcs", Some(json!({"name": "Hob", "campaign_id": vale}))).await;
+    let sql = format!(
+        "UPDATE sessions SET number = 2.5; \
+         UPDATE npcs SET campaign_id = CAST('{vale}' AS BLOB) WHERE id = '{}';",
+        npc["id"].as_str().unwrap()
+    );
+    questodian_core::db::load_sql(&dir.path().join(questodian_core::db::DB_FILENAME), &sql).await.unwrap();
+
+    let export = |campaign: &str| format!("/api/export?campaign_id={campaign}");
+    let (_, bundle) = call(&router, Method::GET, &export(vale), None).await;
+    let found: Vec<(&Value, &Value)> =
+        bundle["unreadable"].as_array().unwrap().iter().map(|r| (&r["kind"], &r["id"])).collect();
+    // Its own session, not the other campaign's.
+    assert_eq!(found, [(&json!("sessions"), &ours["id"])], "{bundle}");
+    // The NPC whose campaign link is stored as a blob reads as text, and is in its campaign's export.
+    assert_eq!(bundle["collections"]["npcs"][0]["id"], npc["id"], "{bundle}");
+    let (_, other) = call(&router, Method::GET, &export(moor), None).await;
+    let found: Vec<&Value> = other["unreadable"].as_array().unwrap().iter().map(|r| &r["id"]).collect();
+    assert_eq!(found, [&theirs["id"]], "{other}");
+    assert_eq!(other["collections"]["npcs"], json!([]));
 }
 
 async fn raw(router: &Router, method: Method, path: &str, body: Vec<u8>, content_type: &str) -> (StatusCode, Vec<u8>) {

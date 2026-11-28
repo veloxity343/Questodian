@@ -16,6 +16,7 @@ use questodian_core::kinds::Kind;
 use questodian_core::schemas::Edition;
 use questodian_core::server::{self, App, Ui};
 use questodian_core::{db, dice, srd, transfer};
+use serde_json::Value;
 
 #[derive(Parser)]
 #[command(name = "questodian", version, about = "All-in-one 5e table manager.")]
@@ -179,7 +180,28 @@ async fn export(database: db::Database, output: String, campaign: Option<String>
             .collect();
         println!("Exported {} to {output}", counts.join(", "));
     }
-    Ok(ExitCode::SUCCESS)
+    // On stderr, so it's seen even when the export itself goes to stdout.
+    // The file is written either way; 2 tells a backup script it's incomplete (1 is a failed export).
+    let incomplete = warn_unreadable(&bundle, "can't be read and", "in the export");
+    Ok(if incomplete { ExitCode::from(2) } else { ExitCode::SUCCESS })
+}
+
+/// Records an export left out (`unreadable` in a bundle or an import summary), as a warning.
+/// Whether there were any.
+fn warn_unreadable(report: &Value, why: &str, place: &str) -> bool {
+    let Some(Value::Array(unreadable)) = report.get("unreadable") else { return false };
+    let records = match unreadable.len() {
+        0 => return false,
+        1 => format!("1 record {why} isn't"),
+        n => format!("{n} records {why} aren't"),
+    };
+    eprintln!("warning: {records} {place}:");
+    for record in unreadable {
+        let field = |key| record[key].as_str().unwrap_or("");
+        let id = if field("id").is_empty() { "(no id)" } else { field("id") };
+        eprintln!("  {} {id}: {}", field("kind"), field("error"));
+    }
+    true
 }
 
 async fn import(database: db::Database, files: Vec<PathBuf>, mode: String) -> anyhow::Result<ExitCode> {
@@ -221,6 +243,7 @@ async fn import(database: db::Database, files: Vec<PathBuf>, mode: String) -> an
                 let skipped = list("skipped");
                 let skipped = if skipped.is_empty() { String::new() } else { format!(" (skipped {skipped})") };
                 println!("{name}: imported {done}{skipped}");
+                warn_unreadable(&summary, "couldn't be read when this file was made and", "in it");
             }
             Err(e) => {
                 eprintln!("{name}: error: {e}");

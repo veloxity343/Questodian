@@ -40,6 +40,30 @@ pub fn title_of(doc: &Value) -> String {
     text("title").or_else(|| text("name")).unwrap_or("").to_string()
 }
 
+/// A stored record that can't be read (e.g. edited by hand), so lists and exports leave it out.
+#[derive(Debug, Clone, Serialize)]
+pub struct Unreadable {
+    #[serde(serialize_with = "plural")]
+    pub kind: Kind,
+    /// Empty if even the id can't be read.
+    pub id: String,
+    /// As stored, for campaign exports: empty if there's none, `None` if it can't be read.
+    #[serde(skip)]
+    pub campaign_id: Option<String>,
+    pub error: String,
+}
+
+fn plural<S: serde::Serializer>(kind: &Kind, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(kind.plural())
+}
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id = if self.id.is_empty() { "(no id)" } else { &self.id };
+        write!(f, "{} {id} that can't be read: {}", self.kind.singular(), self.error)
+    }
+}
+
 pub struct Repo<'a> {
     /// A connection from the pool, inside this unit of work's transaction.
     conn: Option<Connection>,
@@ -109,8 +133,23 @@ impl<'a> Repo<'a> {
 
     // ------------------------------------------------------------------ reads
 
-    /// All records of a kind, optionally filtered (empty values are ignored).
+    /// All records of a kind, optionally filtered (empty values are ignored). Records that
+    /// can't be read are left out: use [`Repo::list_checked`] where that matters.
     pub async fn list(&mut self, kind: Kind, filters: &[(&str, &str)]) -> Result<Vec<Value>> {
+        let (docs, unreadable) = self.list_checked(kind, filters).await?;
+        for record in unreadable {
+            eprintln!("questodian: skipping {record}");
+        }
+        Ok(docs)
+    }
+
+    /// All records of a kind, as [`Repo::list`], and the ones left out because they can't be
+    /// read (for the caller to report).
+    pub async fn list_checked(
+        &mut self,
+        kind: Kind,
+        filters: &[(&str, &str)],
+    ) -> Result<(Vec<Value>, Vec<Unreadable>)> {
         let columns = self.columns(kind);
         let mut conditions = Vec::new();
         let mut values = Vec::new();
@@ -119,8 +158,9 @@ impl<'a> Repo<'a> {
                 return Err(Error::Internal(format!("can't filter on '{field}'")));
             }
             if !value.is_empty() && columns.iter().any(|c| c.name == field) {
-                conditions.push(format!("{field} = ?"));
-                values.push(value.to_string());
+                // Stored as text, or as the same bytes stored as a blob (which reads as text too).
+                conditions.push(format!("{field} IN (?, CAST(? AS BLOB))"));
+                values.extend([value.to_string(), value.to_string()]);
             }
         }
         let filter = if conditions.is_empty() { String::new() } else { format!(" WHERE {}", conditions.join(" AND ")) };
@@ -129,13 +169,33 @@ impl<'a> Repo<'a> {
         let mut rows = statement.query(params_from_iter(values))?;
         // One unreadable record (e.g. edited by hand) shouldn't hide all the others.
         let mut docs = Vec::new();
+        let mut unreadable = Vec::new();
         while let Some(row) = rows.next()? {
             match to_doc(kind, columns, row) {
                 Ok(doc) => docs.push(doc),
-                Err(e) => eprintln!("questodian: skipping a {} that can't be read: {e}", kind.singular()),
+                Err(e) => {
+                    // Null reads as empty; text that isn't text (e.g. a blob) as `Err`.
+                    let text = |name: &str| row.get::<_, Option<String>>(name).map(Option::unwrap_or_default);
+                    let has_campaign = columns.iter().any(|c| c.name == "campaign_id");
+                    unreadable.push(Unreadable {
+                        kind,
+                        id: text("id").unwrap_or_default(),
+                        campaign_id: if has_campaign { text("campaign_id").ok() } else { Some(String::new()) },
+                        error: e.to_string(),
+                    });
+                }
             }
         }
-        Ok(docs)
+        Ok((docs, unreadable))
+    }
+
+    /// Every record that can't be read, of every kind.
+    pub async fn unreadable(&mut self) -> Result<Vec<Unreadable>> {
+        let mut out = Vec::new();
+        for kind in Kind::ALL {
+            out.extend(self.list_checked(kind, &[]).await?.1);
+        }
+        Ok(out)
     }
 
     pub async fn get(&mut self, kind: Kind, id: &str) -> Result<Value> {

@@ -2,7 +2,7 @@
 
 import type {
   Character, ClassLevel, Edition, Encounter, EncounterAction, Handout, ImportSummary, Kind, KindMap, Meta, RollResult,
-  Session, SrdCategory, SrdEntry, SrdMeta, HandbookEntry,
+  Session, SrdCategory, SrdEntry, SrdMeta, HandbookEntry, ExportBundle, Unreadable,
 } from "./types";
 import type { Rules } from "./lib/builder";
 
@@ -101,7 +101,9 @@ export const api = {
   /** Replace or add a rules data entry; `null` hides a bundled one. */
   editRule: (kind: string, key: string, data: unknown) => request<Rules>("PUT", `rules/${kind}/${encodeURIComponent(key)}`, data),
   resetRule: (kind: string, key: string) => request<Rules>("DELETE", `rules/${kind}/${encodeURIComponent(key)}`),
-  exportAll: (campaign_id?: string) => request<unknown>("GET", `export${qs({ campaign_id })}`),
+  exportAll: (campaign_id?: string) => request<ExportBundle>("GET", `export${qs({ campaign_id })}`),
+  /** Stored records that can't be read, which lists and exports leave out. */
+  unreadable: () => request<{ unreadable: Unreadable[] }>("GET", "unreadable").then((r) => r.unreadable),
   exportOne: (kind: Kind, id: string) => request<unknown>("GET", `export/${kind}/${id}`),
   exportMarkdown: async (kind: Kind, id: string) => {
     const res = await fetch(`${API}export/${kind}/${id}?format=md`);

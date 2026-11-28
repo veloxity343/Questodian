@@ -77,6 +77,7 @@ pub fn router(app: Shared) -> Router {
         .route("/handouts/{id}/tokens", post(move_tokens))
         .route("/handouts/{id}", axum::routing::delete(delete_handout).get(read_handout).put(update_handout))
         .route("/export", get(export_bundle))
+        .route("/unreadable", get(unreadable))
         .route("/export/{kind}/{id}", get(export_one))
         .route("/import", post(import_data))
         .route("/import/markdown", post(import_markdown))
@@ -692,6 +693,12 @@ async fn export_bundle(State(app): State<Shared>, params: Params) -> Result<Resp
         None => "questodian-backup".into(),
     };
     Ok(([attachment(&format!("{}.questodian.json", slug(&name)))], Json(bundle)).into_response())
+}
+
+/// Stored records that can't be read, which lists and exports leave out.
+async fn unreadable(State(app): State<Shared>) -> Result<Json<Value>> {
+    let records = app.db.read().await?.unreadable().await?;
+    Ok(Json(json!({ "unreadable": records })))
 }
 
 async fn export_one(

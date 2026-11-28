@@ -68,9 +68,11 @@ fn text<'a>(doc: &'a Value, key: &str) -> &'a str {
 const RULE_EDITS: &str = "rule_overrides";
 
 /// Everything, or one campaign together with the records linked to it. Handout images
-/// are embedded (base64) so the bundle is self-contained.
+/// are embedded (base64) so the bundle is self-contained. Records that can't be read are
+/// listed under `unreadable` (only when there are any), so an incomplete backup says so.
 pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Result<Value> {
     let mut collections = Map::new();
+    let mut unreadable = Vec::new();
     match campaign_id {
         Some(id) => {
             let campaign = repo.get(Kind::Campaigns, id).await?;
@@ -81,22 +83,37 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
                 .map(|p| text(p, "character_id").to_string())
                 .filter(|c| !c.is_empty())
                 .collect();
+            let in_campaign = |campaign: &str, character: &str| campaign == id || linked.iter().any(|l| l == character);
             collections.insert("campaigns".into(), json!([campaign]));
             for kind in &Kind::ALL[1..] {
                 let docs = if *kind == Kind::Characters {
-                    let all = repo.list(Kind::Characters, &[]).await?;
-                    all.into_iter()
-                        .filter(|c| text(c, "campaign_id") == id || linked.iter().any(|l| l == text(c, "id")))
-                        .collect()
+                    let all = repo.list_checked(Kind::Characters, &[]).await?.0;
+                    all.into_iter().filter(|c| in_campaign(text(c, "campaign_id"), text(c, "id"))).collect()
                 } else {
-                    repo.list(*kind, &[("campaign_id", id)]).await?
+                    repo.list_checked(*kind, &[("campaign_id", id)]).await?.0
                 };
                 collections.insert(kind.plural().into(), Value::Array(docs));
+            }
+            // A record whose campaign can't be told might be this campaign's: list it rather than
+            // say nothing (the filter above never finds one whose campaign_id isn't text).
+            for record in repo.unreadable().await? {
+                let ours = match &record.campaign_id {
+                    None => true,
+                    Some(campaign) => {
+                        let character = record.kind == Kind::Characters && in_campaign(campaign, &record.id);
+                        character || (record.kind != Kind::Characters && campaign == id)
+                    }
+                };
+                if record.kind != Kind::Campaigns && ours {
+                    unreadable.push(record);
+                }
             }
         }
         None => {
             for kind in Kind::ALL {
-                collections.insert(kind.plural().into(), Value::Array(repo.list(kind, &[]).await?));
+                let (docs, bad) = repo.list_checked(kind, &[]).await?;
+                unreadable.extend(bad);
+                collections.insert(kind.plural().into(), Value::Array(docs));
             }
             let edits = repo.rule_overrides().await?;
             let edits = edits
@@ -116,7 +133,11 @@ pub async fn export_bundle(repo: &mut Repo<'_>, campaign_id: Option<&str>) -> Re
             }
         }
     }
-    Ok(json!({"format": FORMAT, "version": VERSION, "exported": now(), "collections": collections}))
+    let mut bundle = json!({"format": FORMAT, "version": VERSION, "exported": now(), "collections": collections});
+    if !unreadable.is_empty() {
+        bundle["unreadable"] = serde_json::to_value(unreadable).expect("plain data");
+    }
+    Ok(bundle)
 }
 
 /// Remove every record that isn't in `docs`, and every rules-data edit the backup doesn't have
@@ -402,7 +423,12 @@ pub async fn import_data(repo: &mut Repo<'_>, payload: &Value, mode: Mode) -> Re
         }
         return Err(e);
     }
-    Ok(json!({"imported": imported, "skipped": skipped, "mode": asked.name()}))
+    // What the export said it left out, so a restore from an incomplete backup says so too.
+    let unreadable: Vec<Value> = match payload.get("unreadable") {
+        Some(Value::Array(list)) => list.iter().filter(|r| r.is_object()).cloned().collect(),
+        _ => Vec::new(),
+    };
+    Ok(json!({"imported": imported, "skipped": skipped, "mode": asked.name(), "unreadable": unreadable}))
 }
 
 pub(crate) fn store_image(dir: &Path, doc: &Value, bytes: &[u8]) -> Result<String> {
